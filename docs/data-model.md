@@ -29,7 +29,7 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `users`, `project_members` | Users and per-project role |
 | `change_events` | Sync journal: seq (autoincrement), type, project, key, actor, ts |
 | `audit_entries` | Actor, operation, target, changes (JSON), batch_id, ts |
-| `notifications` | Persistent inbox |
+| `notifications`, `item_follows` | Per-user inbox (kept until read or deleted) and followed items. `change_events.target_user` limits a signal to one user |
 | `api_tokens` | Hashed token, scopes, project limits, expiry, revoked_at |
 | `idempotency_records` | key, actor, request hash, stored result, created_at |
 | `meta` | schema version, database generation id |

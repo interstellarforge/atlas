@@ -14,7 +14,7 @@
   import { onChange, onResync } from "./events.svelte";
   import { t } from "./i18n";
   import { renderMarkdown } from "./markdown";
-  import { personName } from "./people.svelte";
+  import { actorName } from "./people.svelte";
 
   let { itemKey }: { itemKey: string } = $props();
 
@@ -30,13 +30,6 @@
     timeStyle: "short",
   });
   const done = $derived(checklist.filter((c) => c.done).length);
-
-  // human:user-4 shows the person's name; a token is an agent.
-  function actorName(actor: string): string {
-    const [kind, id] = actor.split(/:\w+-/);
-    if (kind === "human") return personName(Number(id));
-    return t("item.agentToken", { id: id ?? "" });
-  }
 
   async function load(): Promise<void> {
     try {
@@ -107,7 +100,9 @@
     {t("item.checklist")}{#if checklist.length > 0}
       <span class="count">{done}/{checklist.length}</span>{/if}
   </h3>
-  {#if checklistError}<p class="banner error" role="alert">{checklistError}</p>{/if}
+  {#if checklistError}<p class="banner error" role="alert">
+      {checklistError}
+    </p>{/if}
   {#if checklist.length === 0}
     <p class="meta">{t("item.noChecklist")}</p>
   {:else}

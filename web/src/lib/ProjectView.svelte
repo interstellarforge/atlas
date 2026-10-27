@@ -6,6 +6,7 @@
   import { t } from "./i18n";
   import ItemPanel from "./ItemPanel.svelte";
   import ListView from "./ListView.svelte";
+  import MilestonesView from "./MilestonesView.svelte";
   import { navigate } from "./router.svelte";
   import { type ProjectViewName, viewPath } from "./routes";
   import TreeView from "./TreeView.svelte";
@@ -24,12 +25,17 @@
     view: ProjectViewName;
     suffix: string;
     label:
-      "project.board" | "project.list" | "project.backlog" | "project.tree";
+      | "project.board"
+      | "project.list"
+      | "project.backlog"
+      | "project.tree"
+      | "project.milestones";
   }[] = [
     { view: "board", suffix: "", label: "project.board" },
     { view: "list", suffix: "/list", label: "project.list" },
     { view: "backlog", suffix: "/backlog", label: "project.backlog" },
     { view: "tree", suffix: "/tree", label: "project.tree" },
+    { view: "milestones", suffix: "/milestones", label: "project.milestones" },
   ];
 
   async function loadWorkflow(key: string): Promise<void> {
@@ -65,8 +71,7 @@
     {#each tabs as tab (tab.view)}
       <a
         href="#/p/{project}{tab.suffix}"
-        aria-current={view === tab.view ? "page" : undefined}
-        >{t(tab.label)}</a
+        aria-current={view === tab.view ? "page" : undefined}>{t(tab.label)}</a
       >
     {/each}
   </nav>
@@ -79,6 +84,8 @@
         <ListView {project} {workflow} />
       {:else if view === "backlog"}
         <BacklogView {project} {workflow} />
+      {:else if view === "milestones"}
+        <MilestonesView {project} />
       {:else}
         <TreeView {project} />
       {/if}
@@ -115,7 +122,11 @@
     min-height: 120px;
     padding: 20px 28px;
     border-radius: var(--radius-lg);
-    background: linear-gradient(115deg, var(--atlas-hero-1), var(--atlas-hero-2));
+    background: linear-gradient(
+      115deg,
+      var(--atlas-hero-1),
+      var(--atlas-hero-2)
+    );
     color: var(--atlas-hero-text);
   }
   .hero::before {

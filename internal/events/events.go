@@ -3,6 +3,7 @@
 package events
 
 import (
+	"database/sql"
 	"sync"
 	"time"
 
@@ -67,7 +68,7 @@ func (f *Feed) Since(a auth.Actor, since int64, limit int) (Batch, error) {
 	if err != nil {
 		return b, err
 	}
-	rows, err := f.db.R.Query(`SELECT seq, type, project, item_key FROM change_events WHERE seq > ? ORDER BY seq LIMIT ?`, since, limit+1)
+	rows, err := f.db.R.Query(`SELECT seq, type, project, item_key, target_user FROM change_events WHERE seq > ? ORDER BY seq LIMIT ?`, since, limit+1)
 	if err != nil {
 		return b, err
 	}
@@ -75,7 +76,8 @@ func (f *Feed) Since(a auth.Actor, since int64, limit int) (Batch, error) {
 	n := 0
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.Seq, &e.Type, &e.Project, &e.Key); err != nil {
+		var target sql.NullInt64
+		if err := rows.Scan(&e.Seq, &e.Type, &e.Project, &e.Key, &target); err != nil {
 			return b, err
 		}
 		if n++; n > limit {
@@ -83,7 +85,8 @@ func (f *Feed) Since(a auth.Actor, since int64, limit int) (Batch, error) {
 			break
 		}
 		b.Seq = e.Seq
-		if readable[e.Project] {
+		// Notifications are signals for one person only.
+		if readable[e.Project] && (!target.Valid || target.Int64 == a.UserID) {
 			b.Events = append(b.Events, e)
 		}
 	}

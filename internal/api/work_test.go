@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -276,5 +277,157 @@ func TestCommentsAndChecklistREST(t *testing.T) {
 	cl := decodeBody[struct{ Items []map[string]any }](t, e.do("GET", "/api/v1/items/EXO-1/checklist", nil, asReader))
 	if len(cl.Items) != 1 || cl.Items[0]["done"] != true {
 		t.Fatalf("checklist: %v", cl.Items)
+	}
+}
+
+func TestMilestones(t *testing.T) {
+	e := setup(t)
+	cookie, csrf := e.login(t)
+	asUser := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, asUser)
+	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "a"}, asUser)
+	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "b"}, asUser)
+
+	// Only a project admin manages milestones; a member can assign items to them.
+	member, err := e.auth.CreateUser("m@example.com", "Mem", "correct-horse", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(member.ID, 10), map[string]any{"role": "member"}, asUser)
+	_, memTok, _ := e.auth.CreateToken(member.ID, "m", []string{auth.ScopeRead, auth.ScopeWrite}, nil, nil)
+	asMember := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+memTok) }
+	if w := e.do("POST", "/api/v1/projects/EXO/milestones", map[string]any{"name": "v1"}, asMember); w.Code != 403 {
+		t.Fatalf("member created a milestone: %d", w.Code)
+	}
+	if w := e.do("POST", "/api/v1/projects/EXO/milestones", map[string]any{"name": "v1.0"}, asUser); w.Code != 201 {
+		t.Fatalf("create: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("POST", "/api/v1/projects/EXO/milestones", map[string]any{"name": "V1.0"}, asUser); w.Code != 422 {
+		t.Fatalf("duplicate name (case-insensitive): %d", w.Code)
+	}
+
+	// Assign, filter, and a milestone in use cannot be deleted.
+	if w := e.do("PATCH", "/api/v1/items/EXO-1", map[string]any{"version": 1, "milestone": "v1.0"}, asMember); w.Code != 200 {
+		t.Fatalf("assign: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("PATCH", "/api/v1/items/EXO-2", map[string]any{"version": 1, "milestone": "nope"}, asMember); w.Code != 400 {
+		t.Fatalf("unknown milestone: %d", w.Code)
+	}
+	page := decodeBody[struct{ Items []map[string]any }](t, e.do("GET", "/api/v1/items?project=EXO&milestone=v1.0&fields=key,milestone", nil, asMember))
+	if len(page.Items) != 1 || page.Items[0]["key"] != "EXO-1" || page.Items[0]["milestone"] != "v1.0" {
+		t.Fatalf("filter: %v", page.Items)
+	}
+	list := decodeBody[struct{ Items []map[string]any }](t, e.do("GET", "/api/v1/projects/EXO/milestones", nil, asMember))
+	if len(list.Items) != 1 || list.Items[0]["total"] != float64(1) || list.Items[0]["done"] != float64(0) {
+		t.Fatalf("counts: %v", list.Items)
+	}
+	if w := e.do("DELETE", "/api/v1/projects/EXO/milestones/1", nil, asUser); w.Code != 422 {
+		t.Fatalf("deleted a used milestone: %d", w.Code)
+	}
+	e.do("PATCH", "/api/v1/items/EXO-1", map[string]any{"version": 2, "milestone": nil}, asMember)
+	if w := e.do("PATCH", "/api/v1/projects/EXO/milestones/1", map[string]any{"released": true}, asUser); w.Code != 200 {
+		t.Fatalf("release: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("DELETE", "/api/v1/projects/EXO/milestones/1", nil, asUser); w.Code != 204 {
+		t.Fatalf("delete: %d", w.Code)
+	}
+}
+
+func TestNotifications(t *testing.T) {
+	e := setup(t)
+	cookie, csrf := e.login(t) // admin = the actor
+	asAdmin := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, asAdmin)
+	for _, title := range []string{"blocker", "blocked", "followed"} {
+		e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": title}, asAdmin)
+	}
+	bob, _ := e.auth.CreateUser("bob@example.com", "Bob", "correct-horse", false)
+	e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(bob.ID, 10), map[string]any{"role": "member"}, asAdmin)
+	_, tok, _ := e.auth.CreateToken(bob.ID, "bob", []string{auth.ScopeRead, auth.ScopeWrite}, nil, nil)
+	asBob := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+tok) }
+	_, readTok, _ := e.auth.CreateToken(bob.ID, "bob-ro", []string{auth.ScopeRead}, nil, nil)
+	asBobRO := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+readTok) }
+
+	inbox := func(mut func(*http.Request)) (items []map[string]any, unread float64) {
+		r := decodeBody[struct {
+			Items  []map[string]any
+			Unread float64
+		}](t, e.do("GET", "/api/v1/notifications", nil, mut))
+		return r.Items, r.Unread
+	}
+	types := func(items []map[string]any) []string {
+		var out []string
+		for _, n := range items {
+			out = append(out, n["type"].(string)+":"+n["item"].(string))
+		}
+		return out
+	}
+
+	// Assigned: Bob is told; the admin acting on their own changes is not.
+	e.do("PATCH", "/api/v1/items/EXO-2", map[string]any{"version": 1, "assignee": bob.ID}, asAdmin)
+	// Followed: Bob follows EXO-3 and is told about a status change there.
+	if w := e.do("PUT", "/api/v1/items/EXO-3/follow", nil, asBobRO); w.Code != 403 {
+		t.Fatalf("read-only token followed: %d", w.Code)
+	}
+	if w := e.do("PUT", "/api/v1/items/EXO-3/follow", nil, asBob); w.Code != 204 {
+		t.Fatalf("follow: %d", w.Code)
+	}
+	e.do("PATCH", "/api/v1/items/EXO-3", map[string]any{"version": 1, "status": "Todo"}, asAdmin)
+	// Mention in a comment.
+	e.do("POST", "/api/v1/items/EXO-3/comments", map[string]any{"body": "ping @Bob please check"}, asAdmin)
+	// Blocker done: EXO-1 blocks EXO-2 (assigned to Bob); moving EXO-1 to Done tells Bob.
+	e.do("POST", "/api/v1/items/EXO-1/links", map[string]any{"type": "blocks", "target": "EXO-2"}, asAdmin)
+	e.do("PATCH", "/api/v1/items/EXO-1", map[string]any{"version": 1, "status": "Done"}, asAdmin)
+
+	items, unread := inbox(asBob)
+	got := types(items)
+	want := map[string]bool{"assigned:EXO-2": true, "followed:EXO-3": true, "mention:EXO-3": true, "blocker_done:EXO-2": true}
+	for _, g := range got {
+		delete(want, g)
+	}
+	if len(want) != 0 || unread != float64(len(items)) {
+		t.Fatalf("inbox %v (unread %v), missing %v", got, unread, want)
+	}
+	if adminItems, _ := inbox(asAdmin); len(adminItems) != 0 {
+		t.Fatalf("admin notified of own actions: %v", types(adminItems))
+	}
+
+	// The notification signal reaches only its recipient.
+	feed := decodeBody[struct{ Events []map[string]any }](t, e.do("GET", "/api/v1/changes?since=0", nil, asBob))
+	adminFeed := decodeBody[struct{ Events []map[string]any }](t, e.do("GET", "/api/v1/changes?since=0", nil, asAdmin))
+	count := func(ev []map[string]any) (n int) {
+		for _, x := range ev {
+			if x["type"] == "notification.created" {
+				n++
+			}
+		}
+		return
+	}
+	if count(feed.Events) != len(items) || count(adminFeed.Events) != 0 {
+		t.Fatalf("notification events: bob %d admin %d", count(feed.Events), count(adminFeed.Events))
+	}
+
+	// Read state is the owner's: others cannot touch it; read and delete work for the owner.
+	id := strconv.Itoa(int(items[0]["id"].(float64)))
+	if w := e.do("POST", "/api/v1/notifications/"+id+"/read", nil, asAdmin); w.Code != 404 {
+		t.Fatalf("read someone else's notification: %d", w.Code)
+	}
+	if w := e.do("POST", "/api/v1/notifications/"+id+"/read", nil, asBobRO); w.Code != 403 {
+		t.Fatalf("read-only token marked read: %d", w.Code)
+	}
+	if w := e.do("POST", "/api/v1/notifications/"+id+"/read", nil, asBob); w.Code != 204 {
+		t.Fatalf("mark read: %d", w.Code)
+	}
+	if _, unreadNow := inbox(asBob); unreadNow != unread-1 {
+		t.Fatalf("unread after one read: %v", unreadNow)
+	}
+	if w := e.do("DELETE", "/api/v1/notifications/"+id, nil, asBob); w.Code != 204 {
+		t.Fatalf("delete: %d", w.Code)
+	}
+	if w := e.do("POST", "/api/v1/notifications/read", nil, asBob); w.Code != 204 {
+		t.Fatalf("read all: %d", w.Code)
+	}
+	if _, unreadNow := inbox(asBob); unreadNow != 0 {
+		t.Fatalf("unread after read-all: %v", unreadNow)
 	}
 }

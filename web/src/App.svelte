@@ -9,14 +9,16 @@
   } from "./lib/api";
   import Board from "./lib/Board.svelte";
   import Brand from "./lib/Brand.svelte";
-  import { connect, disconnect, realtime } from "./lib/events.svelte";
+  import { connect, disconnect, onChange, realtime } from "./lib/events.svelte";
   import { t } from "./lib/i18n";
+  import Inbox from "./lib/Inbox.svelte";
   import { loadPeople } from "./lib/people.svelte";
   import Projects from "./lib/Projects.svelte";
   import ProjectView from "./lib/ProjectView.svelte";
   import { navigate, route } from "./lib/router.svelte";
   import { matchProject } from "./lib/routes";
   import { theme, toggleTheme } from "./lib/theme.svelte";
+  import { inbox, refreshInbox } from "./lib/unread.svelte";
 
   let user = $state<User | undefined>();
   let ready = $state(false);
@@ -36,11 +38,21 @@
     if (user) {
       connect();
       void loadPeople();
+      void refreshInbox();
       void listProjects().then((ps) => (allProjects = ps.map((p) => p.key)));
     } else {
       disconnect();
     }
   });
+
+  // A notification signal is addressed to this user only; it updates the unread count.
+  $effect(() =>
+    user
+      ? onChange((event) => {
+          if (event.type === "notification.created") void refreshInbox();
+        })
+      : undefined,
+  );
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -111,6 +123,16 @@
           >{t("nav.overview")}</a
         >
         <a
+          href="#/inbox"
+          aria-current={route.path === "/inbox" ? "page" : undefined}
+          >{t("nav.inbox")}{#if inbox.unread > 0}
+            <span
+              class="badge"
+              aria-label={t("nav.unread", { count: inbox.unread })}
+              >{inbox.unread}</span
+            >{/if}</a
+        >
+        <a
           href="#/tokens"
           aria-current={route.path === "/tokens" ? "page" : undefined}
           >{t("nav.tokens")}</a
@@ -138,6 +160,8 @@
             view={current.view}
             item={current.item}
           />
+        {:else if route.path === "/inbox"}
+          <Inbox />
         {:else if route.path === "/board"}
           <h1>{t("cross.title")}</h1>
           <Board projects={allProjects} />
@@ -229,6 +253,18 @@
   nav a[aria-current="page"] {
     color: var(--color-accent);
     background: var(--color-accent-soft);
+  }
+  .badge {
+    display: inline-block;
+    min-width: 18px;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: var(--atlas-radius-pill);
+    background: var(--color-accent);
+    color: var(--color-accent-text);
+    font-size: var(--atlas-fs-xs);
+    font-weight: var(--atlas-fw-bold);
+    text-align: center;
   }
   .spacer {
     flex: 1;

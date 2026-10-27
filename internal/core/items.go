@@ -29,10 +29,12 @@ const (
 		EXISTS (SELECT 1 FROM item_links l
 			JOIN work_items b ON b.id = l.from_id AND b.archived_at IS NULL
 			JOIN project_statuses bs ON bs.id = b.status_id AND bs.category <> 'completed'
-			WHERE l.to_id = i.id AND l.type = 'blocks')
+			WHERE l.to_id = i.id AND l.type = 'blocks'),
+		ms.name
 		FROM work_items i
 		JOIN projects p ON p.id = i.project_id
 		JOIN project_statuses st ON st.id = i.status_id
+		LEFT JOIN milestones ms ON ms.id = i.milestone_id
 		LEFT JOIN work_items par ON par.id = i.parent_id
 		LEFT JOIN work_items rt ON rt.id = CAST(substr(i.path, 2, instr(substr(i.path, 2), '/') - 1) AS INTEGER)`
 )
@@ -50,6 +52,7 @@ type Item struct {
 	Priority       string         `json:"priority"`
 	Assignee       *int64         `json:"assignee"`
 	DueAt          *int64         `json:"due_at"`
+	Milestone      *string        `json:"milestone"`
 	Labels         []string       `json:"labels"`
 	CustomData     map[string]any `json:"custom_data"`
 	Blocked        bool           `json:"blocked"`
@@ -105,12 +108,12 @@ func Select(it Item, fields []string) (map[string]any, error) {
 
 func scanItem(rows *sql.Rows) (itemRow, error) {
 	var r itemRow
-	var parent, root sql.NullString
+	var parent, root, milestone sql.NullString
 	var assignee, due, archived sql.NullInt64
 	var custom string
 	err := rows.Scan(&r.id, &r.Key, &r.Project, &r.Type, &r.Title, &r.Description, &parent, &root, &r.Status, &r.StatusCategory,
 		&r.Priority, &assignee, &due, &custom, &r.Version, &archived, &r.CreatedAt, &r.UpdatedAt,
-		&r.projectID, &r.statusID, &r.parentID, &r.path, &r.Blocked)
+		&r.projectID, &r.statusID, &r.parentID, &r.path, &r.Blocked, &milestone)
 	if err != nil {
 		return r, err
 	}
@@ -118,6 +121,9 @@ func scanItem(rows *sql.Rows) (itemRow, error) {
 		r.Parent = &parent.String
 	}
 	r.Root = root.String
+	if milestone.Valid {
+		r.Milestone = &milestone.String
+	}
 	if assignee.Valid {
 		r.Assignee = &assignee.Int64
 	}
@@ -230,6 +236,7 @@ type CreateItem struct {
 	DueAt       *int64
 	Labels      []string
 	CustomData  map[string]any
+	Milestone   string
 }
 
 func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (Item, error) {
@@ -280,6 +287,10 @@ func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (
 		if err != nil {
 			return err
 		}
+		milestoneID, err := resolveMilestone(tx, p.ID, in.Milestone)
+		if err != nil {
+			return err
+		}
 		if err := checkAssignee(tx, p.ID, in.Assignee); err != nil {
 			return err
 		}
@@ -307,10 +318,10 @@ func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (
 			return err
 		}
 		res, err := tx.Exec(`INSERT INTO work_items (key, project_id, parent_id, path, type, title, description, status_id, priority,
-			assignee_id, due_at, rank, custom_data, version, created_at, updated_at)
-			VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+			assignee_id, due_at, milestone_id, rank, custom_data, version, created_at, updated_at)
+			VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 			key, p.ID, parentID, in.Type, in.Title, in.Description, statusID, in.Priority,
-			in.Assignee, in.DueAt, rank, string(customJSON), now, now)
+			in.Assignee, in.DueAt, milestoneID, rank, string(customJSON), now, now)
 		if err != nil {
 			return err
 		}
@@ -326,8 +337,12 @@ func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (
 				return err
 			}
 		}
+		var notify []Notice
+		if in.Assignee != nil {
+			notify = append(notify, Notice{User: *in.Assignee, Type: NotifyAssigned})
+		}
 		if err := s.journal(ctx, tx, a, change{Operation: "item.create", Target: key, Event: "item.created",
-			Project: p.Key, ItemKey: key, Changes: map[string]any{"type": in.Type, "title": in.Title}}); err != nil {
+			Project: p.Key, ItemKey: key, Changes: map[string]any{"type": in.Type, "title": in.Title}, Notify: notify}); err != nil {
 			return err
 		}
 		r, err := loadRow(tx, key)
@@ -431,6 +446,8 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 		event := "item.updated"
 		var labels *[]string
 		var rebalanceTo int64 // status whose column needs new keys after this update
+		var notices []Notice
+		var newStatus int64
 
 		for k, v := range patch {
 			switch k {
@@ -464,6 +481,7 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 				}
 				set("status_id", k, cur.Status, name)
 				args[len(args)-1] = id
+				newStatus = id
 				if id != cur.statusID { // a changed status puts the item at the end of its new column
 					rk, err := appendRank(tx, p.ID, id, cur.id)
 					if err != nil {
@@ -494,6 +512,9 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 					return err
 				}
 				set("assignee_id", k, cur.Assignee, id)
+				if id != nil && (cur.Assignee == nil || *cur.Assignee != *id) {
+					notices = append(notices, Notice{User: *id, Type: NotifyAssigned})
+				}
 			case "due_at":
 				var due *int64
 				if v != nil {
@@ -535,6 +556,25 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 				}
 				b, _ := json.Marshal(merged)
 				set("custom_data", k, cur.CustomData, string(b))
+			case "milestone":
+				name := ""
+				if v != nil {
+					str, ok := v.(string)
+					if !ok {
+						return invalid("milestone must be a milestone name or null")
+					}
+					name = str
+				}
+				id, err := resolveMilestone(tx, p.ID, name)
+				if err != nil {
+					return err
+				}
+				var from any
+				if cur.Milestone != nil {
+					from = *cur.Milestone
+				}
+				set("milestone_id", k, from, v)
+				args[len(args)-1] = id
 			case "archived":
 				arch, ok := v.(bool)
 				if !ok {
@@ -576,8 +616,21 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 				return err
 			}
 		}
+		if newStatus != 0 && newStatus != cur.statusID && cur.StatusCategory != "completed" {
+			cat, err := statusCategory(tx, newStatus)
+			if err != nil {
+				return err
+			}
+			if cat == "completed" {
+				ns, err := completedNotices(tx, cur.id, key)
+				if err != nil {
+					return err
+				}
+				notices = append(notices, ns...)
+			}
+		}
 		if err := s.journal(ctx, tx, a, change{Operation: "item.update", Target: key, Event: event,
-			Project: p.Key, ItemKey: key, Changes: diff}); err != nil {
+			Project: p.Key, ItemKey: key, Changes: diff, Notify: notices}); err != nil {
 			return err
 		}
 		r, err := loadRow(tx, key)
@@ -596,6 +649,7 @@ type ItemFilter struct {
 	Status          string
 	Priority        string
 	Label           string
+	Milestone       string
 	Parent          string
 	Under           string // item key: that item and all its descendants
 	Q               string // case-insensitive title substring

@@ -87,6 +87,7 @@ func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Act
 		Assignee        *int64   `json:"assignee,omitempty" jsonschema:"user id"`
 		Priority        string   `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
 		Label           string   `json:"label,omitempty"`
+		Milestone       string   `json:"milestone,omitempty" jsonschema:"milestone name"`
 		Parent          string   `json:"parent,omitempty" jsonschema:"parent item key, e.g. EXO-12"`
 		Under           string   `json:"under,omitempty" jsonschema:"item key; returns that item and all its descendants"`
 		Query           string   `json:"query,omitempty" jsonschema:"case-insensitive title substring"`
@@ -106,7 +107,7 @@ func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Act
 			limit = searchLimit
 		}
 		page, err := svc.ListItems(ctx, a, core.ItemFilter{
-			Project: in.Project, Type: in.Type, Status: in.Status, Priority: in.Priority, Label: in.Label,
+			Project: in.Project, Type: in.Type, Status: in.Status, Priority: in.Priority, Label: in.Label, Milestone: in.Milestone,
 			Parent: in.Parent, Under: in.Under, Q: in.Query, Assignee: in.Assignee, UpdatedSince: in.UpdatedSince,
 			IncludeArchived: in.IncludeArchived, Cursor: in.Cursor, Limit: min(limit, searchLimitMax), Fields: in.Fields,
 		})
@@ -371,7 +372,8 @@ type opIn struct {
 	Labels      []string       `json:"labels,omitempty" jsonschema:"replaces the item's labels"`
 	CustomData  map[string]any `json:"custom_data,omitempty" jsonschema:"custom field values (update merges; null removes a key)"`
 	Archived    *bool          `json:"archived,omitempty" jsonschema:"update: archive or restore"`
-	Clear       []string       `json:"clear,omitempty" jsonschema:"update: fields to set to null: assignee, due_at, parent"`
+	Milestone   string         `json:"milestone,omitempty" jsonschema:"milestone name (see workflow_get)"`
+	Clear       []string       `json:"clear,omitempty" jsonschema:"update: fields to set to null: assignee, due_at, parent, milestone"`
 	After       string         `json:"after,omitempty" jsonschema:"move: place after this item key"`
 	Before      string         `json:"before,omitempty" jsonschema:"move: place before this item key"`
 }
@@ -386,7 +388,8 @@ func (o opIn) toCore() core.BatchOp {
 			desc = *o.Description
 		}
 		op.Create = core.CreateItem{Project: o.Project, Type: o.Type, Title: o.Title, Description: desc, Parent: o.Parent,
-			Status: o.Status, Priority: o.Priority, Assignee: o.Assignee, DueAt: o.DueAt, Labels: o.Labels, CustomData: o.CustomData}
+			Status: o.Status, Priority: o.Priority, Assignee: o.Assignee, DueAt: o.DueAt, Labels: o.Labels, CustomData: o.CustomData,
+			Milestone: o.Milestone}
 	case "update":
 		p := map[string]any{}
 		if o.Title != "" {
@@ -416,6 +419,9 @@ func (o opIn) toCore() core.BatchOp {
 		if o.CustomData != nil {
 			p["custom_data"] = o.CustomData
 		}
+		if o.Milestone != "" {
+			p["milestone"] = o.Milestone
+		}
 		if o.Archived != nil {
 			p["archived"] = *o.Archived
 		}
@@ -442,7 +448,7 @@ func workflowView(w core.Workflow) map[string]any {
 	}
 	return map[string]any{
 		"project": w.Project, "types": w.Types, "parents": w.Hierarchy, "statuses": statuses,
-		"transitions": w.Transitions, "labels": w.Labels, "custom_fields": w.CustomFields,
+		"transitions": w.Transitions, "labels": w.Labels, "milestones": w.Milestones, "custom_fields": w.CustomFields,
 	}
 }
 

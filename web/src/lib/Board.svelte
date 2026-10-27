@@ -424,6 +424,7 @@
       <FiltersBar
         bind:filters
         labels={workflow?.labels ?? []}
+        milestones={workflow?.milestones ?? []}
         types={workflow?.types ?? ["epic", "story", "task", "bug"]}
         showCardFields
       />

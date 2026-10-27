@@ -19,11 +19,11 @@ const defaultColumnPage = 50
 var boardFields = []string{"key", "type", "title", "priority", "assignee", "due_at", "parent", "root", "blocked", "version", "labels"}
 
 type BoardFilter struct {
-	Type, Priority, Label, Q string
-	Assignee                 *int64
-	IncludeArchived          bool
-	Fields                   []string
-	Limit                    int // cards per column in the first page
+	Type, Priority, Label, Milestone, Q string
+	Assignee                            *int64
+	IncludeArchived                     bool
+	Fields                              []string
+	Limit                               int // cards per column in the first page
 }
 
 type Column struct {
@@ -41,7 +41,7 @@ type Board struct {
 }
 
 func (f BoardFilter) item() ItemFilter {
-	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Q: f.Q, Assignee: f.Assignee,
+	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Milestone: f.Milestone, Q: f.Q, Assignee: f.Assignee,
 		IncludeArchived: f.IncludeArchived, Fields: f.fields()}
 }
 
@@ -285,8 +285,20 @@ func (s *Service) MoveItem(ctx context.Context, a auth.Actor, key string, versio
 		if target != cur.statusID {
 			diff["status"] = map[string]any{"from": cur.Status, "to": m.Status}
 		}
+		var notices []Notice
+		if target != cur.statusID && cur.StatusCategory != "completed" {
+			cat, err := statusCategory(tx, target)
+			if err != nil {
+				return err
+			}
+			if cat == "completed" {
+				if notices, err = completedNotices(tx, cur.id, key); err != nil {
+					return err
+				}
+			}
+		}
 		if err := s.journal(ctx, tx, a, change{Operation: "item.move", Target: key, Event: "item.moved",
-			Project: p.Key, ItemKey: key, Changes: diff}); err != nil {
+			Project: p.Key, ItemKey: key, Changes: diff, Notify: notices}); err != nil {
 			return err
 		}
 		r, err := loadRow(tx, key)

@@ -45,8 +45,15 @@ func (s *Service) AddComment(ctx context.Context, a auth.Actor, key, body string
 			return err
 		}
 		c.ID, _ = res.LastInsertId()
+		notices, err := mentionNotices(tx, body)
+		if err != nil {
+			return err
+		}
+		for i := range notices {
+			notices[i].Detail = excerpt(body)
+		}
 		return s.journal(ctx, tx, a, change{Operation: "comment.add", Target: key, Event: "comment.added",
-			Project: pk, ItemKey: key, Changes: map[string]any{"comment": c.ID}})
+			Project: pk, ItemKey: key, Changes: map[string]any{"comment": c.ID}, Notify: notices})
 	})
 	return c, err
 }
@@ -75,4 +82,13 @@ func (s *Service) ListComments(ctx context.Context, a auth.Actor, key string) ([
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// excerpt is the start of a comment, short enough for a notification.
+func excerpt(body string) string {
+	r := []rune(strings.Join(strings.Fields(body), " "))
+	if len(r) > 120 {
+		return string(r[:120]) + "…"
+	}
+	return string(r)
 }

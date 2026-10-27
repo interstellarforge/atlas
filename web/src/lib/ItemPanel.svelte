@@ -4,11 +4,13 @@
   import {
     addLink,
     ApiError,
+    getFollowing,
     getItem,
     getLinks,
     type ItemDetail,
     type Links,
     removeLink,
+    setFollowing,
     updateItem,
     type Workflow,
   } from "./api";
@@ -36,6 +38,7 @@
     assignee: string;
     due: string;
     labels: string;
+    milestone: string;
     parent: string;
     custom: Record<string, string>;
   }
@@ -52,6 +55,7 @@
   let linkType = $state<(typeof LINK_TYPES)[number]>("blocks");
   let linkTarget = $state("");
   let linkError = $state("");
+  let following = $state(false);
 
   const dateTime = new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -87,6 +91,7 @@
       assignee: it.assignee === null ? "" : String(it.assignee),
       due: toDateInput(it.due_at),
       labels: it.labels.join(", "),
+      milestone: it.milestone ?? "",
       parent: it.parent ?? "",
       custom: Object.fromEntries(
         workflow.custom_fields.map((f) => [
@@ -120,6 +125,7 @@
     assignee: number | null;
     due_at: number | null;
     labels: string[];
+    milestone: string | null;
     parent: string | null;
     custom_data: Record<string, unknown>;
   }>;
@@ -135,6 +141,8 @@
     if (f.due !== toDateInput(it.due_at)) patch.due_at = fromDateInput(f.due);
     if (splitLabels(f.labels).join("\n") !== it.labels.join("\n"))
       patch.labels = splitLabels(f.labels);
+    if (f.milestone !== (it.milestone ?? ""))
+      patch.milestone = f.milestone === "" ? null : f.milestone;
     if (f.parent.trim() !== (it.parent ?? ""))
       patch.parent = f.parent.trim() === "" ? null : f.parent.trim();
     const custom: Record<string, unknown> = {};
@@ -159,12 +167,29 @@
 
   async function load(): Promise<void> {
     try {
-      const [it, l] = await Promise.all([getItem(itemKey), getLinks(itemKey)]);
+      const [it, l, f] = await Promise.all([
+        getItem(itemKey),
+        getLinks(itemKey),
+        getFollowing(itemKey),
+      ]);
       links = l;
+      following = f;
       apply(it);
       loadError = false;
     } catch {
       loadError = true;
+    }
+  }
+
+  async function toggleFollow(): Promise<void> {
+    error = "";
+    try {
+      await setFollowing(itemKey, !following);
+      following = !following;
+    } catch (e) {
+      error = t("item.saveFailed", {
+        message: e instanceof Error ? e.message : "",
+      });
     }
   }
 
@@ -289,6 +314,14 @@
       {#if item.blocked}<span class="chip warn">{t("board.blocked")}</span>{/if}
     {/if}
     <span class="spacer"></span>
+    {#if item}
+      <button
+        type="button"
+        aria-pressed={following}
+        onclick={() => void toggleFollow()}
+        >{following ? t("item.unfollow") : t("item.follow")}</button
+      >
+    {/if}
     <button
       type="button"
       onclick={() => {
@@ -357,6 +390,17 @@
           <input type="date" bind:value={form.due} />
         </label>
       </div>
+      {#if workflow.milestones.length > 0 || form.milestone !== ""}
+        <label>
+          {t("item.milestone")}
+          <select bind:value={form.milestone}>
+            <option value="">{t("item.noMilestone")}</option>
+            {#each workflow.milestones as m (m.id)}
+              <option value={m.name}>{m.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       <label>
         {t("item.labels")}
         <input bind:value={form.labels} placeholder={t("item.labelsHint")} />

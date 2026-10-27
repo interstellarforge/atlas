@@ -67,7 +67,12 @@ func (s *Server) registerWork(mux *http.ServeMux, protect func(http.HandlerFunc)
 	mux.Handle("GET /api/v1/items/{key}/links", protect(s.listLinks))
 	mux.Handle("POST /api/v1/items/{key}/links", protect(s.addLink))
 	mux.Handle("DELETE /api/v1/items/{key}/links/{type}/{target}", protect(s.removeLink))
+	mux.Handle("GET /api/v1/projects/{key}/milestones", protect(s.listMilestones))
+	mux.Handle("POST /api/v1/projects/{key}/milestones", protect(s.createMilestone))
+	mux.Handle("PATCH /api/v1/projects/{key}/milestones/{id}", protect(s.patchMilestone))
+	mux.Handle("DELETE /api/v1/projects/{key}/milestones/{id}", protect(s.deleteMilestone))
 	s.registerNotes(mux, protect)
+	s.registerInbox(mux, protect)
 }
 
 // ---- users, projects, members ----
@@ -294,7 +299,7 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := core.ItemFilter{
 		Project: q.Get("project"), Type: q.Get("type"), Status: q.Get("status"), Priority: q.Get("priority"),
-		Label: q.Get("label"), Parent: q.Get("parent"), Under: q.Get("under"), Q: q.Get("q"),
+		Label: q.Get("label"), Milestone: q.Get("milestone"), Parent: q.Get("parent"), Under: q.Get("under"), Q: q.Get("q"),
 		Category: q.Get("category"), Sort: q.Get("sort"),
 		IncludeArchived: q.Get("archived") == "1" || q.Get("archived") == "true",
 		Cursor:          q.Get("cursor"), Fields: fieldsParam(r),
@@ -347,6 +352,7 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 		DueAt       *int64         `json:"due_at"`
 		Labels      []string       `json:"labels"`
 		CustomData  map[string]any `json:"custom_data"`
+		Milestone   string         `json:"milestone"`
 	}
 	if !decode(w, r, &in) {
 		return

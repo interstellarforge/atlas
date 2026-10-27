@@ -107,6 +107,7 @@
   <FiltersBar
     bind:filters
     labels={workflow?.labels ?? []}
+    milestones={workflow?.milestones ?? []}
     types={workflow?.types ?? []}
   />
   {#if ready && groups.length === 0}<p class="muted">

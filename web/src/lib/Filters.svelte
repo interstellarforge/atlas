@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { type Filters } from "./api";
+  import { emptyFilters, type Filters, type Milestone } from "./api";
   import { t } from "./i18n";
   import { people } from "./people.svelte";
   import { cardFields, saveCardFields } from "./prefs.svelte";
@@ -8,11 +8,13 @@
     // eslint-disable-next-line @typescript-eslint/no-useless-default-assignment -- $bindable() is how Svelte 5 declares a two-way prop
     filters = $bindable(),
     labels,
+    milestones,
     types,
     showCardFields = false,
   }: {
     filters: Filters;
     labels: string[];
+    milestones: Milestone[];
     types: string[];
     showCardFields?: boolean;
   } = $props();
@@ -22,19 +24,13 @@
       filters.type !== "" ||
       filters.priority !== "" ||
       filters.label !== "" ||
+      filters.milestone !== "" ||
       filters.assignee !== "" ||
       filters.archived,
   );
 
   function clear(): void {
-    filters = {
-      q: "",
-      type: "",
-      priority: "",
-      label: "",
-      assignee: "",
-      archived: false,
-    };
+    filters = { ...emptyFilters };
   }
 </script>
 
@@ -75,6 +71,14 @@
       <option value="">{t("filters.anyTag")}</option>
       {#each labels as label (label)}
         <option value={label}>{label}</option>
+      {/each}
+    </select>
+  {/if}
+  {#if milestones.length > 0}
+    <select aria-label={t("filters.milestone")} bind:value={filters.milestone}>
+      <option value="">{t("filters.anyMilestone")}</option>
+      {#each milestones as m (m.id)}
+        <option value={m.name}>{m.name}</option>
       {/each}
     </select>
   {/if}

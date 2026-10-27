@@ -11,7 +11,9 @@
     "signOut": "Sign out",
     "main": "Main navigation",
     "live": "Live updates connected",
-    "offline": "Reconnecting…"
+    "offline": "Reconnecting…",
+    "inbox": "Inbox",
+    "unread": "{count} unread"
   },
   "auth": {
     "login": {
@@ -43,7 +45,8 @@
     "list": "List",
     "backlog": "Backlog",
     "tree": "Hierarchy",
-    "loadFailed": "Could not load this project."
+    "loadFailed": "Could not load this project.",
+    "milestones": "Milestones"
   },
   "filters": {
     "label": "Filters",
@@ -62,7 +65,9 @@
     "showPriority": "Priority",
     "showAssignee": "Assignee",
     "showDue": "Due date",
-    "showLabels": "Labels"
+    "showLabels": "Labels",
+    "milestone": "Milestone",
+    "anyMilestone": "Any milestone"
   },
   "board": {
     "tools": "Filters and add item",
@@ -204,6 +209,46 @@
     "attachmentFailed": "Could not add the image: {message}",
     "attachmentTooLarge": "The image is too large.",
     "attachmentOpen": "Open {name} in full size",
-    "attachmentDims": "{width} × {height}"
+    "attachmentDims": "{width} × {height}",
+    "milestone": "Milestone",
+    "noMilestone": "No milestone",
+    "follow": "Follow",
+    "unfollow": "Following"
+  },
+  "milestones": {
+    "title": "Milestones",
+    "empty": "No milestones yet.",
+    "name": "Name",
+    "due": "Due date",
+    "add": "Add milestone",
+    "progress": "{done} of {total} done",
+    "released": "Released",
+    "release": "Mark released",
+    "reopen": "Reopen",
+    "save": "Save",
+    "delete": "Delete",
+    "deleteBlocked": "Move or clear its items first.",
+    "failed": "Could not change the milestone: {message}",
+    "adminOnly": "Only project admins can change milestones.",
+    "open": "Open",
+    "items": "Show items"
+  },
+  "inbox": {
+    "title": "Inbox",
+    "empty": "No notifications.",
+    "markAll": "Mark all read",
+    "markRead": "Mark read",
+    "delete": "Delete",
+    "loadFailed": "Could not load the inbox.",
+    "failed": "Could not change the notification.",
+    "assigned": "{actor} assigned {key} to you",
+    "mention": "{actor} mentioned you on {key}",
+    "blocker_done": "{other} is done, so {key} is no longer blocked",
+    "followed": {
+      "item.updated": "{actor} updated {key}",
+      "item.moved": "{actor} moved {key}",
+      "item.archived": "{actor} archived or restored {key}",
+      "comment.added": "{actor} commented on {key}"
+    }
   }
 }

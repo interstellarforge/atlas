@@ -95,8 +95,18 @@ export interface CustomField {
   options?: string[];
 }
 
+export interface Milestone {
+  id: number;
+  name: string;
+  due_at: number | null;
+  released_at: number | null;
+  total: number;
+  done: number;
+}
+
 export interface Workflow {
   types: string[];
+  milestones: Milestone[];
   custom_fields: CustomField[];
   hierarchy: Record<string, string[]>;
   statuses: StatusInfo[];
@@ -157,6 +167,7 @@ export interface Filters {
   type: string;
   priority: string;
   label: string;
+  milestone: string;
   assignee: string;
   archived: boolean;
 }
@@ -166,6 +177,7 @@ export const emptyFilters: Filters = {
   type: "",
   priority: "",
   label: "",
+  milestone: "",
   assignee: "",
   archived: false,
 };
@@ -187,6 +199,7 @@ function filterParams(f: Filters): Record<string, string | boolean> {
     type: f.type,
     priority: f.priority,
     label: f.label,
+    milestone: f.milestone,
     assignee: f.assignee,
     archived: f.archived,
   };
@@ -278,6 +291,7 @@ export interface ItemDetail {
   assignee: number | null;
   due_at: number | null;
   labels: string[];
+  milestone: string | null;
   custom_data: Record<string, unknown>;
   blocked: boolean;
   version: number;
@@ -423,4 +437,90 @@ export async function uploadAttachment(
     );
   }
   return data as unknown as Attachment;
+}
+
+export function createMilestone(
+  project: string,
+  name: string,
+  dueAt: number | null,
+): Promise<Milestone> {
+  return request<Milestone>("POST", `/projects/${project}/milestones`, {
+    name,
+    due_at: dueAt,
+  });
+}
+
+export function updateMilestone(
+  project: string,
+  id: number,
+  patch: { name?: string; due_at?: number | null; released?: boolean },
+): Promise<Milestone> {
+  return request<Milestone>(
+    "PATCH",
+    `/projects/${project}/milestones/${String(id)}`,
+    patch,
+  );
+}
+
+export function deleteMilestone(
+  project: string,
+  id: number,
+): Promise<undefined> {
+  return request<undefined>(
+    "DELETE",
+    `/projects/${project}/milestones/${String(id)}`,
+  );
+}
+
+export async function listMilestones(project: string): Promise<Milestone[]> {
+  return (
+    await request<{ items: Milestone[] }>(
+      "GET",
+      `/projects/${project}/milestones`,
+    )
+  ).items;
+}
+
+export interface Notification {
+  id: number;
+  type: "assigned" | "mention" | "blocker_done" | "followed";
+  project: string;
+  item: string;
+  actor: string;
+  detail: string;
+  created_at: number;
+  read: boolean;
+}
+
+export interface Inbox {
+  items: Notification[];
+  unread: number;
+}
+
+export function getInbox(unreadOnly = false): Promise<Inbox> {
+  return request<Inbox>(
+    "GET",
+    `/notifications${query({ unread: unreadOnly ? 1 : undefined })}`,
+  );
+}
+
+export function markNotificationRead(id: number): Promise<undefined> {
+  return request<undefined>("POST", `/notifications/${String(id)}/read`);
+}
+
+export function markAllNotificationsRead(): Promise<undefined> {
+  return request<undefined>("POST", "/notifications/read");
+}
+
+export function deleteNotification(id: number): Promise<undefined> {
+  return request<undefined>("DELETE", `/notifications/${String(id)}`);
+}
+
+export async function getFollowing(key: string): Promise<boolean> {
+  return (await request<{ following: boolean }>("GET", `/items/${key}/follow`))
+    .following;
+}
+
+export function setFollowing(key: string, on: boolean): Promise<undefined> {
+  return request<undefined>(on ? "PUT" : "DELETE", `/items/${key}/follow`);
 }

@@ -16,6 +16,7 @@ type change struct {
 	Project   string
 	ItemKey   string
 	Changes   any
+	Notify    []Notice // notifications this change causes
 }
 
 // journal writes the audit entry and the change event inside the caller's
@@ -31,7 +32,9 @@ func (s *Service) journal(ctx context.Context, tx *sql.Tx, a auth.Actor, c chang
 		VALUES (?, ?, ?, ?, ?, ?)`, a.String(), c.Operation, c.Target, string(body), batchFrom(ctx), now); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO change_events (type, project, item_key, actor, ts) VALUES (?, ?, ?, ?, ?)`,
-		c.Event, c.Project, c.ItemKey, a.String(), now)
-	return err
+	if _, err := tx.Exec(`INSERT INTO change_events (type, project, item_key, actor, ts) VALUES (?, ?, ?, ?, ?)`,
+		c.Event, c.Project, c.ItemKey, a.String(), now); err != nil {
+		return err
+	}
+	return s.fanOut(tx, a, c)
 }

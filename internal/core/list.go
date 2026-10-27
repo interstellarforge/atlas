@@ -70,6 +70,9 @@ func (s *Service) filterConds(f ItemFilter, projectIDs []int64) ([]string, []any
 	if f.Label != "" {
 		add(`EXISTS (SELECT 1 FROM item_labels il JOIN labels l ON l.id = il.label_id WHERE il.item_id = i.id AND l.name = ?)`, f.Label)
 	}
+	if f.Milestone != "" {
+		add("i.milestone_id = (SELECT id FROM milestones WHERE project_id = i.project_id AND name = ? COLLATE NOCASE)", f.Milestone)
+	}
 	if f.Parent != "" {
 		add("i.parent_id = (SELECT id FROM work_items WHERE key = ?)", f.Parent)
 	}

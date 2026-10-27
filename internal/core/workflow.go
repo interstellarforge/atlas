@@ -53,6 +53,7 @@ type Workflow struct {
 	Statuses     []Status            `json:"statuses"`
 	Transitions  []Transition        `json:"transitions"`
 	Labels       []string            `json:"labels"`
+	Milestones   []Milestone         `json:"milestones"`
 	CustomFields []CustomField       `json:"custom_fields"`
 }
 
@@ -61,7 +62,7 @@ func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Wo
 	if err != nil {
 		return Workflow{}, err
 	}
-	w := Workflow{Project: p.Key, Types: itemTypes, Hierarchy: allowedParents, Transitions: []Transition{}, Labels: []string{}}
+	w := Workflow{Project: p.Key, Types: itemTypes, Hierarchy: allowedParents, Transitions: []Transition{}, Labels: []string{}, Milestones: []Milestone{}}
 
 	if w.Statuses, err = statuses(s.db.R, p.ID); err != nil {
 		return w, err
@@ -96,6 +97,9 @@ func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Wo
 	}
 	lrows.Close()
 
+	if w.Milestones, err = milestones(s.db.R, p.ID); err != nil {
+		return w, err
+	}
 	w.CustomFields, err = s.customFields(s.db.R, p.ID)
 	return w, err
 }

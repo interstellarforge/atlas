@@ -20,7 +20,8 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | POST | `/auth/login`, `/auth/logout` | Sessions |
 | GET/POST | `/tokens`, DELETE `/tokens/{id}` | Scoped API tokens |
 | GET/POST/PATCH | `/projects`, `/projects/{key}` | Projects |
-| GET/PUT | `/projects/{key}/workflow` | GET: types, hierarchy, statuses, transitions, labels, custom fields. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change |
+| GET/POST, PATCH/DELETE `/projects/{key}/milestones[/{id}]` | Milestones with progress (`total`, `done` = active items in a completed status). Changes need a project admin; PATCH `{"name"?,"due_at"?,"released"?}`; delete refused while items use it. Items get one via `milestone` (name or null) on create/update; filter with `?milestone=` |
+| GET/PUT | `/projects/{key}/workflow` | GET: types, hierarchy, statuses, transitions, labels, milestones, custom fields. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change |
 | POST/PATCH/DELETE | `/projects/{key}/statuses[/{id}]` | Manage statuses (project admin); delete refused while items use it |
 | POST/DELETE | `/projects/{key}/custom-fields[/{name}]` | Custom field definitions (project admin) |
 | GET | `/projects/{key}/members`, PUT/DELETE `/projects/{key}/members/{user}` | Roles: admin, member, viewer |
@@ -39,7 +40,10 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET | `/attachments/{id}` , `/attachments/{id}/thumb` | Authorised streaming download (`nosniff`, sandbox CSP); thumbnail is a JPEG with longest edge 320 px, generated on first request. No delete yet |
 | GET | `/changes?since=<seq>` | Delta sync |
 | GET | `/events` | SSE |
-| GET | `/notifications`, POST `/notifications/{id}/read` | Inbox |
+| GET | `/notifications?unread=1&limit=` | The caller's inbox: `{items, unread}`; types `assigned`, `mention` (`@` + the part of the email before the @, in a comment), `blocker_done` (a blocker moved to a completed status; detail is its key) and `followed` (detail is the event type) |
+| POST | `/notifications/read`, `/notifications/{id}/read` | Mark all / one read (write scope) |
+| DELETE | `/notifications/{id}` | Remove one |
+| GET/PUT/DELETE | `/items/{key}/follow` | Follow state of the caller; following notifies on updates, moves, archive and comments |
 | GET | `/export`, POST `/import` | Export / import (dry-run via `?dry_run=1`) |
 
 ## Errors
@@ -62,7 +66,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 ## SSE `/events`
 
 - Frame: `id: 1842` + `data: {"seq":1842,"type":"item.updated","project":"EXO","key":"EXO-42"}` (default message event).
-- Types now: `item.created`, `item.updated`, `item.moved`, `item.archived`, `project.created`, `project.updated`, `board.rebalanced` (clients refetch the board). `comment.added`, `checklist.changed` and `attachment.added` (carry the item key). Planned: `item.deleted`, `notification.created`.
+- Types now: `item.created`, `item.updated`, `item.moved`, `item.archived`, `project.created`, `project.updated`, `board.rebalanced` (clients refetch the board). `comment.added`, `checklist.changed`, `attachment.added` (carry the item key) and `notification.created` (only sent to its recipient; refetch `/notifications`). Planned: `item.deleted`, `notification.created`.
 - Control events: `hello` (`{"generation","seq"}`, first frame; a changed `generation` means the database was replaced, so reload), `resync_required` (`{"seq"}`).
 - `Last-Event-ID` (or `?since=`) resumes from `change_events`. A cursor ahead of the journal or behind its oldest entry gives `resync_required`. Retention: `ATLAS_EVENT_RETENTION_DAYS` (default 7), always keeping the newest 1000.
 - Keepalive comment every 20 s. Events are filtered by the caller's project access. A stream ends after 10 minutes so credentials are re-checked on reconnect.
