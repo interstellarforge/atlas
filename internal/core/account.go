@@ -67,7 +67,7 @@ func (s *Service) ChangePassword(ctx context.Context, a auth.Actor, current, nex
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, fresh, a.UserID); err != nil {
+		if _, err := tx.Exec(`UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?`, fresh, a.UserID); err != nil {
 			return err
 		}
 		res, err := tx.Exec(`DELETE FROM sessions WHERE user_id = ? AND rowid <> ?`, a.UserID, a.SessionID)

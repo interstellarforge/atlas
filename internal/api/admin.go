@@ -37,17 +37,25 @@ func (s *Server) adminPatchUser(w http.ResponseWriter, r *http.Request) {
 		IsAdmin   *bool `json:"is_admin"`
 		Active    *bool `json:"active"`
 		ResetTOTP bool  `json:"reset_totp"`
+		// ForcePasswordReset ends the user's sessions and makes the next one change the password first.
+		ForcePasswordReset bool `json:"force_password_reset"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.IsAdmin == nil && in.Active == nil && !in.ResetTOTP {
-		writeError(w, http.StatusBadRequest, "invalid", "give is_admin and/or active")
+	if in.IsAdmin == nil && in.Active == nil && !in.ResetTOTP && !in.ForcePasswordReset {
+		writeError(w, http.StatusBadRequest, "invalid", "give is_admin, active, reset_totp and/or force_password_reset")
 		return
 	}
 	a := actor(r)
 	if in.ResetTOTP {
 		if err := s.core.ResetUserTOTP(r.Context(), a, id); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	if in.ForcePasswordReset {
+		if err := s.core.ForcePasswordReset(r.Context(), a, id); err != nil {
 			s.fail(w, r, err)
 			return
 		}
@@ -96,7 +104,7 @@ func (s *Server) roles(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": list, "actions": core.Actions})
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "actions": core.Actions, "default_role": s.core.Policy().DefaultRole})
 }
 
 // adminSaveRole creates a custom role or edits viewer, member or a custom role: {"actions": [...]}.

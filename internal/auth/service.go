@@ -38,6 +38,8 @@ type User struct {
 	Name    string `json:"name"`
 	IsAdmin bool   `json:"is_admin"`
 	Avatar  bool   `json:"avatar"`
+	// MustChangePassword is set by an admin: the session may only change the password until it is done.
+	MustChangePassword bool `json:"must_change_password,omitempty"`
 	// TOTP is true when two-factor authentication is on (shown to the user themselves only).
 	TOTP bool `json:"totp,omitempty"`
 }
@@ -130,9 +132,9 @@ func (s *Service) Login(email, password, code, clientKey string) (user User, ses
 	var totpOn bool
 	var totpSecret sql.NullString
 	var lastStep int64
-	err = s.db.R.QueryRow(`SELECT id, email, name, is_admin, password_hash, avatar_path IS NOT NULL, totp_enabled, totp_secret, totp_last_step
+	err = s.db.R.QueryRow(`SELECT id, email, name, is_admin, password_hash, avatar_path IS NOT NULL, totp_enabled, totp_secret, totp_last_step, must_change_password
 		FROM users WHERE email = ? AND deactivated_at IS NULL`, email).
-		Scan(&user.ID, &user.Email, &user.Name, &user.IsAdmin, &hash, &user.Avatar, &totpOn, &totpSecret, &lastStep)
+		Scan(&user.ID, &user.Email, &user.Name, &user.IsAdmin, &hash, &user.Avatar, &totpOn, &totpSecret, &lastStep, &user.MustChangePassword)
 	ok := false
 	if err == nil {
 		ok, _ = VerifyPassword(password, hash)
@@ -197,9 +199,9 @@ func (s *Service) Logout(session string) error {
 func (s *Service) SessionActor(session string) (Actor, error) {
 	var a Actor
 	var exp int64
-	err := s.db.R.QueryRow(`SELECT s.user_id, u.is_admin, s.csrf_token, s.expires_at, s.rowid
+	err := s.db.R.QueryRow(`SELECT s.user_id, u.is_admin, s.csrf_token, s.expires_at, s.rowid, u.must_change_password
 		FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(session)).
-		Scan(&a.UserID, &a.IsAdmin, &a.CSRF, &exp, &a.SessionID)
+		Scan(&a.UserID, &a.IsAdmin, &a.CSRF, &exp, &a.SessionID, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && exp < time.Now().UnixMilli()) {
 		return Actor{}, ErrUnauthenticated
 	}
@@ -212,8 +214,8 @@ func (s *Service) SessionActor(session string) (Actor, error) {
 
 func (s *Service) User(id int64) (User, error) {
 	var u User
-	err := s.db.R.QueryRow(`SELECT id, email, name, is_admin, avatar_path IS NOT NULL, totp_enabled FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Avatar, &u.TOTP)
+	err := s.db.R.QueryRow(`SELECT id, email, name, is_admin, avatar_path IS NOT NULL, totp_enabled, must_change_password FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Avatar, &u.TOTP, &u.MustChangePassword)
 	return u, err
 }
 

@@ -29,10 +29,10 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET, POST, DELETE | `/projects/{key}/item-templates[/{id}]` | Item templates (read: viewer; write: project admin). POST upserts by name: `{"name","type","title_prefix","description","priority","labels","status","checklist","subitems"}`; `subitems` is a tree `[{"type","title","description"?,"priority"?,"children"?}]` (3 levels, 50 items, hierarchy rules checked at save) created with the item in one transaction. The list includes instance-wide templates (`scope`). Placeholders `{date}`, `{user}` only |
 | GET, POST, DELETE | `/project-templates[/{id}]` | Project templates (read: any user; write: global admin). POST `{"name","description"}` plus `"from_project": "KEY"` or `"data": {version:1, statuses, transitions, labels, custom_fields, item_templates}`. `POST /projects` takes `"template": id` and applies it in one transaction |
 | GET | `/admin/users` | Global admin, session only |
-| PATCH | `/admin/users/{id}` | `{"is_admin"?, "active"?}`; no self-deactivation, the last active admin stays; deactivating ends sessions, tokens stop working |
+| PATCH | `/admin/users/{id}` | `{"is_admin"?, "active"?, "reset_totp"?, "force_password_reset"?}` (forcing ends the user's sessions; the next session may only change the password, error `password_change_required` elsewhere); no self-deactivation, the last active admin stays; deactivating ends sessions, tokens stop working |
 | GET | `/admin/audit` | Audit log newest first; filters `actor`, `operation` (prefix), `target`, `before` (id), `limit` (max 200) |
 | GET | `/admin/instance` | Effective instance settings (read-only, from the environment) |
-| GET | `/roles` | Project roles with their actions, plus the list of action names |
+| GET | `/roles` | Project roles with their actions, the list of action names and `default_role` |
 | PUT, DELETE | `/admin/roles/{name}` | Global admin only. PUT `{"actions":[...]}` creates a custom role or replaces the actions of viewer, member or a custom role (`admin` is fixed, `view` is mandatory). DELETE refuses built-ins and roles still assigned |
 | POST | `/auth/register` | `{"email","name","password","invite"?}`: with a valid invite, or when the instance policy is `open` (optionally one email domain). Refusals count against the login rate limiter. Closed instance without invite: 403 |
 | GET | `/auth/policy` | Public: `registration` (closed/invite/open), `min_password_length`, `allowed_domain` |
@@ -43,7 +43,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET | `/users/{id}/avatar` | 320 px JPEG thumbnail for any signed-in reader (metadata such as EXIF is dropped); 404 without a picture |
 | GET | `/me/security` | `{totp, recovery_remaining}` |
 | POST | `/me/totp/setup`, `/me/totp/enable`, `/me/totp/disable` | Enrol: setup returns `secret` and `otpauth` `uri`; enable `{"code"}` returns 10 recovery codes once; disable `{"password","code"}` (a code or recovery code) |
-| GET, PUT | `/admin/policy` | `{"min_password_length": 8-128, "registration", "allowed_domain", "session_days": 1-90}` (global admin) |
+| GET, PUT | `/admin/policy` | `{"min_password_length": 8-128, "registration", "allowed_domain", "session_days": 1-90, "default_role"}` (global admin; default_role must exist, used when a member is added without a role) |
 | GET, POST, DELETE | `/admin/invites[/{id}]` | POST `{"email"?,"is_admin","days"}` returns the `code` once; single use; with an email only that address may redeem it |
 | GET | `/admin/audit/export` | CSV (default) or `?format=json` (JSON lines) with the filters of `/admin/audit`; at most 50.000 entries per download (continue with `before`) |
 | GET, POST, DELETE | `/item-templates[/{id}]` | Instance-wide item templates (read: any user; write: global admin); usable in every project, a project template of the same name wins |

@@ -16,6 +16,7 @@
   import Board from "./lib/Board.svelte";
   import Brand from "./lib/Brand.svelte";
   import { connect, disconnect, onChange } from "./lib/events.svelte";
+  import ForcedPassword from "./lib/ForcedPassword.svelte";
   import HeroArt from "./lib/HeroArt.svelte";
   import { t } from "./lib/i18n";
   import Inbox from "./lib/Inbox.svelte";
@@ -274,6 +275,12 @@
       {/if}
     </main>
   </div>
+{:else if user.must_change_password}
+  <ForcedPassword
+    {user}
+    ondone={() => (user = user && { ...user, must_change_password: false })}
+    onsignout={() => void signOut()}
+  />
 {:else}
   <Shell
     {user}

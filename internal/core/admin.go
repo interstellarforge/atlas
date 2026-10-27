@@ -19,15 +19,16 @@ func adminOnly(a auth.Actor) error {
 
 type AdminUser struct {
 	User
-	DeactivatedAt *int64 `json:"deactivated_at"`
-	CreatedAt     int64  `json:"created_at"`
+	MustChangePassword bool   `json:"must_change_password"`
+	DeactivatedAt      *int64 `json:"deactivated_at"`
+	CreatedAt          int64  `json:"created_at"`
 }
 
 func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser, error) {
 	if err := adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, email, name, is_admin, deactivated_at, created_at FROM users ORDER BY name`)
+	rows, err := s.db.R.Query(`SELECT id, email, name, is_admin, must_change_password, deactivated_at, created_at FROM users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +37,7 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 	for rows.Next() {
 		var u AdminUser
 		var off sql.NullInt64
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &off, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.MustChangePassword, &off, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		if off.Valid {
@@ -115,6 +116,27 @@ func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, act
 			}
 		}
 		return s.journal(ctx, tx, a, change{Operation: "user.active", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{"active": active}})
+	})
+}
+
+// ForcePasswordReset signs the user out everywhere; their next session can only change the password.
+// Tokens keep working: they are separate credentials the user or an admin revokes on their own.
+func (s *Service) ForcePasswordReset(ctx context.Context, a auth.Actor, id int64) error {
+	if err := adminOnly(a); err != nil {
+		return err
+	}
+	return s.tx(func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE users SET must_change_password = 1 WHERE id = ? AND deactivated_at IS NULL`, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+			return err
+		}
+		return s.journal(ctx, tx, a, change{Operation: "user.force_password", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{}})
 	})
 }
 

@@ -15,6 +15,7 @@ export interface User {
   is_admin: boolean;
   avatar?: boolean;
   totp?: boolean;
+  must_change_password?: boolean;
 }
 
 interface Session {
@@ -737,6 +738,7 @@ export async function importItems(
 export interface AdminUser extends User {
   deactivated_at: number | null;
   created_at: number;
+  must_change_password: boolean;
 }
 
 export interface AuditEntry {
@@ -755,7 +757,11 @@ export interface Role {
   actions: string[];
 }
 
-export function listRoles(): Promise<{ items: Role[]; actions: string[] }> {
+export function listRoles(): Promise<{
+  items: Role[];
+  actions: string[];
+  default_role: string;
+}> {
   return request("GET", "/roles");
 }
 
@@ -775,7 +781,12 @@ export async function listAdminUsers(): Promise<AdminUser[]> {
 
 export function patchAdminUser(
   id: number,
-  patch: { is_admin?: boolean; active?: boolean; reset_totp?: boolean },
+  patch: {
+    is_admin?: boolean;
+    active?: boolean;
+    reset_totp?: boolean;
+    force_password_reset?: boolean;
+  },
 ): Promise<undefined> {
   return request("PATCH", `/admin/users/${String(id)}`, patch);
 }
@@ -977,6 +988,7 @@ export interface Policy {
   registration: "closed" | "invite" | "open";
   allowed_domain: string;
   session_days: number;
+  default_role: string;
 }
 
 export function getPolicy(): Promise<Policy> {

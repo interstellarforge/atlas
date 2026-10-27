@@ -84,6 +84,7 @@
   let addUser = $state("");
   let addRole = $state("member");
   let roles = $state<Role[]>([]);
+  let defaultRole = "member";
   function roleLabel(name: string): string {
     return ["admin", "member", "viewer"].includes(name)
       ? t(`psettings.roles.${name}` as "psettings.roles.admin")
@@ -93,10 +94,13 @@
     people.users.filter((u) => !members.some((m) => m.user_id === u.id)),
   );
   async function loadMembers(): Promise<void> {
-    [members, roles] = await Promise.all([
-      listMembers(project),
-      listRoles().then((r) => r.items),
-    ]);
+    const [m, r] = await Promise.all([listMembers(project), listRoles()]);
+    members = m;
+    roles = r.items;
+    if (defaultRole !== r.default_role) {
+      defaultRole = r.default_role;
+      addRole = defaultRole;
+    }
   }
 
   // ---- tokens ----

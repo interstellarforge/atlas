@@ -9,6 +9,7 @@
 
 ## Authorization
 
+- An admin can force a password change (`must_change_password`): sessions end, the next one may only reach `/auth/me`, logout and `/me/password`. Tokens are not touched. See ADR-0010.
 - Roles per project via `project_members`: built-in `admin` (fixed, all actions), `member` and `viewer` (editable) plus custom roles. Each role is a set of actions in `role_actions` (ADR-0010); every project check in `core` names an action through `Service.access`.
 - Token scopes: `read` and `write` separately, optionally limited to projects. A token never exceeds its owner's rights.
 - Enforced in `core` services, not only in handlers. SSE and `changes_since` filter by permission.

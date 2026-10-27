@@ -219,7 +219,11 @@ func (s *Service) ListMembers(ctx context.Context, a auth.Actor, key string) ([]
 	return out, rows.Err()
 }
 
+// SetMember adds or updates a member. An empty roleName means the instance's default role.
 func (s *Service) SetMember(ctx context.Context, a auth.Actor, key string, userID int64, roleName string) error {
+	if roleName == "" {
+		roleName = s.Policy().DefaultRole
+	}
 	return s.tx(func(tx *sql.Tx) error {
 		p, mine, err := s.access(tx, a, key, actMembers)
 		if err != nil {

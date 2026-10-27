@@ -132,6 +132,9 @@ func (s *Service) DeleteRole(ctx context.Context, a auth.Actor, name string) err
 		if builtin {
 			return rule("built-in roles cannot be deleted")
 		}
+		if loadPolicy(tx).DefaultRole == name {
+			return rule("role is the default role for new members")
+		}
 		var n int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM project_members WHERE role = ?`, name).Scan(&n); err != nil {
 			return err

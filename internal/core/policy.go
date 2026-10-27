@@ -20,9 +20,10 @@ type Policy struct {
 	Registration      string `json:"registration"`        // closed (admins create accounts), invite or open
 	AllowedDomain     string `json:"allowed_domain"`      // open registration only: e.g. example.com; empty = any
 	SessionDays       int    `json:"session_days"`        // 1-90
+	DefaultRole       string `json:"default_role"`        // project role used when a member is added without one
 }
 
-var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14}
+var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14, DefaultRole: "member"}
 
 func loadPolicy(q queryer) Policy {
 	p := defaultPolicy
@@ -45,6 +46,8 @@ func loadPolicy(q queryer) Policy {
 			p.AllowedDomain = v
 		case "session_days":
 			p.SessionDays, _ = strconv.Atoi(v)
+		case "default_role":
+			p.DefaultRole = v
 		}
 	}
 	if p.MinPasswordLength < 8 || p.SessionDays < 1 {
@@ -76,9 +79,19 @@ func (s *Service) SetPolicy(ctx context.Context, a auth.Actor, p Policy) (Policy
 		!slices.Contains([]string{"closed", "invite", "open"}, p.Registration) || strings.ContainsAny(p.AllowedDomain, " @/") {
 		return Policy{}, invalid("min_password_length 8-128, session_days 1-90, registration closed, invite or open, allowed_domain like example.com")
 	}
+	if p.DefaultRole == "" {
+		p.DefaultRole = defaultPolicy.DefaultRole
+	}
 	err := s.tx(func(tx *sql.Tx) error {
+		var known int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM roles WHERE name = ?`, p.DefaultRole).Scan(&known); err != nil {
+			return err
+		}
+		if known == 0 {
+			return invalid("unknown default_role")
+		}
 		for k, v := range map[string]string{"min_password_length": strconv.Itoa(p.MinPasswordLength), "registration": p.Registration,
-			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays)} {
+			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays), "default_role": p.DefaultRole} {
 			if _, err := tx.Exec(`INSERT INTO instance_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, k, v); err != nil {
 				return err
 			}

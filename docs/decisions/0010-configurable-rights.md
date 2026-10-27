@@ -16,6 +16,9 @@ SET 4 asks admins to decide who may do what. ADR-0008 only showed a read-only ma
 4. **Guard rails.** `admin` is built in, fixed and cannot be deleted, so a project can always be administered and `guardLastAdmin` keeps working. Every role keeps `view`. Built-ins cannot be deleted; a role still assigned to members cannot be deleted. A role holding `members` cannot grant, change or remove `admin` (no self-escalation). Global admins keep every action on every project.
 5. **Instance-wide only, edited by global admins through a human session.** Role changes are audited (`role.save`, `role.delete`) and apply at once (the role is read per request, one indexed lookup).
 
+6. **Default role for new members** is an instance policy (`default_role`, default `member`). `SetMember` with an empty role uses it, and the add-member form preselects it. It must be an existing role and cannot be deleted while it is the default.
+7. **Forced password change.** `users.must_change_password` (migration 0013). An admin sets it with `PATCH /admin/users/{id}` `{"force_password_reset": true}`: every session of the user ends at once. The next session works only for `GET /auth/me`, `POST /auth/logout` and `PUT /me/password` (`auth.Require` answers 403 `password_change_required` elsewhere); changing the password clears the flag. API tokens keep working: they are separate credentials, revoked on their own.
+
 ## Consequences
 
 - Not built: per-project overrides of the matrix (the story called them optional). Add `project_role_actions` later if needed; `access` is the single place to change.

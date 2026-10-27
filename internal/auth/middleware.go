@@ -40,6 +40,10 @@ func Require(onFail func(w http.ResponseWriter, status int, code, msg string), n
 			onFail(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 			return
 		}
+		if a.MustChangePassword && !passwordChangePaths[r.URL.Path] {
+			onFail(w, http.StatusForbidden, "password_change_required", "change your password first")
+			return
+		}
 		scope := ScopeWrite
 		if safeMethod(r.Method) {
 			scope = ScopeRead
@@ -50,6 +54,13 @@ func Require(onFail func(w http.ResponseWriter, status int, code, msg string), n
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// A session that must change its password may only reach these.
+var passwordChangePaths = map[string]bool{
+	"/api/v1/auth/me":     true,
+	"/api/v1/auth/logout": true,
+	"/api/v1/me/password": true,
 }
 
 func safeMethod(m string) bool {

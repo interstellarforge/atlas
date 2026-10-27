@@ -32,6 +32,8 @@ type Actor struct {
 	CSRF string
 	// SessionID is the row id of the session the actor signed in with (humans only).
 	SessionID int64
+	// MustChangePassword limits the session to changing the password (humans only).
+	MustChangePassword bool
 }
 
 // String gives the audit form: human:user-4, token:pat-17.

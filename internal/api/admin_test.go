@@ -216,3 +216,80 @@ func TestRoleEditing(t *testing.T) {
 		t.Errorf("delete unused role: HTTP %d", c)
 	}
 }
+
+// TestForcePasswordReset: the user is signed out, the next session can only change the password, and
+// changing it restores full access. Only global admins can force it.
+func TestForcePasswordReset(t *testing.T) {
+	e := setup(t)
+	kees := sessionOf(e, t)
+	u, _ := e.auth.CreateUser("pw@example.com", "pw", "password-123", false)
+	id := strconv.FormatInt(u.ID, 10)
+	old := loginAs(e, t, "pw@example.com", "password-123")
+	if c := e.do("PATCH", "/api/v1/admin/users/"+id, map[string]any{"force_password_reset": true}, old).Code; c != 403 {
+		t.Fatalf("non-admin force: HTTP %d, want 403", c)
+	}
+	if c := e.do("PATCH", "/api/v1/admin/users/"+id, map[string]any{"force_password_reset": true}, kees).Code; c != 204 {
+		t.Fatalf("force: HTTP %d", c)
+	}
+	if c := e.do("GET", "/api/v1/auth/me", nil, old).Code; c != 401 {
+		t.Errorf("old session after force: HTTP %d, want 401", c)
+	}
+	fresh := loginAs(e, t, "pw@example.com", "password-123")
+	if c := e.do("GET", "/api/v1/projects", nil, fresh).Code; c != 403 {
+		t.Errorf("work before changing the password: HTTP %d, want 403", c)
+	}
+	me := decodeBody[struct {
+		User struct {
+			MustChangePassword bool `json:"must_change_password"`
+		}
+	}](t, e.do("GET", "/api/v1/auth/me", nil, fresh))
+	if !me.User.MustChangePassword {
+		t.Error("/auth/me does not report must_change_password")
+	}
+	if c := e.do("PUT", "/api/v1/me/password", map[string]any{"current": "password-123", "new": "another-pass-1"}, fresh).Code; c != 204 {
+		t.Fatalf("change password: HTTP %d", c)
+	}
+	if c := e.do("GET", "/api/v1/projects", nil, fresh).Code; c != 200 {
+		t.Errorf("work after changing the password: HTTP %d, want 200", c)
+	}
+}
+
+// TestDefaultRole: a member added without a role gets the instance default; it must be a real role and
+// cannot be deleted while it is the default.
+func TestDefaultRole(t *testing.T) {
+	e := setup(t)
+	kees := sessionOf(e, t)
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
+	e.do("PUT", "/api/v1/admin/roles/reader", map[string]any{"actions": []string{"view"}}, kees)
+	pol := decodeBody[map[string]any](t, e.do("GET", "/api/v1/admin/policy", nil, kees))
+	if pol["default_role"] != "member" {
+		t.Fatalf("default_role = %v, want member", pol["default_role"])
+	}
+	pol["default_role"] = "ghost"
+	if c := e.do("PUT", "/api/v1/admin/policy", pol, kees).Code; c != 400 {
+		t.Errorf("unknown default role: HTTP %d, want 400", c)
+	}
+	pol["default_role"] = "reader"
+	if c := e.do("PUT", "/api/v1/admin/policy", pol, kees).Code; c != 200 {
+		t.Fatalf("set default role: HTTP %d", c)
+	}
+	if c := e.do("DELETE", "/api/v1/admin/roles/reader", nil, kees).Code; c < 400 {
+		t.Errorf("delete default role: HTTP %d", c)
+	}
+	u, _ := e.auth.CreateUser("new@example.com", "new", "password-123", false)
+	id := strconv.FormatInt(u.ID, 10)
+	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+id, map[string]any{}, kees).Code; c != 204 {
+		t.Fatalf("add without role: HTTP %d", c)
+	}
+	members := decodeBody[struct {
+		Items []struct {
+			UserID int64 `json:"user_id"`
+			Role   string
+		}
+	}](t, e.do("GET", "/api/v1/projects/EXO/members", nil, kees))
+	for _, m := range members.Items {
+		if m.UserID == u.ID && m.Role != "reader" {
+			t.Errorf("new member role = %q, want reader", m.Role)
+		}
+	}
+}

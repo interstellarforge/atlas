@@ -29,6 +29,11 @@
     "settings": "Settings",
     "admin": "Admin"
   },
+  "forcedPassword": {
+    "title": "Choose a new password",
+    "intro": "{name}, an administrator requires you to change your password before you continue.",
+    "signOut": "Sign out"
+  },
   "auth": {
     "login": {
       "title": "Sign in to Atlas",
@@ -523,6 +528,11 @@
     "createUser": "Create user",
     "userCreated": "User created.",
     "rightsIntro": "What each project role may do; a change applies at once. Admin is fixed and every role can view. Add a custom role below, then assign it to members in project settings. A global admin may do everything.",
+    "mustChange": "Must change password",
+    "forcePassword": "Force password change",
+    "passwordForced": "Signed out; the next sign-in must change the password.",
+    "defaultRole": "Default role for new members",
+    "defaultRoleHint": "Used when a member is added without choosing a role; the add-member form preselects it.",
     "roleName": "New role name",
     "addRole": "Add role",
     "deleteRole": "Delete",

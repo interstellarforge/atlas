@@ -157,6 +157,7 @@
       void loadUsers().catch(() => (error = t("admin.loadFailed")));
     if (active === "access") {
       void getPolicy().then((p) => (policy = p));
+      void loadRoles();
       void listInvites().then((l) => (invites = l));
     }
     if (active === "templates")
@@ -203,6 +204,9 @@
               >{t("admin.deactivated")}</span
             >{/if}
           {#if u.is_admin}<span class="chip type">{t("admin.admin")}</span>{/if}
+          {#if u.must_change_password}<span class="chip warn"
+              >{t("admin.mustChange")}</span
+            >{/if}
           <button
             type="button"
             onclick={() =>
@@ -220,6 +224,15 @@
               void run(t("admin.totpReset"), async () => {
                 await patchAdminUser(u.id, { reset_totp: true });
               })}>{t("admin.resetTotp")}</button
+          >
+          <button
+            type="button"
+            disabled={Boolean(u.deactivated_at)}
+            onclick={() =>
+              void run(t("admin.passwordForced"), async () => {
+                await patchAdminUser(u.id, { force_password_reset: true });
+                await loadUsers();
+              })}>{t("admin.forcePassword")}</button
           >
           <button
             type="button"
@@ -333,6 +346,15 @@
           required
         />
       </label>
+      <label>
+        {t("admin.defaultRole")}
+        <select bind:value={policy.default_role}>
+          {#each roles as r (r.name)}
+            <option value={r.name}>{roleLabel(r.name)}</option>
+          {/each}
+        </select>
+      </label>
+      <p class="muted hint">{t("admin.defaultRoleHint")}</p>
       <div>
         <button class="primary" type="submit">{t("settings.save")}</button>
       </div>
