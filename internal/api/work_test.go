@@ -498,3 +498,60 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Fatalf("partial import leaked: %s", w.Body)
 	}
 }
+
+// TestBlockedCreateStatus: a status with allow_create=false refuses new items over REST and MCP, items can still be
+// moved into it, and the last creatable status cannot be blocked.
+func TestBlockedCreateStatus(t *testing.T) {
+	e := setup(t)
+	cookie, csrf := e.login(t)
+	asUser := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, asUser)
+	wf := decodeBody[struct {
+		Statuses []struct {
+			ID   int64
+			Name string
+		}
+	}](t, e.do("GET", "/api/v1/projects/EXO/workflow", nil, asUser))
+	byName := map[string]int64{}
+	for _, s := range wf.Statuses {
+		byName[s.Name] = s.ID
+	}
+	patch := func(name string, allow bool) int {
+		return e.do("PATCH", "/api/v1/projects/EXO/statuses/"+strconv.FormatInt(byName[name], 10), map[string]any{"allow_create": allow}, asUser).Code
+	}
+	if c := patch("Review", false); c != 200 {
+		t.Fatalf("block Review: %d", c)
+	}
+	if w := e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "x", "status": "Review"}, asUser); w.Code != 422 {
+		t.Fatalf("create in blocked status: %d %s", w.Code, w.Body)
+	}
+	// MCP gives the same refusal.
+	_, tok, _ := e.auth.CreateToken(1, "rw", []string{auth.ScopeRead, auth.ScopeWrite}, nil, nil)
+	w := mcpCall(e, tok, "items_write", map[string]any{"operations": []any{map[string]any{"op": "create", "project": "EXO", "type": "task", "title": "x", "status": "Review"}}})
+	var r rpcResult
+	_ = json.Unmarshal(w.Body.Bytes(), &r)
+	if !r.Result.IsError || !strings.Contains(r.Result.Content[0].Text, "rule_violation") {
+		t.Fatalf("mcp create in blocked status: %s", w.Body)
+	}
+	// Creating elsewhere and moving into the blocked status still works.
+	it := decodeBody[map[string]any](t, e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "y"}, asUser))
+	if w := e.do("POST", "/api/v1/items/"+it["key"].(string)+"/move", map[string]any{"version": it["version"], "status": "Review"}, asUser); w.Code != 200 {
+		t.Fatalf("move into blocked status: %d %s", w.Code, w.Body)
+	}
+	// The default (first) status blocked: a clear error, no silent fallback.
+	if c := patch("Backlog", false); c != 200 {
+		t.Fatalf("block Backlog: %d", c)
+	}
+	if w := e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "z"}, asUser); w.Code != 422 {
+		t.Fatalf("create in blocked default status: %d", w.Code)
+	}
+	// Block everything else; the last creatable one is protected.
+	for _, n := range []string{"Todo", "In Progress"} {
+		if c := patch(n, false); c != 200 {
+			t.Fatalf("block %s: %d", n, c)
+		}
+	}
+	if c := patch("Done", false); c != 422 {
+		t.Fatalf("blocking the last creatable status: %d", c)
+	}
+}

@@ -30,6 +30,8 @@ type Actor struct {
 	Projects []string
 	// CSRF is the session's CSRF token (humans only).
 	CSRF string
+	// SessionID is the row id of the session the actor signed in with (humans only).
+	SessionID int64
 }
 
 // String gives the audit form: human:user-4, token:pat-17.

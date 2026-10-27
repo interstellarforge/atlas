@@ -115,13 +115,20 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Key  string `json:"key"`
-		Name string `json:"name"`
+		Key      string `json:"key"`
+		Name     string `json:"name"`
+		Template int64  `json:"template"` // id of a project template; 0 = the default workflow
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	p, err := s.core.CreateProject(r.Context(), actor(r), in.Key, in.Name)
+	var p core.Project
+	var err error
+	if in.Template != 0 {
+		p, err = s.core.CreateProjectFromTemplate(r.Context(), actor(r), in.Key, in.Name, in.Template)
+	} else {
+		p, err = s.core.CreateProject(r.Context(), actor(r), in.Key, in.Name)
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -353,6 +360,7 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 		Labels      []string       `json:"labels"`
 		CustomData  map[string]any `json:"custom_data"`
 		Milestone   string         `json:"milestone"`
+		Template    string         `json:"template"`
 	}
 	if !decode(w, r, &in) {
 		return

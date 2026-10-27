@@ -261,6 +261,9 @@ func (s *Service) RemoveMember(ctx context.Context, a auth.Actor, key string, us
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotFound
 		}
+		if err := s.revokeOwnedProjectTokens(tx, userID, key); err != nil {
+			return err
+		}
 		return s.journal(ctx, tx, a, change{Operation: "member.remove", Target: key, Event: "project.updated",
 			Project: key, Changes: map[string]any{"user_id": userID}})
 	})

@@ -8,10 +8,25 @@ const PROJECT_ROUTE =
 
 // /p/EXO is the board; /p/EXO/list, /backlog and /tree are the other views of the same data.
 // A trailing item key (/p/EXO/list/EXO-12) opens that item's panel over the view.
-export function matchProject(
-  path: string,
-):
-  { key: string; view: ProjectViewName; item: string | undefined } | undefined {
+const SETTINGS_ROUTE =
+  /^\/p\/([A-Za-z][A-Za-z0-9]{1,9})\/settings(?:\/([a-z]+))?$/;
+
+export function matchProject(path: string):
+  | {
+      key: string;
+      view: ProjectViewName;
+      item: string | undefined;
+      section?: string;
+    }
+  | undefined {
+  const settings = SETTINGS_ROUTE.exec(path);
+  if (settings)
+    return {
+      key: (settings[1] ?? "").toUpperCase(),
+      view: "settings",
+      item: undefined,
+      ...(settings[2] && { section: settings[2] }),
+    };
   const match = PROJECT_ROUTE.exec(path);
   if (!match) return undefined;
   return {

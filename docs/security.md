@@ -41,3 +41,11 @@
 - SQLite and uploads on local disk with restrictive permissions; backups contain secrets-free data (tokens hashed).
 - Logs never contain tokens, passwords or full request bodies.
 - Dependencies pinned; Go vulnerability scan (`govulncheck`) in CI.
+
+## Accounts, sessions and administration (epic SET)
+
+- Password and session operations, tokens, and the admin API need a user session: a token cannot change a password, list sessions, mint tokens or administer users.
+- Changing a password requires the current one and ends every other session. Passwords, token secrets and hashes never enter the audit log (tested).
+- Deactivating a user deletes their sessions and makes their tokens fail; sign-in is refused. The last active admin cannot be demoted or deactivated, and nobody deactivates themselves.
+- Project tokens never exceed their owner: access still goes through the owner's membership. When the owner leaves the project, those tokens are revoked.
+- The rights matrix shown in the admin UI is the code's own table (`core.RightsMatrix`) and a test checks it against real requests for viewer, member and admin. See ADR-0008.

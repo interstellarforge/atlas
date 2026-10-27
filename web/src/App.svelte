@@ -1,6 +1,8 @@
 <script lang="ts">
+  import Admin from "./lib/Admin.svelte";
   import {
     ApiError,
+    getPreferences,
     listProjects,
     login,
     logout,
@@ -16,12 +18,14 @@
   import Inbox from "./lib/Inbox.svelte";
   import PageHero from "./lib/PageHero.svelte";
   import { loadPeople } from "./lib/people.svelte";
+  import { account } from "./lib/prefs.svelte";
   import Projects from "./lib/Projects.svelte";
   import ProjectView from "./lib/ProjectView.svelte";
   import { navigate, route } from "./lib/router.svelte";
   import { matchProject } from "./lib/routes";
+  import Settings from "./lib/Settings.svelte";
   import Shell from "./lib/Shell.svelte";
-  import Tokens from "./lib/Tokens.svelte";
+  import { setThemeMode } from "./lib/theme.svelte";
   import { inbox, refreshInbox } from "./lib/unread.svelte";
 
   let user = $state<User | undefined>();
@@ -49,6 +53,10 @@
       void loadPeople();
       void refreshInbox();
       void loadProjects();
+      void getPreferences().then((p) => {
+        account.defaultView = p.default_view;
+        if (p.theme !== "system") setThemeMode(p.theme);
+      });
     } else {
       disconnect();
     }
@@ -64,6 +72,11 @@
         })
       : undefined,
   );
+
+  // The token page moved into the personal settings.
+  $effect(() => {
+    if (route.path === "/tokens") navigate("/settings/tokens");
+  });
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -142,9 +155,12 @@
       <ProjectView
         project={current.key}
         name={projects.find((p) => p.key === current.key)?.name ?? ""}
+        {user}
         canAdmin={user.is_admin ||
           projects.find((p) => p.key === current.key)?.role === "admin"}
         view={current.view}
+        section={current.section ?? ""}
+        onchange={() => void loadProjects()}
         item={current.item}
       />
     {:else if route.path === "/inbox"}
@@ -152,8 +168,14 @@
     {:else if route.path === "/board"}
       <PageHero title={t("cross.title")} description={t("cross.intro")} />
       <div class="fill"><Board projects={allKeys} /></div>
-    {:else if route.path === "/tokens"}
-      <Tokens />
+    {:else if route.path.startsWith("/admin") && user.is_admin}
+      <Admin {user} section={route.path.split("/")[2] ?? "users"} />
+    {:else if route.path.startsWith("/settings")}
+      <Settings
+        {user}
+        section={route.path.split("/")[2] ?? "profile"}
+        onuser={(u: User) => (user = u)}
+      />
     {:else}
       <h1>{t("notFound.title")}</h1>
       <p><a href="#/">{t("notFound.back")}</a></p>

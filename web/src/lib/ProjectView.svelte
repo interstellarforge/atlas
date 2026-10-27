@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getWorkflow, type Workflow } from "./api";
+  import { getWorkflow, type User, type Workflow } from "./api";
   import BacklogView from "./BacklogView.svelte";
   import Board from "./Board.svelte";
   import { onChange } from "./events.svelte";
@@ -10,21 +10,27 @@
   import MilestonesView from "./MilestonesView.svelte";
   import PageHero from "./PageHero.svelte";
   import { projectColor } from "./projectColor";
+  import ProjectSettings from "./ProjectSettings.svelte";
   import { navigate } from "./router.svelte";
   import { type ProjectViewName, viewPath } from "./routes";
   import TreeView from "./TreeView.svelte";
-  import WorkflowSettings from "./WorkflowSettings.svelte";
 
   let {
     project,
     name = "",
     canAdmin = false,
+    user,
+    section = "",
+    onchange = () => undefined,
     view,
     item,
   }: {
     project: string;
     name?: string;
     canAdmin?: boolean;
+    user: User;
+    section?: string;
+    onchange?: () => void;
     view: ProjectViewName;
     item: string | undefined;
   } = $props();
@@ -120,7 +126,14 @@
       {:else if view === "milestones"}
         <MilestonesView {project} />
       {:else if view === "settings"}
-        <WorkflowSettings {project} {workflow} />
+        <ProjectSettings
+          {project}
+          {name}
+          {section}
+          {workflow}
+          {onchange}
+          {user}
+        />
       {:else}
         <TreeView {project} />
       {/if}

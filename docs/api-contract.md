@@ -21,11 +21,22 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET/POST | `/tokens`, DELETE `/tokens/{id}` | Scoped API tokens |
 | GET | `/projects/{key}/export` | Download a project: JSON (default; workflow, items with checklist, comments, links, attachment metadata, archived items included) or `?format=csv` (key,type,title,description,status,priority,parent,labels,due_at,milestone,archived). Needs read access |
 | POST | `/projects/{key}/import` | Import items into the project in the path (the explicit project mapping; it must exist, needs member role). Body: `{"items":[...]}` (an export file works) or `?format=csv`. Rows carry source `key` and `parent` (a row key or an existing item). `?dry_run=1` validates with the real create rules and writes nothing; `?allow_duplicates=1` imports rows whose type, title and parent already exist (default: skipped and reported). Any row error rejects the whole file (`applied:false`). Report: `created`, `duplicates`, `errors` (row, message), `mapping` (source key to new key). Max 20.000 rows, 32 MiB. Imports items only: comments, checklists, links, attachments and assignees are not imported |
+| PATCH | `/me` | Own profile: `{"name"}` (session only) |
+| PUT | `/me/password` | `{"current","new"}` (min. 8): needs the current password, signs out every other session. Never logged |
+| GET, DELETE | `/me/sessions`, `/me/sessions/{id}` | Own active sessions (`current` marks this one); sign one out |
+| GET, PUT | `/me/preferences` | `{"theme": system/light/dark, "default_view": board/list/backlog/tree, "muted_notifications": [assigned, mention, blocker_done, followed]}`; muted types create no notification |
+| GET, POST, DELETE | `/projects/{key}/tokens[/{id}]` | Tokens limited to exactly this project (project admin, session only). POST `{"name","write","expires_at"?}`; secret shown once; list shows owner, scopes, `last_used_at`, expiry. Owner leaves the project: tokens are revoked |
+| GET, POST, DELETE | `/projects/{key}/item-templates[/{id}]` | Item templates (read: viewer; write: project admin). POST upserts by name: `{"name","type","title_prefix","description","priority","labels","status","checklist"}`. Placeholders `{date}`, `{user}` only |
+| GET, POST, DELETE | `/project-templates[/{id}]` | Project templates (read: any user; write: global admin). POST `{"name","description"}` plus `"from_project": "KEY"` or `"data": {version:1, statuses, transitions, labels, custom_fields, item_templates}`. `POST /projects` takes `"template": id` and applies it in one transaction |
+| GET | `/admin/users` | Global admin, session only |
+| PATCH | `/admin/users/{id}` | `{"is_admin"?, "active"?}`; no self-deactivation, the last active admin stays; deactivating ends sessions, tokens stop working |
+| GET | `/admin/audit` | Audit log newest first; filters `actor`, `operation` (prefix), `target`, `before` (id), `limit` (max 200) |
+| GET | `/admin/instance` | Effective instance settings (read-only, from the environment) and the rights matrix |
 | GET | `/mcp/stats` | Aggregate MCP call metrics per tool (calls, errors, bytes, p95 ms, paginated, too_large); in memory, reset on restart |
 | GET/POST/PATCH | `/projects`, `/projects/{key}` | Projects |
 | GET/POST, PATCH/DELETE `/projects/{key}/milestones[/{id}]` | Milestones with progress (`total`, `done` = active items in a completed status). Changes need a project admin; PATCH `{"name"?,"due_at"?,"released"?}`; delete refused while items use it. Items get one via `milestone` (name or null) on create/update; filter with `?milestone=` |
 | GET/PUT | `/projects/{key}/workflow` | GET: types, hierarchy, statuses, transitions, labels, milestones, custom fields. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change |
-| POST/PATCH/DELETE | `/projects/{key}/statuses[/{id}]` | Manage statuses (project admin); delete refused while items use it |
+| POST/PATCH/DELETE | `/projects/{key}/statuses[/{id}]` | Manage statuses (project admin); delete refused while items use it. PATCH accepts `allow_create` (false: items cannot be created directly in this status, moving in stays allowed; at least one status must stay creatable). Create in a blocked status (also the default one) fails with 422 `rule_violation`, over REST, MCP and import |
 | POST/DELETE | `/projects/{key}/custom-fields[/{name}]` | Custom field definitions (project admin) |
 | GET | `/projects/{key}/members`, PUT/DELETE `/projects/{key}/members/{user}` | Roles: admin, member, viewer |
 | GET/POST | `/users` | List users; create (global admin) |

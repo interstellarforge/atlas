@@ -88,6 +88,7 @@ export interface StatusInfo {
   position: number;
   category: string;
   wip_limit: number | null;
+  allow_create: boolean;
 }
 
 export interface CustomField {
@@ -113,14 +114,23 @@ export interface Workflow {
   hierarchy: Record<string, string[]>;
   statuses: StatusInfo[];
   labels: string[];
+  item_templates: string[];
 }
 
 export async function listProjects(): Promise<Project[]> {
   return (await request<{ items: Project[] }>("GET", "/projects")).items;
 }
 
-export function createProject(key: string, name: string): Promise<Project> {
-  return request<Project>("POST", "/projects", { key, name });
+export function createProject(
+  key: string,
+  name: string,
+  template = 0,
+): Promise<Project> {
+  return request<Project>("POST", "/projects", {
+    key,
+    name,
+    ...(template > 0 && { template }),
+  });
 }
 
 export function getWorkflow(project: string): Promise<Workflow> {
@@ -262,6 +272,7 @@ export function createItem(body: {
   title: string;
   parent?: string;
   status?: string;
+  template?: string;
 }): Promise<Card> {
   return request<Card>("POST", "/items", body);
 }
@@ -536,6 +547,7 @@ export interface Token {
   expires_at: number | null;
   revoked_at: number | null;
   created_at: number;
+  last_used_at?: number | null;
 }
 
 export async function listTokens(): Promise<Token[]> {
@@ -572,4 +584,268 @@ export function updateStatus(
 
 export function deleteStatus(project: string, id: number): Promise<undefined> {
   return request("DELETE", `/projects/${project}/statuses/${String(id)}`);
+}
+
+export interface Preferences {
+  theme: "system" | "light" | "dark";
+  default_view: "board" | "list" | "backlog" | "tree";
+  muted_notifications: string[];
+}
+
+export interface SessionInfo {
+  id: number;
+  created_at: number;
+  expires_at: number;
+  current: boolean;
+}
+
+export async function updateProfile(name: string): Promise<User> {
+  return (await request<{ user: User }>("PATCH", "/me", { name })).user;
+}
+
+export function changePassword(
+  current: string,
+  next: string,
+): Promise<undefined> {
+  return request("PUT", "/me/password", { current, new: next });
+}
+
+export async function listSessions(): Promise<SessionInfo[]> {
+  return (await request<{ items: SessionInfo[] }>("GET", "/me/sessions")).items;
+}
+
+export function revokeSession(id: number): Promise<undefined> {
+  return request("DELETE", `/me/sessions/${String(id)}`);
+}
+
+export function getPreferences(): Promise<Preferences> {
+  return request("GET", "/me/preferences");
+}
+
+export function setPreferences(p: Preferences): Promise<Preferences> {
+  return request("PUT", "/me/preferences", p);
+}
+
+export interface Member {
+  user_id: number;
+  name: string;
+  email: string;
+  role: string;
+}
+
+export async function listMembers(project: string): Promise<Member[]> {
+  return (
+    await request<{ items: Member[] }>("GET", `/projects/${project}/members`)
+  ).items;
+}
+
+export function setMember(
+  project: string,
+  userId: number,
+  role: string,
+): Promise<undefined> {
+  return request("PUT", `/projects/${project}/members/${String(userId)}`, {
+    role,
+  });
+}
+
+export function removeMember(
+  project: string,
+  userId: number,
+): Promise<undefined> {
+  return request("DELETE", `/projects/${project}/members/${String(userId)}`);
+}
+
+export function updateProject(
+  project: string,
+  patch: { name?: string; archived?: boolean },
+): Promise<Project> {
+  return request("PATCH", `/projects/${project}`, patch);
+}
+
+export interface ProjectToken extends Token {
+  owner: string;
+}
+
+export async function listProjectTokens(
+  project: string,
+): Promise<ProjectToken[]> {
+  return (
+    await request<{ items: ProjectToken[] }>(
+      "GET",
+      `/projects/${project}/tokens`,
+    )
+  ).items;
+}
+
+export function createProjectToken(
+  project: string,
+  body: { name: string; write: boolean; expires_at: number | null },
+): Promise<{ token: ProjectToken; secret: string }> {
+  return request("POST", `/projects/${project}/tokens`, body);
+}
+
+export function revokeProjectToken(
+  project: string,
+  id: number,
+): Promise<undefined> {
+  return request("DELETE", `/projects/${project}/tokens/${String(id)}`);
+}
+
+export interface ImportReport {
+  dry_run: boolean;
+  applied: boolean;
+  created: number;
+  duplicates: { row: number; key?: string; message: string }[];
+  errors: { row: number; key?: string; message: string }[];
+  mapping: Record<string, string>;
+}
+
+// Import takes the raw file text (an export JSON, or CSV); dryRun validates without writing.
+export async function importItems(
+  project: string,
+  text: string,
+  format: "json" | "csv",
+  dryRun: boolean,
+): Promise<ImportReport> {
+  const res = await fetch(
+    `/api/v1/projects/${project}/import${query({ format, dry_run: dryRun ? 1 : undefined })}`,
+    { method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: text },
+  );
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: { code?: string; message?: string };
+  } & ImportReport;
+  if (!res.ok)
+    throw new ApiError(
+      res.status,
+      data.error?.code ?? "unknown",
+      data.error?.message ?? res.statusText,
+    );
+  return data;
+}
+
+export interface AdminUser extends User {
+  deactivated_at: number | null;
+  created_at: number;
+}
+
+export interface AuditEntry {
+  id: number;
+  actor: string;
+  operation: string;
+  target: string;
+  changes: string;
+  batch_id?: string;
+  ts: number;
+}
+
+export interface RightRow {
+  action: string;
+  viewer: boolean;
+  member: boolean;
+  admin: boolean;
+}
+
+export async function listAdminUsers(): Promise<AdminUser[]> {
+  return (await request<{ items: AdminUser[] }>("GET", "/admin/users")).items;
+}
+
+export function patchAdminUser(
+  id: number,
+  patch: { is_admin?: boolean; active?: boolean },
+): Promise<undefined> {
+  return request("PATCH", `/admin/users/${String(id)}`, patch);
+}
+
+export function createUser(body: {
+  email: string;
+  name: string;
+  password: string;
+  is_admin: boolean;
+}): Promise<User> {
+  return request("POST", "/users", body);
+}
+
+export async function getAudit(f: {
+  actor: string;
+  operation: string;
+  target: string;
+  before?: number;
+}): Promise<AuditEntry[]> {
+  return (
+    await request<{ items: AuditEntry[] }>(
+      "GET",
+      `/admin/audit${query({ ...f, limit: 50 })}`,
+    )
+  ).items;
+}
+
+export function getInstance(): Promise<{
+  settings: Record<string, string | number | boolean>;
+  rights: RightRow[];
+}> {
+  return request("GET", "/admin/instance");
+}
+
+export interface ItemTemplate {
+  id: number;
+  name: string;
+  type: string;
+  title_prefix: string;
+  description: string;
+  priority: string;
+  labels: string[];
+  status: string;
+  checklist: string[];
+}
+
+export interface ProjectTemplate {
+  id: number;
+  name: string;
+  description: string;
+  data: unknown;
+}
+
+export async function listItemTemplates(
+  project: string,
+): Promise<ItemTemplate[]> {
+  return (
+    await request<{ items: ItemTemplate[] }>(
+      "GET",
+      `/projects/${project}/item-templates`,
+    )
+  ).items;
+}
+
+export function saveItemTemplate(
+  project: string,
+  t: Omit<ItemTemplate, "id">,
+): Promise<ItemTemplate> {
+  return request("POST", `/projects/${project}/item-templates`, t);
+}
+
+export function deleteItemTemplate(
+  project: string,
+  id: number,
+): Promise<undefined> {
+  return request("DELETE", `/projects/${project}/item-templates/${String(id)}`);
+}
+
+export async function listProjectTemplates(): Promise<ProjectTemplate[]> {
+  return (
+    await request<{ items: ProjectTemplate[] }>("GET", "/project-templates")
+  ).items;
+}
+
+export function saveProjectTemplate(body: {
+  name: string;
+  description?: string;
+  from_project?: string;
+  data?: unknown;
+}): Promise<ProjectTemplate> {
+  return request("POST", "/project-templates", body);
+}
+
+export function deleteProjectTemplate(id: number): Promise<undefined> {
+  return request("DELETE", `/project-templates/${String(id)}`);
 }

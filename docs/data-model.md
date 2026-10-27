@@ -32,6 +32,8 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `notifications`, `item_follows` | Per-user inbox (kept until read or deleted) and followed items. `change_events.target_user` limits a signal to one user |
 | `api_tokens` | Hashed token, scopes, project limits, expiry, revoked_at |
 | `idempotency_records` | key, actor, request hash, stored result, created_at |
+| `item_templates` | Per project: name, type, title prefix, description, priority, labels, status, checklist |
+| `project_templates` | Instance-wide: name, description, JSON (schema version 1); built-ins Kanban, Bug tracking, Scrum |
 | `meta` | schema version, database generation id |
 
 Status category enum: `todo`, `active`, `completed`.
@@ -79,3 +81,10 @@ Status category enum: `todo`, `active`, `completed`.
 4. Destructive changes (drop/rename column) use expand/contract across releases.
 5. Every migration that changes `work_items` keeps a test that the seed dataset still loads.
 6. Back up the database file automatically before applying pending migrations.
+
+## Settings, rights and templates (migration 0010)
+
+- `users.deactivated_at` (null = active; sign-in, sessions and tokens stop at once), `users.preferences` (JSON: theme, default view, muted notification types).
+- `api_tokens.last_used_at`, written at most every 5 minutes per token.
+- `project_statuses.allow_create` (default 1).
+- A project token is an `api_tokens` row whose `projects` is exactly `["KEY"]`; it is owned by the admin who created it.

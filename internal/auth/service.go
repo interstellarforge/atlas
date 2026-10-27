@@ -20,6 +20,7 @@ const (
 	tokenPrefix     = "atl_"
 	loginMaxFails   = 5
 	loginFailWindow = 15 * time.Minute
+	lastUsedEvery   = 5 * time.Minute
 )
 
 var (
@@ -45,6 +46,8 @@ type Token struct {
 	ExpiresAt *int64   `json:"expires_at"`
 	RevokedAt *int64   `json:"revoked_at"`
 	CreatedAt int64    `json:"created_at"`
+	// LastUsedAt is when the token last authenticated (updated at most every few minutes).
+	LastUsedAt *int64 `json:"last_used_at"`
 }
 
 type Service struct {
@@ -52,10 +55,12 @@ type Service struct {
 
 	mu    sync.Mutex
 	fails map[string][]time.Time
+	// seen throttles last_used_at writes: token id -> when it was last written.
+	seen map[int64]time.Time
 }
 
 func NewService(d *db.DB) *Service {
-	return &Service{db: d, fails: map[string][]time.Time{}}
+	return &Service{db: d, fails: map[string][]time.Time{}, seen: map[int64]time.Time{}}
 }
 
 // EnsureAdmin creates the first admin when the database has no users.
@@ -99,7 +104,7 @@ func (s *Service) Login(email, password, clientKey string) (user User, session, 
 	}
 
 	var hash string
-	err = s.db.R.QueryRow(`SELECT id, email, name, is_admin, password_hash FROM users WHERE email = ?`, email).
+	err = s.db.R.QueryRow(`SELECT id, email, name, is_admin, password_hash FROM users WHERE email = ? AND deactivated_at IS NULL`, email).
 		Scan(&user.ID, &user.Email, &user.Name, &user.IsAdmin, &hash)
 	ok := false
 	if err == nil {
@@ -135,9 +140,9 @@ func (s *Service) Logout(session string) error {
 func (s *Service) SessionActor(session string) (Actor, error) {
 	var a Actor
 	var exp int64
-	err := s.db.R.QueryRow(`SELECT s.user_id, u.is_admin, s.csrf_token, s.expires_at
-		FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`, hashToken(session)).
-		Scan(&a.UserID, &a.IsAdmin, &a.CSRF, &exp)
+	err := s.db.R.QueryRow(`SELECT s.user_id, u.is_admin, s.csrf_token, s.expires_at, s.rowid
+		FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(session)).
+		Scan(&a.UserID, &a.IsAdmin, &a.CSRF, &exp, &a.SessionID)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && exp < time.Now().UnixMilli()) {
 		return Actor{}, ErrUnauthenticated
 	}
@@ -155,6 +160,12 @@ func (s *Service) User(id int64) (User, error) {
 	return u, err
 }
 
+// NewTokenSecret makes a token: the plaintext (shown once), its display prefix and the hash that is stored.
+func NewTokenSecret() (plain, prefix, hash string) {
+	plain = tokenPrefix + randomToken(32)
+	return plain, plain[:len(tokenPrefix)+4], hashToken(plain)
+}
+
 // CreateToken returns the plaintext token once; only its hash is stored.
 func (s *Service) CreateToken(userID int64, name string, scopes, projects []string, expiresAt *int64) (Token, string, error) {
 	if name == "" || len(scopes) == 0 {
@@ -165,8 +176,7 @@ func (s *Service) CreateToken(userID int64, name string, scopes, projects []stri
 			return Token{}, "", ErrInvalid
 		}
 	}
-	plain := tokenPrefix + randomToken(32)
-	prefix := plain[:len(tokenPrefix)+4]
+	plain, prefix, hash := NewTokenSecret()
 	scopesJSON, _ := json.Marshal(scopes)
 	var projectsJSON any
 	if projects != nil {
@@ -175,7 +185,7 @@ func (s *Service) CreateToken(userID int64, name string, scopes, projects []stri
 	}
 	now := time.Now().UnixMilli()
 	res, err := s.db.W.Exec(`INSERT INTO api_tokens (user_id, name, prefix, token_hash, scopes, projects, expires_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, userID, name, prefix, hashToken(plain), string(scopesJSON), projectsJSON, expiresAt, now)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, userID, name, prefix, hash, string(scopesJSON), projectsJSON, expiresAt, now)
 	if err != nil {
 		return Token{}, "", err
 	}
@@ -184,7 +194,7 @@ func (s *Service) CreateToken(userID int64, name string, scopes, projects []stri
 }
 
 func (s *Service) ListTokens(userID int64) ([]Token, error) {
-	rows, err := s.db.R.Query(`SELECT id, name, prefix, scopes, projects, expires_at, revoked_at, created_at
+	rows, err := s.db.R.Query(`SELECT id, name, prefix, scopes, projects, expires_at, revoked_at, created_at, last_used_at
 		FROM api_tokens WHERE user_id = ? ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
@@ -195,9 +205,12 @@ func (s *Service) ListTokens(userID int64) ([]Token, error) {
 		var t Token
 		var scopes string
 		var projects sql.NullString
-		var exp, rev sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Prefix, &scopes, &projects, &exp, &rev, &t.CreatedAt); err != nil {
+		var exp, rev, used sql.NullInt64
+		if err := rows.Scan(&t.ID, &t.Name, &t.Prefix, &scopes, &projects, &exp, &rev, &t.CreatedAt, &used); err != nil {
 			return nil, err
+		}
+		if used.Valid {
+			t.LastUsedAt = &used.Int64
 		}
 		_ = json.Unmarshal([]byte(scopes), &t.Scopes)
 		if projects.Valid {
@@ -235,7 +248,7 @@ func (s *Service) TokenActor(plain string) (Actor, error) {
 	var projects sql.NullString
 	var exp, rev sql.NullInt64
 	err := s.db.R.QueryRow(`SELECT t.id, t.user_id, u.is_admin, t.scopes, t.projects, t.expires_at, t.revoked_at
-		FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ?`, hashToken(plain)).
+		FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(plain)).
 		Scan(&a.TokenID, &a.UserID, &a.IsAdmin, &scopes, &projects, &exp, &rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Actor{}, ErrUnauthenticated
@@ -247,11 +260,26 @@ func (s *Service) TokenActor(plain string) (Actor, error) {
 		return Actor{}, ErrUnauthenticated
 	}
 	a.Kind = KindToken
+	s.touch(a.TokenID)
 	_ = json.Unmarshal([]byte(scopes), &a.Scopes)
 	if projects.Valid {
 		_ = json.Unmarshal([]byte(projects.String), &a.Projects)
 	}
 	return a, nil
+}
+
+// touch records that a token was used, at most once per lastUsedEvery: one write per request would
+// burden the single writer for a hint nobody needs to the second.
+func (s *Service) touch(id int64) {
+	s.mu.Lock()
+	last, ok := s.seen[id]
+	if ok && time.Since(last) < lastUsedEvery {
+		s.mu.Unlock()
+		return
+	}
+	s.seen[id] = time.Now()
+	s.mu.Unlock()
+	_, _ = s.db.W.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, time.Now().UnixMilli(), id)
 }
 
 // PurgeExpiredSessions is cheap housekeeping; call at startup.

@@ -9,10 +9,10 @@
   import { t } from "./i18n";
   import Icon from "./Icon.svelte";
   import type { IconName } from "./icons";
-  import { layout, toggleSidebar } from "./prefs.svelte";
+  import { account, layout, toggleSidebar } from "./prefs.svelte";
   import { projectColor } from "./projectColor";
   import { route } from "./router.svelte";
-  import { matchProject } from "./routes";
+  import { matchProject, type ProjectViewName, viewPath } from "./routes";
   import { theme, toggleTheme } from "./theme.svelte";
 
   let {
@@ -38,7 +38,12 @@
     href: string;
     path: string;
     icon: IconName;
-    label: "nav.projects" | "nav.overview" | "nav.inbox" | "nav.tokens";
+    label:
+      | "nav.projects"
+      | "nav.overview"
+      | "nav.inbox"
+      | "nav.settings"
+      | "nav.admin";
   }[] = [
     { href: "#/", path: "/", icon: "projects", label: "nav.projects" },
     {
@@ -48,8 +53,20 @@
       label: "nav.overview",
     },
     { href: "#/inbox", path: "/inbox", icon: "inbox", label: "nav.inbox" },
-    { href: "#/tokens", path: "/tokens", icon: "key", label: "nav.tokens" },
+    {
+      href: "#/settings/profile",
+      path: "/settings",
+      icon: "settings",
+      label: "nav.settings",
+    },
   ];
+  const adminLink = {
+    href: "#/admin/users",
+    path: "/admin",
+    icon: "key",
+    label: "nav.admin",
+  } as const;
+  const visibleLinks = $derived(user.is_admin ? [...links, adminLink] : links);
 
   const viewLabel = {
     board: "project.board",
@@ -60,6 +77,19 @@
     settings: "project.settings",
   } as const;
 
+  const views = ["board", "list", "backlog", "tree"];
+  // The user's chosen default view for a project (Settings > Preferences).
+  function defaultView(): ProjectViewName {
+    return (
+      views.includes(account.defaultView) ? account.defaultView : "board"
+    ) as ProjectViewName;
+  }
+
+  function isActive(path: string): boolean {
+    if (path === "/") return route.path === "/" || Boolean(current);
+    return route.path === path || route.path.startsWith(`${path}/`);
+  }
+
   const crumbs = $derived.by(() => {
     if (current)
       return [
@@ -67,7 +97,7 @@
         { label: current.key, href: `#/p/${current.key}` },
         { label: t(viewLabel[current.view]) },
       ];
-    const link = links.find((l) => l.path === route.path);
+    const link = visibleLinks.find((l) => l.path !== "/" && isActive(l.path));
     return [{ label: link ? t(link.label) : t("notFound.title") }];
   });
 
@@ -143,14 +173,12 @@
   </div>
 
   <nav aria-label={t("nav.main")} class="main">
-    {#each links as link (link.path)}
+    {#each visibleLinks as link (link.path)}
       <a
         href={link.href}
         class="navlink"
         title={collapsed ? t(link.label) : undefined}
-        aria-current={route.path === link.path || (link.path === "/" && current)
-          ? "page"
-          : undefined}
+        aria-current={isActive(link.path) ? "page" : undefined}
       >
         <Icon name={link.icon} />
         <span class="label" class:sr-only={collapsed}>{t(link.label)}</span>
@@ -169,7 +197,7 @@
       {#each projects as project (project.key)}
         <li>
           <a
-            href="#/p/{project.key}"
+            href="#{viewPath(project.key, defaultView())}"
             class="projlink"
             title={collapsed ? project.name : undefined}
             aria-current={current?.key === project.key ? "page" : undefined}
@@ -201,11 +229,18 @@
   </div>
 
   <div class="account">
-    <Avatar name={user.name} size={32} />
-    <span class="who" class:sr-only={collapsed}>
-      <span class="whoname">{user.name}</span>
-      <span class="whoemail">{user.email}</span>
-    </span>
+    <a
+      class="me"
+      href="#/settings/profile"
+      title={collapsed ? t("nav.settings") : undefined}
+      aria-label={collapsed ? t("nav.settings") : undefined}
+    >
+      <Avatar name={user.name} size={32} />
+      <span class="who" class:sr-only={collapsed}>
+        <span class="whoname">{user.name}</span>
+        <span class="whoemail">{user.email}</span>
+      </span>
+    </a>
     <button
       type="button"
       class="iconbtn"
@@ -517,6 +552,23 @@
   .collapsed .account {
     flex-direction: column;
   }
+  .me {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 4px;
+    border-radius: var(--atlas-radius-sm);
+    color: inherit;
+    text-decoration: none;
+  }
+  .me:hover {
+    background: var(--color-soft);
+  }
+  .collapsed .me {
+    flex: none;
+  }
   .who {
     flex: 1;
   }
@@ -591,6 +643,10 @@
     padding: 24px 28px 20px;
     gap: var(--space-4);
     overflow-y: auto;
+  }
+  /* Pages stack in a scrolling column: sections keep their height instead of shrinking to nothing. */
+  main > :global(*) {
+    flex-shrink: 0;
   }
   .backdrop {
     position: fixed;

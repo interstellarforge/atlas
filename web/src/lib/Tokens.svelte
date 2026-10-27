@@ -11,6 +11,8 @@
   import Icon from "./Icon.svelte";
   import PageHero from "./PageHero.svelte";
 
+  let { embedded = false }: { embedded?: boolean } = $props();
+
   let tokens = $state<Token[]>([]);
   let loaded = $state(false);
   let name = $state("");
@@ -76,7 +78,9 @@
   }
 </script>
 
-<PageHero title={t("tokens.title")} description={t("tokens.intro")} />
+{#if !embedded}
+  <PageHero title={t("tokens.title")} description={t("tokens.intro")} />
+{/if}
 
 <div class="grid">
   <section class="panel" aria-labelledby="tokens-list">
@@ -100,7 +104,9 @@
                   ? token.projects.join(", ")
                   : t("tokens.allProjects")} · {t("tokens.created", {
                   date: dateFormat.format(token.created_at),
-                })}</span
+                })}{token.last_used_at
+                  ? ` · ${t("psettings.lastUsed", { date: dateFormat.format(token.last_used_at) })}`
+                  : ` · ${t("psettings.neverUsed")}`}</span
               >
             </div>
             {#if token.revoked_at}

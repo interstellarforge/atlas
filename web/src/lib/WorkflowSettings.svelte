@@ -89,6 +89,7 @@
         <span role="columnheader">{t("workflow.status")}</span>
         <span role="columnheader">{t("workflow.category")}</span>
         <span role="columnheader">{t("workflow.wip")}</span>
+        <span role="columnheader">{t("workflow.allowCreate")}</span>
         <span role="columnheader" class="sr-only">{t("workflow.actions")}</span>
       </div>
       {#each statuses as status, i (status.id)}
@@ -148,6 +149,19 @@
             value={status.wip_limit ?? ""}
             onchange={(e) => void setWip(status, e)}
           />
+          <label class="toggle">
+            <input
+              type="checkbox"
+              aria-label={t("workflow.allowCreateOf", { name: status.name })}
+              checked={status.allow_create}
+              onchange={(e) =>
+                void run(() =>
+                  updateStatus(project, status.id, {
+                    allow_create: e.currentTarget.checked,
+                  }),
+                )}
+            />
+          </label>
           <button
             type="button"
             class="mini danger"
@@ -234,7 +248,7 @@
   }
   .row {
     display: grid;
-    grid-template-columns: 76px minmax(0, 1.6fr) 150px 130px 44px;
+    grid-template-columns: 76px minmax(0, 1.6fr) 150px 130px 70px 44px;
     align-items: center;
     gap: var(--space-3);
     min-height: 56px;
@@ -277,6 +291,10 @@
   }
   .wip {
     width: 100%;
+  }
+  .toggle {
+    display: flex;
+    justify-content: center;
   }
   .add {
     display: grid;

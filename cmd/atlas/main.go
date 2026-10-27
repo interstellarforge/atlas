@@ -110,7 +110,10 @@ func run() error {
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, Media: uploads, MaxUpload: cfg.UploadMaxBytes, CookieSecure: cfg.CookieSecure,
-			SPA: web.Dist(), MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: cfg.MCPWritesPerHour, Metrics: mcpMetrics}), MCPStats: mcpMetrics}).Handler(),
+			SPA: web.Dist(), MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: cfg.MCPWritesPerHour, Metrics: mcpMetrics}), MCPStats: mcpMetrics,
+			Instance: map[string]any{"upload_max_mb": cfg.UploadMaxBytes >> 20, "upload_max_megapixels": cfg.UploadMaxMegapixels / 1_000_000,
+				"mcp_writes_per_hour": cfg.MCPWritesPerHour, "event_retention_days": int(cfg.EventRetention.Hours() / 24), "cookie_secure": cfg.CookieSecure,
+				"synchronous": cfg.Synchronous}}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		// Open event streams watch their request context; cancelling it on SIGTERM lets Shutdown finish promptly.

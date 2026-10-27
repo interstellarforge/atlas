@@ -15,6 +15,8 @@
     getCard,
     getCrossBoard,
     getItems,
+    type ItemTemplate,
+    listItemTemplates,
     moveItem,
     type Workflow,
   } from "./api";
@@ -72,14 +74,32 @@
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let dirty = false;
 
+  let itemTemplates = $state<ItemTemplate[]>([]);
+  let newTemplate = $state("");
+
+  // Choosing a template pre-fills type and status (still editable); the server adds the rest on create.
+  function pickTemplate(): void {
+    const tpl = itemTemplates.find((x) => x.name === newTemplate);
+    if (!tpl) return;
+    newType = tpl.type;
+    if (
+      workflow?.statuses.some((st) => st.name === tpl.status && st.allow_create)
+    )
+      newStatus = tpl.status;
+  }
+
   function openNew(status?: string): void {
     if (status) newStatus = status;
+    newTemplate = "";
+    if (project !== undefined && (workflow?.item_templates.length ?? 0) > 0)
+      void listItemTemplates(project).then((list) => (itemTemplates = list));
     dialog?.showModal();
   }
 
   // New cards start in the first status unless another is chosen.
   $effect(() => {
-    if (!newStatus && workflow) newStatus = workflow.statuses[0]?.name ?? "";
+    if (!newStatus && workflow)
+      newStatus = workflow.statuses.find((st) => st.allow_create)?.name ?? "";
   });
 
   async function load(): Promise<void> {
@@ -420,6 +440,7 @@
         type: newType,
         title: newTitle,
         ...(newStatus && { status: newStatus }),
+        ...(newTemplate && { template: newTemplate }),
       });
       newTitle = "";
       error = "";
@@ -466,6 +487,17 @@
     <dialog class="newdialog" bind:this={dialog} aria-labelledby="new-title">
       <form class="add" onsubmit={add}>
         <h2 id="new-title">{t("board.newItem")}</h2>
+        {#if itemTemplates.length > 0}
+          <label>
+            {t("board.template")}
+            <select bind:value={newTemplate} onchange={pickTemplate}>
+              <option value="">{t("board.noTemplate")}</option>
+              {#each itemTemplates as tpl (tpl.id)}
+                <option value={tpl.name}>{tpl.name}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
         <label>
           {t("board.type")}
           <select bind:value={newType}>
@@ -486,7 +518,7 @@
         <label>
           {t("board.status")}
           <select bind:value={newStatus}>
-            {#each workflow.statuses as st (st.id)}
+            {#each workflow.statuses.filter((st) => st.allow_create) as st (st.id)}
               <option value={st.name}>{st.name}</option>
             {/each}
           </select>
@@ -522,6 +554,15 @@
         <header>
           <span class="dot" aria-hidden="true"></span>
           <h2>{column.status.name}</h2>
+          {#if !cross && !column.status.allow_create}
+            <span
+              class="lock"
+              role="img"
+              title={t("board.createBlocked")}
+              aria-label={t("board.createBlocked")}
+              ><Icon name="lock" size={14} /></span
+            >
+          {/if}
           <span class="count" class:warn={column.over_wip}>
             {column.status.wip_limit
               ? t("board.wip", {
@@ -537,7 +578,7 @@
         <div class="body">
           {#if ready && column.items.length === 0}
             <EmptyState compact icon="board" title={t("board.empty")}>
-              {#if !cross}
+              {#if !cross && column.status.allow_create}
                 <button
                   type="button"
                   class="addhere"
@@ -579,7 +620,7 @@
             <div class="drop" style:top="{drag.over.top}px"></div>
           {/if}
         </div>
-        {#if !cross && column.items.length > 0}
+        {#if !cross && column.items.length > 0 && column.status.allow_create}
           <button
             type="button"
             class="addbtn"
@@ -742,6 +783,10 @@
   .count.warn {
     color: var(--color-danger);
     border-color: var(--color-danger);
+  }
+  .lock {
+    display: inline-flex;
+    color: var(--color-muted);
   }
   .warn-text {
     color: var(--color-danger);

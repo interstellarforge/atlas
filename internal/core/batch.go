@@ -151,6 +151,9 @@ func (s *Service) Batch(ctx context.Context, a auth.Actor, ops []BatchOp, partia
 			if err != nil {
 				return out, err
 			}
+			if len(it.Warnings) > 0 {
+				m["warnings"] = it.Warnings
+			}
 			out.Results[i].Item = m
 			continue
 		}

@@ -60,6 +60,8 @@ type Item struct {
 	ArchivedAt     *int64         `json:"archived_at"`
 	CreatedAt      int64          `json:"created_at"`
 	UpdatedAt      int64          `json:"updated_at"`
+	// Warnings are set on a freshly created item when its template no longer fitted (not stored).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // itemRow is an Item plus the internal ids the services need.
@@ -237,9 +239,26 @@ type CreateItem struct {
 	Labels      []string
 	CustomData  map[string]any
 	Milestone   string
+	// Template names an item template of the project; its type, description, priority, labels, status
+	// and checklist fill what the caller left empty, and its title prefix is put before the title.
+	Template string
 }
 
+// CreateItem creates one item, applying its template first when one is named.
 func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (Item, error) {
+	var checklist, warnings []string
+	if in.Template != "" {
+		var err error
+		if in, checklist, warnings, err = s.applyItemTemplate(a, in); err != nil {
+			return Item{}, err
+		}
+	}
+	it, err := s.createItem(ctx, a, in, checklist)
+	it.Warnings = warnings
+	return it, err
+}
+
+func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, checklist []string) (Item, error) {
 	in.Title = strings.TrimSpace(in.Title)
 	if in.Title == "" || len(in.Title) > maxTitleLen {
 		return Item{}, invalid("title is required (max %d characters)", maxTitleLen)
@@ -287,6 +306,9 @@ func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (
 		if err != nil {
 			return err
 		}
+		if err := checkCreatable(tx, statusID); err != nil {
+			return err
+		}
 		milestoneID, err := resolveMilestone(tx, p.ID, in.Milestone)
 		if err != nil {
 			return err
@@ -332,6 +354,11 @@ func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (
 		if err := setLabels(tx, p.ID, id, in.Labels); err != nil {
 			return err
 		}
+		for _, text := range checklist {
+			if _, err := tx.Exec(`INSERT INTO checklist_items (item_id, text, done, position) VALUES (?, ?, 0, (SELECT COALESCE(MAX(position), 0) + 1 FROM checklist_items WHERE item_id = ?))`, id, text, id); err != nil {
+				return err
+			}
+		}
 		if len(rank) > maxRankLen {
 			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, statusID); err != nil {
 				return err
@@ -364,6 +391,19 @@ func resolveStatus(q queryer, projectID int64, name string) (int64, error) {
 		return 0, invalid("unknown status %q", name)
 	}
 	return id, err
+}
+
+// checkCreatable refuses to create an item directly in a status that blocks it (allow_create = 0).
+func checkCreatable(q queryer, statusID int64) error {
+	var name string
+	var allowed bool
+	if err := q.QueryRow(`SELECT name, allow_create FROM project_statuses WHERE id = ?`, statusID).Scan(&name, &allowed); err != nil {
+		return err
+	}
+	if !allowed {
+		return rule("items cannot be created in status %q; create it in another status and move it", name)
+	}
+	return nil
 }
 
 func checkAssignee(q queryer, projectID int64, assignee *int64) error {

@@ -56,3 +56,8 @@ export function toggleSidebar(): void {
     /* storage unavailable: the choice just won't persist */
   }
 }
+
+// Server-side preferences of the signed-in user (theme, default view, muted notifications).
+export const account = $state<{ defaultView: string }>({
+  defaultView: "board",
+});

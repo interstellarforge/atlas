@@ -68,7 +68,7 @@ func (s *Service) fanOut(tx *sql.Tx, a auth.Actor, c change) error {
 		}
 		if ok, err := s.canRead(tx, n.User, pk); err != nil {
 			return err
-		} else if !ok {
+		} else if !ok || muted(tx, n.User, n.Type) {
 			continue
 		}
 		now := s.nowMs()

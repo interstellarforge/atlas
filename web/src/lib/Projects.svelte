@@ -4,7 +4,9 @@
     createProject,
     emptyFilters,
     getBoard,
+    listProjectTemplates,
     type Project,
+    type ProjectTemplate,
   } from "./api";
   import EmptyState from "./EmptyState.svelte";
   import { t } from "./i18n";
@@ -20,6 +22,9 @@
   let name = $state("");
   let error = $state("");
   let query = $state("");
+  let template = $state("0");
+  let projectTemplates = $state<ProjectTemplate[]>([]);
+  void listProjectTemplates().then((list) => (projectTemplates = list));
   let counts = $state<
     Record<string, { total: number; active: number; done: number }>
   >({});
@@ -54,7 +59,7 @@
     event.preventDefault();
     error = "";
     try {
-      await createProject(key, name);
+      await createProject(key, name, Number(template));
       key = "";
       name = "";
       creating = false;
@@ -96,6 +101,17 @@
         {t("projects.name")}
         <input bind:value={name} required />
       </label>
+      {#if projectTemplates.length > 0}
+        <label>
+          {t("projects.template")}
+          <select bind:value={template}>
+            <option value="0">{t("projects.defaultTemplate")}</option>
+            {#each projectTemplates as tpl (tpl.id)}
+              <option value={String(tpl.id)}>{tpl.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       <button class="primary" type="submit">{t("projects.submit")}</button>
     </div>
     {#if error}<p class="error" role="alert">{error}</p>{/if}

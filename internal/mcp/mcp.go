@@ -420,6 +420,7 @@ type opIn struct {
 	CustomData  map[string]any `json:"custom_data,omitempty" jsonschema:"custom field values (update merges; null removes a key)"`
 	Archived    *bool          `json:"archived,omitempty" jsonschema:"update: archive or restore"`
 	Milestone   string         `json:"milestone,omitempty" jsonschema:"milestone name (see workflow_get)"`
+	Template    string         `json:"template,omitempty" jsonschema:"create: name of an item template of the project (see workflow_get); fills type, description, priority, labels, status and checklist you leave out"`
 	Clear       []string       `json:"clear,omitempty" jsonschema:"update: fields to set to null: assignee, due_at, parent, milestone"`
 	After       string         `json:"after,omitempty" jsonschema:"move: place after this item key"`
 	Before      string         `json:"before,omitempty" jsonschema:"move: place before this item key"`
@@ -436,7 +437,7 @@ func (o opIn) toCore() core.BatchOp {
 		}
 		op.Create = core.CreateItem{Project: o.Project, Type: o.Type, Title: o.Title, Description: desc, Parent: o.Parent,
 			Status: o.Status, Priority: o.Priority, Assignee: o.Assignee, DueAt: o.DueAt, Labels: o.Labels, CustomData: o.CustomData,
-			Milestone: o.Milestone}
+			Milestone: o.Milestone, Template: o.Template}
 	case "update":
 		p := map[string]any{}
 		if o.Title != "" {
@@ -491,11 +492,14 @@ func workflowView(w core.Workflow) map[string]any {
 		if st.WIPLimit != nil {
 			m["wip_limit"] = *st.WIPLimit
 		}
+		if !st.AllowCreate {
+			m["allow_create"] = false // items cannot be created here, only moved in
+		}
 		statuses = append(statuses, m)
 	}
 	return map[string]any{
 		"project": w.Project, "types": w.Types, "parents": w.Hierarchy, "statuses": statuses,
-		"transitions": w.Transitions, "labels": w.Labels, "milestones": w.Milestones, "custom_fields": w.CustomFields,
+		"transitions": w.Transitions, "labels": w.Labels, "item_templates": w.ItemTemplates, "milestones": w.Milestones, "custom_fields": w.CustomFields,
 	}
 }
 

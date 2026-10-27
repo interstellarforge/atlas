@@ -31,6 +31,8 @@ type Status struct {
 	Position int    `json:"position"`
 	Category string `json:"category"`
 	WIPLimit *int   `json:"wip_limit"`
+	// AllowCreate false blocks creating items directly in this status; moving into it stays allowed.
+	AllowCreate bool `json:"allow_create"`
 }
 
 type Transition struct {
@@ -55,6 +57,8 @@ type Workflow struct {
 	Labels       []string            `json:"labels"`
 	Milestones   []Milestone         `json:"milestones"`
 	CustomFields []CustomField       `json:"custom_fields"`
+	// ItemTemplates are the names of the project's item templates (see /item-templates for their content).
+	ItemTemplates []string `json:"item_templates"`
 }
 
 func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Workflow, error) {
@@ -100,12 +104,15 @@ func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Wo
 	if w.Milestones, err = milestones(s.db.R, p.ID); err != nil {
 		return w, err
 	}
-	w.CustomFields, err = s.customFields(s.db.R, p.ID)
+	if w.CustomFields, err = s.customFields(s.db.R, p.ID); err != nil {
+		return w, err
+	}
+	w.ItemTemplates, err = itemTemplateNames(s.db.R, p.ID)
 	return w, err
 }
 
 func statuses(q queryer, projectID int64) ([]Status, error) {
-	rows, err := q.Query(`SELECT id, name, position, category, wip_limit FROM project_statuses WHERE project_id = ? ORDER BY position, id`, projectID)
+	rows, err := q.Query(`SELECT id, name, position, category, wip_limit, allow_create FROM project_statuses WHERE project_id = ? ORDER BY position, id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +121,7 @@ func statuses(q queryer, projectID int64) ([]Status, error) {
 	for rows.Next() {
 		var st Status
 		var wip sql.NullInt64
-		if err := rows.Scan(&st.ID, &st.Name, &st.Position, &st.Category, &wip); err != nil {
+		if err := rows.Scan(&st.ID, &st.Name, &st.Position, &st.Category, &wip, &st.AllowCreate); err != nil {
 			return nil, err
 		}
 		if wip.Valid {
@@ -151,7 +158,7 @@ func (s *Service) AddStatus(ctx context.Context, a auth.Actor, key, name, catego
 		if err != nil {
 			return err
 		}
-		st = Status{Name: name, Position: pos, Category: category, WIPLimit: wip}
+		st = Status{Name: name, Position: pos, Category: category, WIPLimit: wip, AllowCreate: true}
 		st.ID, _ = res.LastInsertId()
 		return s.journal(ctx, tx, a, change{Operation: "status.create", Target: key, Event: "project.updated",
 			Project: key, Changes: map[string]any{"status": name}})
@@ -196,6 +203,21 @@ func (s *Service) UpdateStatus(ctx context.Context, a auth.Actor, key string, id
 					return invalid("position must be an integer")
 				}
 				col, val = "position", n
+			case "allow_create":
+				b, ok := v.(bool)
+				if !ok {
+					return invalid("allow_create must be true or false")
+				}
+				if !b {
+					var others int
+					if err := tx.QueryRow(`SELECT COUNT(*) FROM project_statuses WHERE project_id = ? AND id <> ? AND allow_create = 1`, p.ID, id).Scan(&others); err != nil {
+						return err
+					}
+					if others == 0 {
+						return rule("at least one status must allow creating items")
+					}
+				}
+				col, val = "allow_create", b
 			case "wip_limit":
 				if v == nil {
 					col, val = "wip_limit", nil
