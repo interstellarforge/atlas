@@ -3,6 +3,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** On a 409: the current state of the thing that was changed elsewhere. */
+    readonly current?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -41,13 +43,18 @@ async function request<T>(
   });
   if (res.status === 204) return undefined as T;
   const data = (await res.json().catch(() => ({}))) as {
-    error?: { code?: string; message?: string };
+    error?: {
+      code?: string;
+      message?: string;
+      current?: Record<string, unknown>;
+    };
   };
   if (!res.ok) {
     throw new ApiError(
       res.status,
       data.error?.code ?? "unknown",
       data.error?.message ?? res.statusText,
+      data.error?.current,
     );
   }
   return data as T;
@@ -100,6 +107,7 @@ export interface Project {
   repository?: Repository | null;
   archived_at?: number | null;
   created_at?: number;
+  time_tracking?: boolean;
 }
 
 export interface StatusInfo {
@@ -139,6 +147,8 @@ export interface Workflow {
   item_templates: string[];
   /** Statuses of one category share a board column. */
   merge_columns: boolean;
+  /** Members may book time on items. */
+  time_tracking: boolean;
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -469,13 +479,18 @@ export async function uploadAttachment(
     body,
   });
   const data = (await res.json().catch(() => ({}))) as {
-    error?: { code?: string; message?: string };
+    error?: {
+      code?: string;
+      message?: string;
+      current?: Record<string, unknown>;
+    };
   };
   if (!res.ok) {
     throw new ApiError(
       res.status,
       data.error?.code ?? "unknown",
       data.error?.message ?? res.statusText,
+      data.error?.current,
     );
   }
   return data as unknown as Attachment;
@@ -1120,4 +1135,325 @@ export function saveInstanceItemTemplate(
 
 export function deleteInstanceItemTemplate(id: number): Promise<undefined> {
   return request("DELETE", `/item-templates/${String(id)}`);
+}
+
+// ---- progress, timeline, time tracking (ADR-0014) ----
+
+export interface StatusCount {
+  id: number;
+  name: string;
+  category: string;
+  count: number;
+}
+
+export interface Progress {
+  total: number;
+  categories: Record<"todo" | "active" | "completed", number>;
+  statuses: StatusCount[];
+  priorities: Record<string, number>;
+  types: Record<string, number>;
+}
+
+export function getProgress(project: string): Promise<Progress> {
+  return request("GET", `/projects/${project}/progress`);
+}
+
+export interface TimelineItem {
+  key: string;
+  type: string;
+  title: string;
+  status: string;
+  category: string;
+  start_at: number;
+  due_at: number;
+}
+
+export interface Timeline {
+  milestones: Milestone[];
+  items: TimelineItem[];
+  truncated: boolean;
+}
+
+export function getTimeline(
+  project: string,
+  from: number,
+  to: number,
+): Promise<Timeline> {
+  return request(
+    "GET",
+    `/projects/${project}/timeline?from=${String(from)}&to=${String(to)}`,
+  );
+}
+
+export interface ActivityEntry {
+  id: number;
+  actor: string;
+  operation: string;
+  target: string;
+  changes: string;
+  at: number;
+}
+
+export async function getActivity(
+  project: string,
+  before = 0,
+): Promise<ActivityEntry[]> {
+  return (
+    await request<{ items: ActivityEntry[] }>(
+      "GET",
+      `/projects/${project}/activity${before ? `?before=${String(before)}` : ""}`,
+    )
+  ).items;
+}
+
+export function setTimeTracking(
+  project: string,
+  enabled: boolean,
+): Promise<undefined> {
+  return request("PUT", `/projects/${project}/time-tracking`, { enabled });
+}
+
+export interface TimeEntry {
+  id: number;
+  item: string;
+  title?: string;
+  user_id: number;
+  user: string;
+  status: string;
+  minutes: number;
+  spent_on: string;
+  note: string;
+}
+
+export async function getItemTime(key: string): Promise<TimeEntry[]> {
+  return (await request<{ items: TimeEntry[] }>("GET", `/items/${key}/time`))
+    .items;
+}
+
+export function logTime(
+  key: string,
+  duration: string,
+  date: string,
+  note: string,
+): Promise<TimeEntry> {
+  return request("POST", `/items/${key}/time`, { duration, date, note });
+}
+
+export function updateTime(
+  project: string,
+  id: number,
+  patch: { duration?: string; date?: string; note?: string },
+): Promise<TimeEntry> {
+  return request("PATCH", `/projects/${project}/time/${String(id)}`, patch);
+}
+
+export function deleteTime(project: string, id: number): Promise<undefined> {
+  return request("DELETE", `/projects/${project}/time/${String(id)}`);
+}
+
+export interface TimeBucket {
+  key: string;
+  label?: string;
+  minutes: number;
+}
+
+export interface TimeSummary {
+  total_minutes: number;
+  entries: number;
+  items: TimeBucket[];
+  people: TimeBucket[];
+  statuses: TimeBucket[];
+  periods: TimeBucket[];
+}
+
+export interface TimeQuery {
+  from: string;
+  to: string;
+  user: string;
+  period: string;
+}
+
+function timeParams(q: TimeQuery): string {
+  const params = new URLSearchParams();
+  for (const k of ["from", "to", "user", "period"] as const)
+    if (q[k]) params.set(k, q[k]);
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+export function getTimeSummary(
+  project: string,
+  q: TimeQuery,
+): Promise<TimeSummary> {
+  return request("GET", `/projects/${project}/time${timeParams(q)}`);
+}
+
+export function timeExportUrl(project: string, q: TimeQuery): string {
+  return `/api/v1/projects/${project}/time/export${timeParams(q)}`;
+}
+
+// ---- project context (ADR-0015) ----
+
+export const CONTEXT_CATEGORIES = [
+  "architecture",
+  "decision",
+  "convention",
+  "pitfall",
+  "dependency",
+  "reference",
+] as const;
+export type ContextCategory = (typeof CONTEXT_CATEGORIES)[number];
+export const CONTEXT_SOURCE_TYPES = ["file", "adr", "ticket", "url"] as const;
+export type ContextSourceType = (typeof CONTEXT_SOURCE_TYPES)[number];
+
+export interface ContextSource {
+  type: ContextSourceType;
+  path?: string;
+  ticket?: string;
+  url?: string;
+  repository?: string;
+  commit_sha?: string;
+  content_hash?: string;
+  note?: string;
+  verified_at?: number | null;
+}
+
+export interface ContextEntry {
+  key: string;
+  category: ContextCategory;
+  title: string;
+  summary: string;
+  /** Only present when one entry is read. */
+  body?: string;
+  status: "active" | "superseded" | "archived";
+  superseded_by?: string;
+  verification_state: "verified" | "unverified" | "stale";
+  source_kind: string;
+  pinned: boolean;
+  version: number;
+  updated_at: number;
+  verified_at: number | null;
+  verified_by?: string;
+  sources: ContextSource[];
+}
+
+export interface ContextList {
+  context_version: number;
+  items: ContextEntry[];
+  warnings?: string[];
+  next_cursor?: string;
+}
+
+export interface ContextQuery {
+  q: string;
+  category: string;
+  status: string;
+}
+
+export function getContextList(
+  project: string,
+  q: ContextQuery,
+): Promise<ContextList> {
+  const params = new URLSearchParams({ limit: "200" });
+  if (q.q) params.set("q", q.q);
+  if (q.category) params.set("category", q.category);
+  if (q.status) params.set("status", q.status);
+  return request("GET", `/projects/${project}/context?${params.toString()}`);
+}
+
+export function getContextEntry(
+  project: string,
+  key: string,
+): Promise<ContextEntry> {
+  return request("GET", `/projects/${project}/context/${key}`);
+}
+
+export interface ContextDraft {
+  category: ContextCategory;
+  title: string;
+  summary: string;
+  body: string;
+  pinned: boolean;
+  sources: ContextSource[];
+}
+
+export async function createContext(
+  project: string,
+  draft: ContextDraft,
+): Promise<ContextEntry> {
+  return (
+    await request<{ entry: ContextEntry }>(
+      "POST",
+      `/projects/${project}/context`,
+      draft,
+    )
+  ).entry;
+}
+
+export async function updateContext(
+  project: string,
+  key: string,
+  version: number,
+  draft: ContextDraft,
+): Promise<ContextEntry> {
+  return (
+    await request<{ entry: ContextEntry }>(
+      "PATCH",
+      `/projects/${project}/context/${key}`,
+      { ...draft, version },
+    )
+  ).entry;
+}
+
+export async function archiveContext(
+  project: string,
+  key: string,
+): Promise<ContextEntry> {
+  return (
+    await request<{ entry: ContextEntry }>(
+      "DELETE",
+      `/projects/${project}/context/${key}`,
+    )
+  ).entry;
+}
+
+export async function verifyContext(
+  project: string,
+  key: string,
+  version: number,
+): Promise<ContextEntry> {
+  return (
+    await request<{ entry: ContextEntry }>(
+      "POST",
+      `/projects/${project}/context/${key}/verify`,
+      { version },
+    )
+  ).entry;
+}
+
+export async function supersedeContext(
+  project: string,
+  key: string,
+  by: string,
+  version: number,
+): Promise<ContextEntry> {
+  return (
+    await request<{ entry: ContextEntry }>(
+      "POST",
+      `/projects/${project}/context/${key}/supersede`,
+      { by, version },
+    )
+  ).entry;
+}
+
+/** The answer of GET .../context/bootstrap exactly as an agent receives it, with its size. */
+export async function getContextPreview(
+  project: string,
+): Promise<{ json: string; bytes: number }> {
+  const data = await request<unknown>(
+    "GET",
+    `/projects/${project}/context/bootstrap`,
+  );
+  const json = JSON.stringify(data, null, 2);
+  return { json, bytes: new TextEncoder().encode(JSON.stringify(data)).length };
 }

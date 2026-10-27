@@ -135,6 +135,8 @@ type Project struct {
 	MergeColumns bool `json:"merge_columns"`
 	// Repository is the linked git repository, or null (ADR-0013).
 	Repository *repo.Repo `json:"repository"`
+	// TimeTracking lets members book time on items (ADR-0014).
+	TimeTracking bool `json:"time_tracking"`
 }
 
 // linkedRepo rebuilds the repository link stored on a project row.
@@ -163,8 +165,8 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	var p Project
 	var archived sql.NullInt64
 	var repoURL, repoBranch string
-	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_columns, repo_url, repo_branch FROM projects WHERE key = ?`, key).
-		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns, &repoURL, &repoBranch)
+	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_columns, repo_url, repo_branch, time_tracking FROM projects WHERE key = ?`, key).
+		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns, &repoURL, &repoBranch, &p.TimeTracking)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !a.CanProject(p.Key)) {
 		return Project{}, "", ErrNotFound
 	}

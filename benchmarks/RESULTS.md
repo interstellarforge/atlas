@@ -102,3 +102,34 @@ Low-end hardware, concurrent writers under load, uploads, reparenting large subt
 ## Merged board columns (SET, 2026-10-27)
 
 Core level (`svc.Board`, no HTTP), Apple Silicon Mac, 10.000 items in one project, 50 cards per column, 200 runs: per-status columns (5) p50 6,0 ms / p95 6,7 ms; merged columns (3) p50 15,1 ms / p95 15,7 ms. The merged read orders the union of a category's statuses by rank. Board over HTTP with 5 clients (default mode) after the change: p50 15 ms, p95 27 ms, update p95 8 ms, unchanged from the REL validation. Reproduce: `ATLAS_BENCH=1 go test ./benchmarks -run 'MergedBoard|Concurrent' -v`.
+
+## Progress, timeline and time (INS, 2026-10-27)
+
+Core level (no HTTP), Apple Silicon Mac, 10.000 items in one project, 20.000 time entries, 10.000 audit entries, 100 runs. Progress p50 12,4 ms / p95 12,9 ms; timeline of 90 days p50 6,7 ms / p95 7,2 ms; activity (50 entries) p50 11,9 ms / p95 12,4 ms; time summary (total, per item, person, status and period over all 20.000 entries) p50 89 ms / p95 92 ms (158 ms before aggregating on the raw column and joining names afterwards). All below the 150 ms board target; the time summary is the one to watch on slow hardware. Reproduce: `ATLAS_BENCH=1 go test ./benchmarks -run Insight -v`.
+
+## Atlas Context (CTX, 2026-10-27)
+
+Hardware: Apple M1 Pro, 16 GB. Core level (no HTTP), 10.000 items plus 200 context entries (about a sixth pinned, summaries of about 230 characters, one or two sources) in one project, 200 runs. Bootstrap p50 0,40 ms / p95 0,58 ms, 3.848 bytes. Search "module 7" p50 0,41 ms / p95 0,56 ms, 2.995 bytes. Detail of 3 entries with bodies p50 0,30 ms / p95 0,48 ms, 3.992 bytes. Unbudgeted list of all 200 entries (REST, no bodies) p50 3,7 ms / p95 4,0 ms, 115.980 bytes. Targets (p95 < 100 ms, default answer at most 4 KiB) met. RSS with `benchmarks/rss.sh` (idle, then 2.000 health requests): 24,0 / 25,8 MB without context, 24,2 / 24,3 MB with 200 entries; the load does not call context endpoints. Reproduce: `ATLAS_BENCH=1 go test ./benchmarks -run 'TestContext$' -v`, `CONTEXT=200 benchmarks/rss.sh`.
+
+MCP catalogue: 18 tools, 15.232 bytes of JSON (about 3,8k tokens at 4 bytes/token); `context_get` and `context_write` are 2.754 bytes of that (about 690 tokens), so 16 tools were 12.478 bytes before. The 8 tool / 5.978 byte figure above predates the issue, progress and time tools.
+
+### Agent runs with and without context_get
+
+Setup: Atlas on localhost with project ATL holding 13 hand-written entries about this repository (all verified by a human session, 6 pinned; the entries answer the three tasks, see below). Agents ran read-only in the repository (Claude Code 2.1.307 with haiku: Read, Grep, Glob and `context_get` only, `CLAUDE.md` loading and user settings off; Codex CLI 0.145.0 with the default model `gpt-5.6-terra`, reasoning effort low, read-only sandbox, a clean `CODEX_HOME`). Tasks: find the project permission check (auth), list what to change for a new role action (migration), what to know before adding `Idempotency-Key` to the REST item routes (pitfall). Variants: `without` (no Atlas MCP), `with` (Atlas MCP plus the AGENTS.md paragraph in the system prompt or prompt), `server` (Claude only: MCP connected and server `instructions`, nothing else; the feature was removed afterwards), `explicit` (as `with`, plus "first call context_get"). Claude: 3 runs per cell, 9 per variant. Codex: 2 runs per cell planned; stopped after 5 runs per variant (pitfall: 1) because a run takes about two minutes. "Tokens" is everything the client reports as input plus output, including cached system prompt, so it is dominated by a fixed overhead and noisy; tool calls and bytes returned by tools are the cleaner signals.
+
+| Client | Variant | Runs | `context_get` calls | Tool calls (mean) | Bytes returned by tools (mean) | Tokens (mean) |
+|---|---|---|---|---|---|---|
+| Claude haiku | without | 9 | 0 | 9,0 | 24.342 | 208.024 |
+| Claude haiku | with | 9 | 0 | 8,0 | 22.490 | 194.453 |
+| Claude haiku | server | 9 | 0 | 8,7 | 23.677 | 232.027 |
+| Claude haiku | explicit | 9 | 18 | 3,8 | 4.939 | 134.558 |
+| Codex | without | 5 | 0 | 3,2 | 77.970 | 110.154 |
+| Codex | with | 5 | 4 | 3,6 | 56.108 | 151.136 |
+| Codex | explicit | 5 | 5 | 1,8 | 7.872 | 67.611 |
+
+Reading:
+
+- When the agent calls `context_get`, it needs fewer steps and far fewer bytes (Claude: 3,8 calls and 4,9 KB instead of 9,0 and 24,3 KB; Codex: 1,8 calls and 7,9 KB instead of 3,2 and 78 KB) and reads no files. Answers to auth and migration were right in every run in all variants (keyword check; one Codex migration run without context missed it).
+- Without an explicit instruction Claude haiku never called the tool, with the paragraph in its system prompt (0 of 9) or with server instructions (0 of 9): the benefit only exists when the agent is told to use it. Codex used it in 4 of 5 runs with the paragraph, but its token total did not drop in that variant (151k vs 110k, one run each cell at this size is noise).
+- The pitfall keyword check (documented as not implemented, mentions `Batch`) scored 0 to 2 of 3 in every variant and is unreliable: the answers I read were substantively right. It is also contaminated: this change's own docs (`docs/api-contract.md`) now state the pitfall, so the no-context variant could find it.
+- Bias: the entries were written by the author of the tasks, so they answer them directly. This is an upper bound for a hand-curated entry on a question it was written for, not the saving on questions nobody anticipated. Two small models, three tasks, few runs: no claim of a general saving. Not measured: entries that are wrong or stale, questions the entries do not cover, a human-written set for another repository.

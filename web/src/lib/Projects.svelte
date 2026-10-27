@@ -2,9 +2,9 @@
   import {
     ApiError,
     createProject,
-    emptyFilters,
-    getBoard,
+    getProgress,
     listProjectTemplates,
+    type Progress,
     type Project,
     type ProjectTemplate,
   } from "./api";
@@ -12,6 +12,7 @@
   import { t } from "./i18n";
   import Icon from "./Icon.svelte";
   import PageHero from "./PageHero.svelte";
+  import ProgressBar from "./ProgressBar.svelte";
   import { projectColor, projectCoverName } from "./projectColor";
 
   let { projects, onchange }: { projects: Project[]; onchange: () => void } =
@@ -25,9 +26,7 @@
   let template = $state("0");
   let projectTemplates = $state<ProjectTemplate[]>([]);
   void listProjectTemplates().then((list) => (projectTemplates = list));
-  let counts = $state<
-    Record<string, { total: number; active: number; done: number }>
-  >({});
+  let counts = $state<Record<string, Progress>>({});
 
   const shown = $derived(
     projects.filter((p) =>
@@ -35,22 +34,12 @@
     ),
   );
 
-  // Item counts come from each project's board (limit 1: only the column counts are used).
+  // One grouped query per project (ADR-0014); the compact bar shows the split by status.
   $effect(() => {
     for (const project of projects) {
       if (counts[project.key]) continue;
-      void getBoard(project.key, emptyFilters, 1)
-        .then((board) => {
-          const sum = (category: string): number =>
-            board.columns
-              .filter((c) => c.status.category === category)
-              .reduce((n, c) => n + c.count, 0);
-          counts[project.key] = {
-            total: board.columns.reduce((n, c) => n + c.count, 0),
-            active: sum("active"),
-            done: sum("completed"),
-          };
-        })
+      void getProgress(project.key)
+        .then((p) => (counts[project.key] = p))
         .catch(() => undefined);
     }
   });
@@ -172,24 +161,11 @@
               {#if project.role}<span class="chip">{project.role}</span>{/if}
             </div>
             {#if c}
-              <div
-                class="progress"
-                role="progressbar"
-                aria-label={t("home.progress")}
-                aria-valuemin="0"
-                aria-valuemax={c.total}
-                aria-valuenow={c.done}
-              >
-                <span
-                  style:width="{c.total
-                    ? Math.round((c.done / c.total) * 100)
-                    : 0}%"
-                ></span>
-              </div>
+              <ProgressBar progress={c} compact />
               <p class="stats">
                 <span><b>{c.total}</b> {t("home.items")}</span>
-                <span><b>{c.active}</b> {t("home.inProgress")}</span>
-                <span><b>{c.done}</b> {t("home.done")}</span>
+                <span><b>{c.categories.active}</b> {t("home.inProgress")}</span>
+                <span><b>{c.categories.completed}</b> {t("home.done")}</span>
               </p>
             {:else}
               <p class="stats muted">…</p>
@@ -333,18 +309,6 @@
   }
   .head .chip {
     margin-top: 30px;
-  }
-  .progress {
-    height: 6px;
-    border-radius: var(--atlas-radius-pill);
-    background: var(--color-soft);
-    overflow: hidden;
-  }
-  .progress span {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--accent);
   }
   .stats {
     margin: 0;

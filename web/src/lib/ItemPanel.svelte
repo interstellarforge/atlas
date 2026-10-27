@@ -22,6 +22,7 @@
   import Icon from "./Icon.svelte";
   import ItemAttachments from "./ItemAttachments.svelte";
   import ItemNotes from "./ItemNotes.svelte";
+  import ItemTime from "./ItemTime.svelte";
   import { people } from "./people.svelte";
   import PriorityIndicator from "./PriorityIndicator.svelte";
   import { navigate } from "./router.svelte";
@@ -474,6 +475,11 @@
           </section>
           {#if !create}
             <div class="panel"><ItemAttachments {itemKey} /></div>
+            {#if workflow.time_tracking}
+              <div class="panel">
+                <ItemTime {itemKey} enabled={workflow.time_tracking} />
+              </div>
+            {/if}
             <div class="panel"><ItemNotes {itemKey} /></div>
           {/if}
         </div>

@@ -47,7 +47,7 @@ Browser (Svelte SPA) --REST+SSE--> ATLAS SERVER (one Go binary) <--MCP-- Claude/
 
 | Module | Responsibility | May depend on |
 |---|---|---|
-| `core` | Business services and rules (the only place for domain logic) | `db`, `events` |
+| `core` | Business services and rules (the only place for domain logic), including project context (`context.go`, ADR-0015) | `db`, `events` |
 | `db` | Connections, migrations, queries | - |
 | `events` | Change journal read side, SSE hub | `db` |
 | `api` | REST/SSE handlers; thin adapters over `core` | `core`, `auth`, `events` |

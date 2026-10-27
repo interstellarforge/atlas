@@ -51,6 +51,10 @@ func addResources(s *sdk.Server, svc *core.Service, a auth.Actor) {
 			}
 			return workflowView(w), nil
 		}, regexp.MustCompile(`^atlas://projects/([A-Z][A-Z0-9]{1,9})/workflow$`))
+	add("atlas://projects/{key}/context", "context", "Project knowledge for agents: pinned context entries in compact form (same as context_get bootstrap).",
+		func(ctx context.Context, m []string) (any, error) {
+			return svc.ContextBootstrapFor(ctx, a, m[1], nil, 0, "", 0)
+		}, regexp.MustCompile(`^atlas://projects/([A-Z][A-Z0-9]{1,9})/context$`))
 	add("atlas://items/{key}", "item", "One work item in detail, with its links.",
 		func(ctx context.Context, m []string) (any, error) {
 			it, err := svc.GetItem(ctx, a, m[1])

@@ -101,6 +101,8 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 	kees := sessionOf(e, t)
 	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
 	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "t"}, kees)
+	e.do("PUT", "/api/v1/projects/EXO/time-tracking", map[string]any{"enabled": true}, kees)
+	e.do("POST", "/api/v1/projects/EXO/context", map[string]any{"key": "seed", "category": "pitfall", "title": "Seed", "summary": "s"}, kees)
 	roles := map[string]func(*http.Request){}
 	if c := e.do("PUT", "/api/v1/admin/roles/commenter", map[string]any{"actions": []string{"view", "comment"}}, kees); c.Code != 200 {
 		t.Fatalf("create role: %d", c.Code)
@@ -139,6 +141,15 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 		},
 		"members": func(_ string, as func(*http.Request)) int {
 			return e.do("PUT", "/api/v1/projects/EXO/members/1", map[string]any{"role": "admin"}, as).Code
+		},
+		"time.log": func(_ string, as func(*http.Request)) int {
+			return e.do("POST", "/api/v1/items/EXO-1/time", map[string]any{"duration": "5m"}, as).Code
+		},
+		"context.write": func(role string, as func(*http.Request)) int {
+			return e.do("POST", "/api/v1/projects/EXO/context", map[string]any{"category": "pitfall", "title": "T " + role, "summary": "s"}, as).Code
+		},
+		"context.verify": func(_ string, as func(*http.Request)) int {
+			return e.do("POST", "/api/v1/projects/EXO/context/seed/verify", nil, as).Code
 		},
 		"tokens": func(_ string, as func(*http.Request)) int {
 			return e.do("GET", "/api/v1/projects/EXO/tokens", nil, as).Code

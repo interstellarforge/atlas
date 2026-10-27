@@ -49,6 +49,34 @@ Atlas sends no email until SMTP is set up, either with environment variables or 
 
 A password saved in the admin screen is encrypted with `<data dir>/mail.key`. Backups do not include this file; after restoring on another machine the password must be entered again (the settings otherwise survive). Mails that cannot be delivered are retried five times (1, 5, 15, 60 minutes) and then dropped; `mail_outbox.last_error` has the reason.
 
+## Connecting Claude Code and Codex (MCP)
+
+Atlas serves MCP over Streamable HTTP at `/mcp`. Agents authenticate with an API token (Settings > API tokens, or a project token under project settings > Tokens). Give an agent read scope to let it read project knowledge (`context_get`) and the board; add write scope only when it should create items, comment or write context. A token can be limited to projects and is revoked instantly. Note: a token for the Atlas MCP is not the Taiga server some global agent instructions call "Atlas MCP"; they are different servers.
+
+Claude Code (from the project directory; `ATLAS_TOKEN` holds the token, `https://atlas.example.com` is your public address):
+
+```bash
+claude mcp add --transport http atlas https://atlas.example.com/mcp --header "Authorization: Bearer $ATLAS_TOKEN"
+```
+
+Then check the connection with `/mcp`. In non-interactive mode allow the tools explicitly, for example `--allowedTools "mcp__atlas__context_get"`.
+
+Codex (`~/.codex/config.toml`, the token is read from the environment):
+
+```toml
+[mcp_servers.atlas]
+url = "https://atlas.example.com/mcp"
+bearer_token_env_var = "ATLAS_TOKEN"
+```
+
+Codex asks before it calls a tool that changes data; read-only tools such as `context_get` need no approval.
+
+Agents only use `context_get` when told to: the repository's `AGENTS.md` (or `CLAUDE.md`) should carry the short Atlas Context paragraph from this project's `AGENTS.md`. Measured use without it is in `benchmarks/RESULTS.md`.
+
+## Project context
+
+Entries are kept in the project's database like everything else, so the normal backup covers them. They are not part of the project export (JSON/CSV) yet. A project with more than 200 active entries gets a warning in the bootstrap and the Context tab: archive or merge old entries instead of letting the bootstrap grow.
+
 ## Repository README
 
 `ATLAS_REPO_ALLOW_PRIVATE=true` lets Atlas fetch READMEs from a git server on a private address (for example a Gitea on the LAN). By default only public internet addresses are fetched. Provider support for the README: GitHub, GitLab, Gitea/Codeberg/Forgejo, Bitbucket; any other host is assumed to use Gitea-style raw URLs. Private repositories are not supported.

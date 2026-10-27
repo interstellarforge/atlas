@@ -69,6 +69,10 @@
   const visibleLinks = $derived(user.is_admin ? [...links, adminLink] : links);
 
   const viewLabel = {
+    overview: "project.overview",
+    timeline: "project.timeline",
+    time: "project.time",
+    context: "project.context",
     board: "project.board",
     list: "project.list",
     backlog: "project.backlog",

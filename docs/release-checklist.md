@@ -16,6 +16,7 @@ Status 2026-10-27. The original 12-point "definition of success" is not in this 
 | 10 | Export and import with dry-run | done (REST only, items only) | `docs/api-contract.md` |
 | 11 | Accessibility audit | partly | `docs/accessibility.md`: automated pass; no screen-reader test |
 | 12 | License decided | AGPL-3.0 in `LICENSE` and ADR-0001; owner to confirm before first public release | |
+| 13 | Project context for agents (ADR-0015) | built; benefit not proven | `internal/core/context_test.go`, `internal/api/context_test.go`, `benchmarks/context_test.go`; agent runs in RESULTS.md show no saving yet |
 
 ## Open before calling it 1.0
 
@@ -23,3 +24,4 @@ Status 2026-10-27. The original 12-point "definition of success" is not in this 
 - Screen-reader and full keyboard pass; target-size leftovers on cards (fixed by the UIX redesign).
 - Export/import UI, and import of comments, checklists, links, attachments and assignees, if needed.
 - Confirm the license and replace this list with the original 12 points.
+- Project context: show that `context_get` saves agent work (see RESULTS.md, Atlas Context), or simplify the module; screen-reader pass of the Context tab; context in project export.

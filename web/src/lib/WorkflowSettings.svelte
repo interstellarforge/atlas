@@ -4,6 +4,7 @@
     ApiError,
     deleteStatus,
     setMergeColumns,
+    setTimeTracking,
     type StatusInfo,
     updateStatus,
     type Workflow,
@@ -181,6 +182,19 @@
       <span
         ><strong>{t("workflow.merge")}</strong>
         <small class="muted">{t("workflow.mergeHint")}</small></span
+      >
+    </label>
+
+    <label class="merge">
+      <input
+        type="checkbox"
+        checked={workflow.time_tracking}
+        onchange={(e) =>
+          void run(() => setTimeTracking(project, e.currentTarget.checked))}
+      />
+      <span
+        ><strong>{t("workflow.timeTracking")}</strong>
+        <small class="muted">{t("workflow.timeTrackingHint")}</small></span
       >
     </label>
 

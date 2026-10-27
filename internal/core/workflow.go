@@ -63,6 +63,8 @@ type Workflow struct {
 	ItemTemplates []string `json:"item_templates"`
 	// MergeColumns shows statuses of one category in one board column.
 	MergeColumns bool `json:"merge_columns"`
+	// TimeTracking is on when members may book time on items (ADR-0014).
+	TimeTracking bool `json:"time_tracking"`
 }
 
 func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Workflow, error) {
@@ -71,7 +73,7 @@ func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Wo
 		return Workflow{}, err
 	}
 	w := Workflow{Project: p.Key, Types: itemTypes, Hierarchy: allowedParents, Transitions: []Transition{}, Labels: []string{}, Milestones: []Milestone{},
-		MergeColumns: p.MergeColumns}
+		MergeColumns: p.MergeColumns, TimeTracking: p.TimeTracking}
 
 	if w.Statuses, err = statuses(s.db.R, p.ID); err != nil {
 		return w, err

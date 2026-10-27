@@ -15,6 +15,7 @@ All values are acceptance targets, not measured results. Record measurements in 
 | Concurrent clients | >= 5 |
 | Containers / external DBs | 1 / 0 |
 | MCP default response | <= 16 KiB |
+| Context bootstrap and search (200 entries) | p95 < 100 ms, default answer <= 4 KiB |
 
 ## Method
 
@@ -31,6 +32,7 @@ All values are acceptance targets, not measured results. Record measurements in 
 4. Board API at 10.000 items; column pagination.
 5. Image upload/thumbnail RAM peaks with large and corrupt images.
 6. MCP: catalog size, bytes per response, calls per task.
+7. Project context: bootstrap, search and detail on 200 entries; RSS with and without; agent runs with and without `context_get` (ADR-0015).
 
 ## Rules
 

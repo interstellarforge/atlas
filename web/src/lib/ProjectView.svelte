@@ -1,12 +1,15 @@
 <script lang="ts">
   import {
+    getProgress,
     getWorkflow,
+    type Progress,
     type Repository,
     type User,
     type Workflow,
   } from "./api";
   import BacklogView from "./BacklogView.svelte";
   import Board from "./Board.svelte";
+  import ContextView from "./ContextView.svelte";
   import { onChange } from "./events.svelte";
   import { t } from "./i18n";
   import Icon from "./Icon.svelte";
@@ -14,18 +17,23 @@
   import ItemPanel from "./ItemPanel.svelte";
   import ListView from "./ListView.svelte";
   import MilestonesView from "./MilestonesView.svelte";
+  import OverviewView from "./OverviewView.svelte";
   import PageHero from "./PageHero.svelte";
+  import ProgressBar from "./ProgressBar.svelte";
   import { projectColor } from "./projectColor";
   import ProjectSettings from "./ProjectSettings.svelte";
   import ReadmeView from "./ReadmeView.svelte";
   import { navigate } from "./router.svelte";
   import { type ProjectViewName, viewPath } from "./routes";
+  import TimelineView from "./TimelineView.svelte";
+  import TimeView from "./TimeView.svelte";
   import TreeView from "./TreeView.svelte";
 
   let {
     project,
     name = "",
     canAdmin = false,
+    role = "",
     repository = null,
     user,
     section = "",
@@ -36,6 +44,8 @@
     project: string;
     name?: string;
     canAdmin?: boolean;
+    /** The signed-in user's role in this project. */
+    role?: string;
     repository?: Repository | null;
     user: User;
     section?: string;
@@ -46,34 +56,47 @@
 
   let workflow = $state<Workflow | undefined>();
   let error = $state("");
+  let progress = $state<Progress | undefined>();
 
   const tabs: {
     view: ProjectViewName;
     suffix: string;
     label:
+      | "project.overview"
+      | "project.timeline"
+      | "project.time"
       | "project.board"
       | "project.list"
       | "project.backlog"
       | "project.tree"
+      | "project.context"
       | "project.milestones"
       | "project.issues"
       | "project.readme"
       | "project.settings";
   }[] = [
+    { view: "overview", suffix: "/overview", label: "project.overview" },
     { view: "board", suffix: "", label: "project.board" },
     { view: "list", suffix: "/list", label: "project.list" },
     { view: "backlog", suffix: "/backlog", label: "project.backlog" },
     { view: "tree", suffix: "/tree", label: "project.tree" },
+    { view: "context", suffix: "/context", label: "project.context" },
     { view: "milestones", suffix: "/milestones", label: "project.milestones" },
+    { view: "timeline", suffix: "/timeline", label: "project.timeline" },
+    { view: "time", suffix: "/time", label: "project.time" },
     { view: "issues", suffix: "/issues", label: "project.issues" },
     { view: "readme", suffix: "/readme", label: "project.readme" },
     { view: "settings", suffix: "/settings", label: "project.settings" },
   ];
   const icons = {
+    overview: "overview",
+    timeline: "calendar",
+    time: "clock",
     board: "board",
     list: "list",
     backlog: "backlog",
     tree: "tree",
+    context: "context",
     milestones: "milestone",
     issues: "bug",
     readme: "story",
@@ -83,6 +106,7 @@
     tabs.filter(
       (tab) =>
         (tab.view !== "settings" || canAdmin) &&
+        (tab.view !== "time" || workflow?.time_tracking === true) &&
         (tab.view !== "readme" || repository !== null),
     ),
   );
@@ -102,6 +126,27 @@
     void loadWorkflow(project);
   });
 
+  let progressTimer: ReturnType<typeof setTimeout> | undefined;
+  async function loadProgress(key: string): Promise<void> {
+    try {
+      const loaded = await getProgress(key);
+      if (key === project) progress = loaded;
+    } catch {
+      /* the overview tab reports a failed load */
+    }
+  }
+  $effect(() => {
+    progress = undefined;
+    void loadProgress(project);
+  });
+  $effect(() =>
+    onChange((event) => {
+      if (event.project !== project) return;
+      clearTimeout(progressTimer);
+      progressTimer = setTimeout(() => void loadProgress(project), 500);
+    }),
+  );
+
   // Statuses and labels change rarely; reload them when the project's settings were touched.
   $effect(() =>
     onChange((event) => {
@@ -120,6 +165,11 @@
       <span class="tile" style:--accent={projectColor(project)}
         >{project.slice(0, 1)}</span
       >
+    {/snippet}
+    {#snippet actions()}
+      {#if progress && progress.total > 0}
+        <div class="heroprogress"><ProgressBar {progress} compact /></div>
+      {/if}
     {/snippet}
     {#snippet tabs()}
       <nav class="tabs" aria-label={t("project.views")}>
@@ -146,12 +196,20 @@
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
   {#if workflow}
     <div class="view">
-      {#if view === "board"}
+      {#if view === "overview"}
+        <OverviewView {project} />
+      {:else if view === "timeline"}
+        <TimelineView {project} />
+      {:else if view === "time"}
+        <TimeView {project} enabled={workflow.time_tracking} />
+      {:else if view === "board"}
         <Board {project} {workflow} />
       {:else if view === "list"}
         <ListView {project} {workflow} />
       {:else if view === "backlog"}
         <BacklogView {project} {workflow} />
+      {:else if view === "context"}
+        <ContextView {project} {role} {user} />
       {:else if view === "milestones"}
         <MilestonesView {project} />
       {:else if view === "issues"}
@@ -236,6 +294,10 @@
     color: #fff;
     border-bottom-color: #4aa0ff;
     background: linear-gradient(0deg, rgb(74 160 255 / 22%), transparent);
+  }
+  .heroprogress {
+    width: 220px;
+    color: #fff;
   }
   .view {
     flex: 1;

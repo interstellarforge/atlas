@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,8 @@ type Options struct {
 	Items    int
 	Projects int
 	Seed     uint64
+	// ContextEntries adds that many project context entries (ADR-0015) to the first project.
+	ContextEntries int
 }
 
 var statusSpecs = []struct {
@@ -112,6 +115,41 @@ func Run(w *sql.DB, o Options) error {
 		if _, err := tx.Exec(`UPDATE projects SET next_item_number = ? WHERE id = ?`, n+1, pid); err != nil {
 			return err
 		}
+		if p == 0 && o.ContextEntries > 0 {
+			if err := seedContext(tx, pid, o.ContextEntries, rng, now); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.Commit()
+}
+
+var contextCategories = []string{"architecture", "decision", "convention", "pitfall", "dependency", "reference"}
+
+// seedContext adds realistic entries: about a sixth pinned, a summary of a few hundred characters, a body,
+// one or two sources, and a mix of verification states.
+func seedContext(tx *sql.Tx, projectID int64, n int, rng *rand.Rand, now int64) error {
+	states := []string{"verified", "verified", "unverified", "stale"}
+	for i := 1; i <= n; i++ {
+		cat := contextCategories[i%len(contextCategories)]
+		title := fmt.Sprintf("%s note %d about module %d", cat, i, i%23)
+		summary := fmt.Sprintf("Module %d keeps its %s rules in one place: read internal/mod%d first, follow the conventions in docs/%s.md and "+
+			"check the tests before changing behaviour; the previous attempt at a shortcut broke the export path.", i%23, cat, i%23, cat)
+		body := strings.Repeat(fmt.Sprintf("Detail line for entry %d. ", i), 25)
+		res, err := tx.Exec(`INSERT INTO project_context_entries (project_id, key, category, title, summary, body, verification_state, source_kind, pinned,
+			created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'repository', ?, 'human:user-1', 'human:user-1', ?, ?)`,
+			projectID, fmt.Sprintf("seed-%d", i), cat, title, summary, body, states[rng.IntN(len(states))], i%6 == 0, now, now-int64(i)*1000)
+		if err != nil {
+			return err
+		}
+		id, _ := res.LastInsertId()
+		for s := 0; s <= i%2; s++ {
+			if _, err := tx.Exec(`INSERT INTO project_context_sources (entry_id, source_type, file_path) VALUES (?, 'file', ?)`,
+				id, fmt.Sprintf("internal/mod%d/file%d.go", i%23, s)); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := tx.Exec(`UPDATE projects SET context_version = ? WHERE id = ?`, n, projectID)
+	return err
 }

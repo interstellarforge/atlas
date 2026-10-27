@@ -87,15 +87,13 @@ func (s *Service) Batch(ctx context.Context, a auth.Actor, ops []BatchOp, partia
 	if len(idemKey) > maxIdempotency {
 		return BatchOutcome{}, invalid("idempotency key is longer than %d characters", maxIdempotency)
 	}
-	reqJSON, err := json.Marshal(struct {
+	hash, err := requestHash(struct {
 		Ops     []BatchOp
 		Partial bool
 	}{ops, partial})
 	if err != nil {
 		return BatchOutcome{}, err
 	}
-	sum := sha256.Sum256(reqJSON)
-	hash := hex.EncodeToString(sum[:])
 
 	var out BatchOutcome
 	tx, err := s.db.W.Begin()
@@ -105,20 +103,9 @@ func (s *Service) Batch(ctx context.Context, a auth.Actor, ops []BatchOp, partia
 	defer tx.Rollback()
 
 	if idemKey != "" {
-		var storedHash, stored string
-		err := tx.QueryRow(`SELECT request_hash, result FROM idempotency_records WHERE actor = ? AND key = ?`,
-			a.String(), idemKey).Scan(&storedHash, &stored)
-		switch {
-		case err == nil:
-			if storedHash != hash {
-				return out, invalid("idempotency key was already used for a different request")
-			}
-			if err := json.Unmarshal([]byte(stored), &out); err != nil {
-				return out, err
-			}
-			out.Replayed = true
-			return out, nil
-		case !errors.Is(err, sql.ErrNoRows):
+		replayed, err := idemReplay(tx, a, idemKey, hash, &out)
+		if err != nil || replayed {
+			out.Replayed = replayed
 			return out, err
 		}
 	}
@@ -171,16 +158,7 @@ func (s *Service) Batch(ctx context.Context, a auth.Actor, ops []BatchOp, partia
 	}
 
 	if idemKey != "" {
-		body, err := json.Marshal(out)
-		if err != nil {
-			return out, err
-		}
-		now := s.nowMs()
-		if _, err := tx.Exec(`DELETE FROM idempotency_records WHERE created_at < ?`, now-idempotencyTTL); err != nil {
-			return out, err
-		}
-		if _, err := tx.Exec(`INSERT INTO idempotency_records (actor, key, request_hash, result, created_at) VALUES (?, ?, ?, ?, ?)`,
-			a.String(), idemKey, hash, string(body), now); err != nil {
+		if err := s.idemStore(tx, a, idemKey, hash, out); err != nil {
 			return out, err
 		}
 	}
@@ -203,4 +181,47 @@ func (s *Service) runOp(ctx context.Context, a auth.Actor, op BatchOp) (Item, er
 		return s.MoveItem(ctx, a, op.Key, op.Version, op.Move)
 	}
 	return Item{}, invalid("op must be create, update or move")
+}
+
+// requestHash fingerprints a request, so a reused idempotency key with other content is refused.
+func requestHash(v any) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// idemReplay loads the result stored for the actor's idempotency key into out. It reports false when the
+// key is new, and an invalid error when the key was used for a different request.
+func idemReplay(tx *sql.Tx, a auth.Actor, key, hash string, out any) (bool, error) {
+	var storedHash, stored string
+	err := tx.QueryRow(`SELECT request_hash, result FROM idempotency_records WHERE actor = ? AND key = ?`,
+		a.String(), key).Scan(&storedHash, &stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if storedHash != hash {
+		return false, invalid("idempotency key was already used for a different request")
+	}
+	return true, json.Unmarshal([]byte(stored), out)
+}
+
+// idemStore remembers the result for the key (24 hours) and drops expired records.
+func (s *Service) idemStore(tx *sql.Tx, a auth.Actor, key, hash string, result any) error {
+	body, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	now := s.nowMs()
+	if _, err := tx.Exec(`DELETE FROM idempotency_records WHERE created_at < ?`, now-idempotencyTTL); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO idempotency_records (actor, key, request_hash, result, created_at) VALUES (?, ?, ?, ?, ?)`,
+		a.String(), key, hash, string(body), now)
+	return err
 }

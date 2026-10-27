@@ -6,7 +6,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 
 - Items are referenced by key (`EXO-42`); numeric ids are accepted too.
 - Auth: session cookie (UI) or `Authorization: Bearer <token>`.
-- Mutations accept `Idempotency-Key` header; replay returns the original result.
+- `Idempotency-Key` header (replay returns the original result): honoured on project context writes (POST, DELETE, supersede) and, as `idempotency_key`, by the MCP tool `items_write`. The item routes do not implement it yet (issue 281/282 in Taiga).
 - Updates require `version` (body or `If-Match`); mismatch returns 409.
 - Field selection: `?fields=key,title,status,version`. Default responses are compact.
 - Pagination: `?limit=` (default 50, max 200) and opaque `?cursor=`; response has `next_cursor` (null at end).
@@ -129,3 +129,16 @@ With `merge_columns` on, `GET /projects/{key}/board` returns one column per stat
 | GET | `/projects/{key}/readme/asset?u=<https image URL>` | Image proxy for README images. Hosts: the repository, its raw host, `*.githubusercontent.com`, a few badge hosts; others 404. Served with `nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`. Max 5 MiB |
 
 Issues are items of type `bug`: list them with `GET /items?project=KEY&type=bug` (optionally `status`, `priority`, `label`, `assignee`), create with `POST /items` and `"type":"bug"`. The UI page is `#/p/KEY/issues`.
+
+## Progress, timeline and time tracking (ADR-0014)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/projects/{key}/progress` | `{total, categories{todo,active,completed}, statuses[{id,name,category,count}], priorities{}, types{}}`; archived items excluded. `view`. |
+| GET | `/projects/{key}/timeline?from&to[&limit]` | `from`, `to` unix ms (to after from, at most five years). `{milestones, items[{key,type,title,status,category,start_at,due_at}], truncated}`; milestones and items with a due date in the range; limit default 200, max 500. `view`. |
+| GET | `/projects/{key}/activity[?before=<id>&limit]` | Newest first, `{items[{id,actor,operation,target,changes,at}]}`; item, comment, milestone, attachment and time operations only. Default 50, max 200. `view`. |
+| PUT | `/projects/{key}/time-tracking` | `{"enabled": bool}`; `workflow` action; 204. Projects and the workflow carry `time_tracking`. |
+| GET / POST | `/items/{key}/time` | List bookings (`view`) / book time `{duration, date?, note?}` (`time.log`; 201; `rule_violation` when tracking is off). `duration`: `90`, `45m`, `1.5h`, `1h30m`, 1 minute to 24 hours. |
+| PATCH / DELETE | `/projects/{key}/time/{id}` | Change `{duration?, date?, note?}` / delete a booking; owner or project admin; `time.log`. |
+| GET | `/projects/{key}/time?from&to&user&item&period` | Dates `YYYY-MM-DD`, `period` day, week (default) or month. `{total_minutes, entries, items, people, statuses, periods}`, each bucket `{key, label, minutes}`; items top 100. `view`. |
+| GET | `/projects/{key}/time/export?...` | Same filters, CSV (`date,item,title,person,status,minutes,note`), at most 10.000 rows; `export` action. |

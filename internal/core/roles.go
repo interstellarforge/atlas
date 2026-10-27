@@ -23,10 +23,13 @@ const (
 	actProjectUpdate action = "project.update"
 	actMembers       action = "members"
 	actTokens        action = "tokens"
+	actTimeLog       action = "time.log"
+	actContextWrite  action = "context.write"
+	actContextVerify action = "context.verify"
 )
 
 // Actions lists every action in display order.
-var Actions = []string{"view", "export", "item.create", "item.update", "comment", "import", "workflow", "project.update", "members", "tokens"}
+var Actions = []string{"view", "export", "item.create", "item.update", "comment", "import", "workflow", "project.update", "members", "tokens", "time.log", "context.write", "context.verify"}
 
 // Role is a project role and the actions it grants. admin is built in and fixed: it always holds every
 // action, so a project can never be locked out. viewer and member are built in and editable.

@@ -297,6 +297,7 @@
         {user}
         repository={projects.find((p) => p.key === current.key)?.repository ??
           null}
+        role={projects.find((p) => p.key === current.key)?.role ?? ""}
         canAdmin={user.is_admin ||
           projects.find((p) => p.key === current.key)?.role === "admin"}
         view={current.view}

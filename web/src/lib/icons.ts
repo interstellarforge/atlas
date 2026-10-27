@@ -21,6 +21,7 @@ export const paths = {
   archive: "M3 5h18v4H3zM5 9v10h14V9M10 13h4",
   restore: "M4 12a8 8 0 1 0 2.5-5.8L4 8M4 4v4h4",
   check: "M5 12.5l4.5 4.5L19 7.5",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
   calendar:
     "M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM4 10h16M8 3v4M16 3v4",
   "arrow-up": "M12 19V5M6 11l6-6 6 6",
@@ -40,6 +41,8 @@ export const paths = {
   board: "M4 4h5v16H4zM10 4h5v10h-5zM16 4h4v13h-4z",
   list: "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
   backlog: "M4 5h16M4 10h12M4 15h16M4 20h10",
+  context:
+    "M4 5.5A2.5 2.5 0 0 1 6.5 3H12v17H6.5A2.5 2.5 0 0 0 4 22.5zM20 5.5A2.5 2.5 0 0 0 17.5 3H12v17h5.5a2.5 2.5 0 0 1 2.5 2.5z",
   tree: "M5 4h5v4H5zM14 10h5v4h-5zM14 17h5v4h-5zM7.5 8v11.5H14M7.5 12H14",
   milestone: "M6 21V4M6 4h12l-3 4.5L18 13H6",
   logout: "M9 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4M16 8l4 4-4 4M20 12H9",

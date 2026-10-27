@@ -112,3 +112,14 @@ Status category enum: `todo`, `active`, `completed`.
 ## Repository link (migration 0016)
 
 - `projects.repo_url` (normalised `https://host/owner/name`, empty = not linked) and `projects.repo_branch`. The provider is derived from the host. Issues need no tables: they are items of type `bug`. See ADR-0013.
+
+## Time tracking (migration 0017)
+
+- `projects.time_tracking` (default 0). `time_entries(id, project_id, item_id, user_id, status_id, minutes 1..1440, spent_on 'YYYY-MM-DD', note, created_at, updated_at)`, indexed on `item_id` and `(project_id, spent_on)`; cascade on item and project, `status_id` set null when the status is deleted. The new action `time.log` is granted to roles that hold `item.update`. Progress, timeline and activity need no tables. See ADR-0014.
+
+## Project context (migration 0018)
+
+- `projects.context_version` (default 0): raised in the transaction of every change to the active context, so clients can see whether their copy is current. `MAX(seq)` of `change_events` was rejected because the journal is pruned.
+- `project_context_entries(id, project_id, key, category, title, summary, body, status, superseded_by, verification_state, source_kind, pinned, version, created_by, updated_by, created_at, updated_at, verified_at, verified_by)`, `UNIQUE(project_id, key)`, STRICT with CHECKs on category (`architecture`, `decision`, `convention`, `pitfall`, `dependency`, `reference`), status (`active`, `superseded`, `archived`), verification state (`verified`, `unverified`, `stale`), source kind (`manual`, `repository`, `ticket`, `derived`) and lengths. Timestamps are unix ms; `created_by`, `updated_by` and `verified_by` are audit actor strings (`human:user-4`, `token:pat-17`). Cascade on project; `superseded_by` is set null when the replacing entry goes.
+- `project_context_sources(id, entry_id, source_type, repository, file_path, commit_sha, ticket_key, url, content_hash, note, verified_at)`; cascade on entry. Only the fields of the type are filled.
+- Actions `context.write` (member, admin) and `context.verify` (admin) are granted by the migration. See ADR-0015.
