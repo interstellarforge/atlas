@@ -163,7 +163,7 @@ func (s *Service) followTx(ctx context.Context, a auth.Actor, key string, on boo
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
-		if _, _, err := s.access(tx, a, pk, roleViewer); err != nil {
+		if _, _, err := s.access(tx, a, pk, actView); err != nil {
 			return err
 		}
 		ref, err := refOf(tx, key)
@@ -193,7 +193,7 @@ func (s *Service) IsFollowing(ctx context.Context, a auth.Actor, key string) (bo
 	if err != nil {
 		return false, err
 	}
-	if _, _, err := s.access(s.db.R, a, pk, roleViewer); err != nil {
+	if _, _, err := s.access(s.db.R, a, pk, actView); err != nil {
 		return false, err
 	}
 	var n int

@@ -50,7 +50,7 @@ func milestones(q queryer, projectID int64) ([]Milestone, error) {
 }
 
 func (s *Service) ListMilestones(ctx context.Context, a auth.Actor, key string) ([]Milestone, error) {
-	p, _, err := s.access(s.db.R, a, key, roleViewer)
+	p, _, err := s.access(s.db.R, a, key, actView)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (s *Service) CreateMilestone(ctx context.Context, a auth.Actor, key, name s
 	}
 	m := Milestone{Name: name, DueAt: dueAt}
 	err = s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actProjectUpdate)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (s *Service) UpdateMilestone(ctx context.Context, a auth.Actor, key string,
 	}
 	var out Milestone
 	err := s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actProjectUpdate)
 		if err != nil {
 			return err
 		}
@@ -182,7 +182,7 @@ func (s *Service) UpdateMilestone(ctx context.Context, a auth.Actor, key string,
 // DeleteMilestone removes an unused milestone; one that still has items is refused, like a status.
 func (s *Service) DeleteMilestone(ctx context.Context, a auth.Actor, key string, id int64) error {
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actProjectUpdate)
 		if err != nil {
 			return err
 		}

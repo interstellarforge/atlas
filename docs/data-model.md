@@ -26,7 +26,8 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `milestones` | Releases and milestones |
 | `attachments` | Metadata: item_id, filename, mime, size, width, height, path, created_by |
 | `custom_field_definitions` | Typed fields per project: name, type, default, validation |
-| `users`, `project_members` | Users and per-project role |
+| `users`, `project_members` | Users and per-project role (a name in `roles`) |
+| `roles`, `role_actions` | Project roles and the actions each grants (built-ins seeded, custom roles added by admins) |
 | `change_events` | Sync journal: seq (autoincrement), type, project, key, actor, ts |
 | `audit_entries` | Actor, operation, target, changes (JSON), batch_id, ts |
 | `notifications`, `item_follows` | Per-user inbox (kept until read or deleted) and followed items. `change_events.target_user` limits a signal to one user |

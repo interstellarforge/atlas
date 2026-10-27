@@ -7,6 +7,7 @@
     createUser,
     deleteInstanceItemTemplate,
     deleteProjectTemplate,
+    deleteRole,
     getAudit,
     getInstance,
     getPolicy,
@@ -16,13 +17,15 @@
     listInstanceItemTemplates,
     listInvites,
     listProjectTemplates,
+    listRoles,
     patchAdminUser,
     type Policy,
     type ProjectTemplate,
     revokeInvite,
-    type RightRow,
+    type Role,
     saveInstanceItemTemplate,
     saveProjectTemplate,
+    saveRole,
     setPolicy,
     type User,
   } from "./api";
@@ -66,7 +69,9 @@
   let importText = $state("");
   let importName = $state("");
   let users = $state<AdminUser[]>([]);
-  let rights = $state<RightRow[]>([]);
+  let roles = $state<Role[]>([]);
+  let roleActions = $state<string[]>([]);
+  let newRole = $state("");
   let settings = $state<Record<string, string | number | boolean>>({});
   let audit = $state<AuditEntry[]>([]);
   let notice = $state("");
@@ -78,6 +83,32 @@
   let fActor = $state("");
   let fOperation = $state("");
   let fTarget = $state("");
+
+  function roleLabel(name: string): string {
+    return ["admin", "member", "viewer"].includes(name)
+      ? t(`psettings.roles.${name}` as "psettings.roles.admin")
+      : name;
+  }
+
+  async function loadRoles(): Promise<void> {
+    try {
+      const r = await listRoles();
+      roles = r.items;
+      roleActions = r.actions;
+    } catch {
+      error = t("admin.loadFailed");
+    }
+  }
+
+  function toggleAction(r: Role, action: string, on: boolean): Promise<void> {
+    const actions = on
+      ? [...r.actions, action]
+      : r.actions.filter((x) => x !== action);
+    return run(t("admin.roleSaved"), async () => {
+      await saveRole(r.name, actions);
+      await loadRoles();
+    });
+  }
 
   async function run(
     done: string,
@@ -137,12 +168,10 @@
         .catch(() => (error = t("admin.loadFailed")));
     if (active === "audit")
       void loadAudit().catch(() => (error = t("admin.loadFailed")));
-    if (active === "rights" || active === "instance")
+    if (active === "rights") void loadRoles();
+    if (active === "instance")
       void getInstance()
-        .then((i) => {
-          rights = i.rights;
-          settings = i.settings;
-        })
+        .then((i) => (settings = i.settings))
         .catch(() => (error = t("admin.loadFailed")));
   });
 </script>
@@ -542,33 +571,69 @@
       <thead>
         <tr>
           <th scope="col">{t("admin.action")}</th>
-          {#each ["viewer", "member", "admin"] as r (r)}
+          {#each roles as r (r.name)}
             <th scope="col"
-              >{t(`psettings.roles.${r}` as "psettings.roles.admin")}</th
+              >{roleLabel(r.name)}
+              {#if !r.builtin}
+                <button
+                  type="button"
+                  onclick={() =>
+                    void run(t("admin.roleDeleted"), async () => {
+                      await deleteRole(r.name);
+                      await loadRoles();
+                    })}>{t("admin.deleteRole")}</button
+                >
+              {/if}</th
             >
           {/each}
         </tr>
       </thead>
       <tbody>
-        {#each rights as row (row.action)}
+        {#each roleActions as action (action)}
           <tr>
             <th scope="row"
               >{t(
-                `admin.actions.${row.action.replace(".", "_")}` as "admin.actions.view",
+                `admin.actions.${action.replace(".", "_")}` as "admin.actions.view",
               )}</th
             >
-            {#each [row.viewer, row.member, row.admin] as ok, i (i)}
+            {#each roles as r (r.name)}
               <td
-                ><span aria-hidden="true">{ok ? "✓" : "–"}</span><span
-                  class="sr-only"
-                  >{ok ? t("admin.allowed") : t("admin.denied")}</span
-                ></td
+                ><input
+                  type="checkbox"
+                  checked={r.actions.includes(action)}
+                  disabled={r.name === "admin" || action === "view"}
+                  aria-label="{roleLabel(r.name)}: {t(
+                    `admin.actions.${action.replace('.', '_')}` as 'admin.actions.view',
+                  )}"
+                  onchange={(e) =>
+                    void toggleAction(r, action, e.currentTarget.checked)}
+                /></td
               >
             {/each}
           </tr>
         {/each}
       </tbody>
     </table>
+    <form
+      class="inline"
+      onsubmit={(e) => {
+        e.preventDefault();
+        void run(t("admin.roleSaved"), async () => {
+          await saveRole(newRole.trim(), ["view"]);
+          newRole = "";
+          await loadRoles();
+        });
+      }}
+    >
+      <input
+        aria-label={t("admin.roleName")}
+        placeholder={t("admin.roleName")}
+        bind:value={newRole}
+        required
+        maxlength="32"
+      />
+      <button class="primary" type="submit">{t("admin.addRole")}</button>
+    </form>
     <p class="muted hint">{t("admin.rightsTokens")}</p>
   </section>
 {:else if active === "audit"}

@@ -85,7 +85,7 @@ func (s *Service) AddAttachment(ctx context.Context, a auth.Actor, key, filename
 	}
 	// Check permission and room before spending disk and CPU on the body.
 	var n int
-	if _, _, err := s.access(s.db.R, a, pk, roleMember); err != nil {
+	if _, _, err := s.access(s.db.R, a, pk, actItemUpdate); err != nil {
 		return Attachment{}, err
 	}
 	if err := s.db.R.QueryRow(`SELECT COUNT(*) FROM attachments c JOIN work_items i ON i.id = c.item_id WHERE i.key = ?`, key).Scan(&n); err != nil {
@@ -109,7 +109,7 @@ func (s *Service) AddAttachment(ctx context.Context, a auth.Actor, key, filename
 	att := Attachment{Item: key, Filename: name, Mime: saved.Mime, Size: saved.Size, Width: saved.Width, Height: saved.Height,
 		CreatedBy: a.String(), Path: saved.Path}
 	err = s.tx(func(tx *sql.Tx) error {
-		if _, _, err := s.access(tx, a, pk, roleMember); err != nil {
+		if _, _, err := s.access(tx, a, pk, actItemUpdate); err != nil {
 			return err
 		}
 		ref, err := refOf(tx, key)
@@ -149,7 +149,7 @@ func (s *Service) ListAttachments(ctx context.Context, a auth.Actor, key string)
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := s.access(s.db.R, a, pk, roleViewer); err != nil {
+	if _, _, err := s.access(s.db.R, a, pk, actView); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.R.Query(attachmentSelect+`WHERE i.key = ? ORDER BY c.id`, key)
@@ -181,7 +181,7 @@ func (s *Service) GetAttachment(ctx context.Context, a auth.Actor, id int64) (At
 	if err != nil {
 		return Attachment{}, err
 	}
-	if _, _, err := s.access(s.db.R, a, pk, roleViewer); err != nil {
+	if _, _, err := s.access(s.db.R, a, pk, actView); err != nil {
 		return Attachment{}, err
 	}
 	return att, nil

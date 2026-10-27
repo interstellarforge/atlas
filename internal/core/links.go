@@ -55,14 +55,14 @@ func (s *Service) AddLink(ctx context.Context, a auth.Actor, fromKey, toKey, typ
 		if err != nil {
 			return err
 		}
-		if _, _, err := s.access(tx, a, from.project, roleMember); err != nil {
+		if _, _, err := s.access(tx, a, from.project, actItemUpdate); err != nil {
 			return err
 		}
 		to, err := refOf(tx, toKey)
 		if err != nil {
 			return err
 		}
-		if _, _, err := s.access(tx, a, to.project, roleViewer); err != nil {
+		if _, _, err := s.access(tx, a, to.project, actView); err != nil {
 			return err
 		}
 
@@ -105,7 +105,7 @@ func (s *Service) RemoveLink(ctx context.Context, a auth.Actor, fromKey, toKey, 
 		if err != nil {
 			return err
 		}
-		if _, _, err := s.access(tx, a, from.project, roleMember); err != nil {
+		if _, _, err := s.access(tx, a, from.project, actItemUpdate); err != nil {
 			return err
 		}
 		to, err := refOf(tx, toKey)
@@ -139,7 +139,7 @@ func (s *Service) ListLinks(ctx context.Context, a auth.Actor, key string) (Link
 	if err != nil {
 		return Links{}, err
 	}
-	if _, _, err := s.access(s.db.R, a, pk, roleViewer); err != nil {
+	if _, _, err := s.access(s.db.R, a, pk, actView); err != nil {
 		return Links{}, err
 	}
 	ref, err := refOf(s.db.R, key)

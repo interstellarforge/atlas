@@ -86,7 +86,7 @@ func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, er
 }
 
 func (s *Service) GetProject(ctx context.Context, a auth.Actor, key string) (Project, error) {
-	p, _, err := s.access(s.db.R, a, key, roleViewer)
+	p, _, err := s.access(s.db.R, a, key, actView)
 	return p, err
 }
 
@@ -94,7 +94,7 @@ func (s *Service) GetProject(ctx context.Context, a auth.Actor, key string) (Pro
 func (s *Service) UpdateProject(ctx context.Context, a auth.Actor, key string, patch map[string]any) (Project, error) {
 	var out Project
 	err := s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actProjectUpdate)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func (s *Service) UpdateProject(ctx context.Context, a auth.Actor, key string, p
 			Project: key, Changes: changes}); err != nil {
 			return err
 		}
-		out, _, err = s.access(tx, a, key, roleViewer)
+		out, _, err = s.access(tx, a, key, actView)
 		return err
 	})
 	return out, err
@@ -198,7 +198,7 @@ func (s *Service) CreateUser(ctx context.Context, a auth.Actor, email, name, pas
 }
 
 func (s *Service) ListMembers(ctx context.Context, a auth.Actor, key string) ([]Member, error) {
-	p, _, err := s.access(s.db.R, a, key, roleViewer)
+	p, _, err := s.access(s.db.R, a, key, actView)
 	if err != nil {
 		return nil, err
 	}
@@ -220,12 +220,19 @@ func (s *Service) ListMembers(ctx context.Context, a auth.Actor, key string) ([]
 }
 
 func (s *Service) SetMember(ctx context.Context, a auth.Actor, key string, userID int64, roleName string) error {
-	if parseRole(roleName) == roleNone {
-		return invalid("role must be admin, member or viewer")
-	}
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, mine, err := s.access(tx, a, key, actMembers)
 		if err != nil {
+			return err
+		}
+		var known int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM roles WHERE name = ?`, roleName).Scan(&known); err != nil {
+			return err
+		}
+		if known == 0 {
+			return invalid("unknown role")
+		}
+		if err := guardAdminRole(tx, p.ID, userID, mine, roleName); err != nil {
 			return err
 		}
 		var exists int
@@ -251,8 +258,11 @@ func (s *Service) SetMember(ctx context.Context, a auth.Actor, key string, userI
 
 func (s *Service) RemoveMember(ctx context.Context, a auth.Actor, key string, userID int64) error {
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, mine, err := s.access(tx, a, key, actMembers)
 		if err != nil {
+			return err
+		}
+		if err := guardAdminRole(tx, p.ID, userID, mine, ""); err != nil {
 			return err
 		}
 		if err := s.guardLastAdmin(tx, p.ID, userID); err != nil {
@@ -271,6 +281,23 @@ func (s *Service) RemoveMember(ctx context.Context, a auth.Actor, key string, us
 		return s.journal(ctx, tx, a, change{Operation: "member.remove", Target: key, Event: "project.updated",
 			Project: key, Changes: map[string]any{"user_id": userID}})
 	})
+}
+
+// guardAdminRole stops a custom role that holds "members" from escalating: only an admin may grant,
+// change or remove the admin role. newRole is "" when the member is being removed.
+func guardAdminRole(tx *sql.Tx, projectID, userID int64, actorRole, newRole string) error {
+	if actorRole == "admin" {
+		return nil
+	}
+	var cur string
+	err := tx.QueryRow(`SELECT role FROM project_members WHERE project_id = ? AND user_id = ?`, projectID, userID).Scan(&cur)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if cur == "admin" || newRole == "admin" {
+		return ErrForbidden
+	}
+	return nil
 }
 
 // guardLastAdmin refuses to demote or remove the only admin, which would orphan the project.

@@ -62,7 +62,7 @@ type Workflow struct {
 }
 
 func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Workflow, error) {
-	p, _, err := s.access(s.db.R, a, key, roleViewer)
+	p, _, err := s.access(s.db.R, a, key, actView)
 	if err != nil {
 		return Workflow{}, err
 	}
@@ -145,7 +145,7 @@ func (s *Service) AddStatus(ctx context.Context, a auth.Actor, key, name, catego
 	}
 	var st Status
 	err := s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actWorkflow)
 		if err != nil {
 			return err
 		}
@@ -170,7 +170,7 @@ func (s *Service) AddStatus(ctx context.Context, a auth.Actor, key, name, catego
 func (s *Service) UpdateStatus(ctx context.Context, a auth.Actor, key string, id int64, patch map[string]any) (Status, error) {
 	var out Status
 	err := s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actWorkflow)
 		if err != nil {
 			return err
 		}
@@ -255,7 +255,7 @@ func (s *Service) UpdateStatus(ctx context.Context, a auth.Actor, key string, id
 
 func (s *Service) DeleteStatus(ctx context.Context, a auth.Actor, key string, id int64) error {
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actWorkflow)
 		if err != nil {
 			return err
 		}
@@ -287,7 +287,7 @@ func (s *Service) DeleteStatus(ctx context.Context, a auth.Actor, key string, id
 // SetTransitions replaces the transition rules. An empty list allows every status change.
 func (s *Service) SetTransitions(ctx context.Context, a auth.Actor, key string, ts []Transition) error {
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actWorkflow)
 		if err != nil {
 			return err
 		}
@@ -381,7 +381,7 @@ func (s *Service) AddCustomField(ctx context.Context, a auth.Actor, key string, 
 		}
 	}
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actWorkflow)
 		if err != nil {
 			return err
 		}
@@ -409,7 +409,7 @@ func (s *Service) AddCustomField(ctx context.Context, a auth.Actor, key string, 
 // DeleteCustomField removes the definition; values already stored on items are left untouched.
 func (s *Service) DeleteCustomField(ctx context.Context, a auth.Actor, key, name string) error {
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actWorkflow)
 		if err != nil {
 			return err
 		}

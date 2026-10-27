@@ -9,10 +9,12 @@
     listItemTemplates,
     listMembers,
     listProjectTokens,
+    listRoles,
     type Member,
     type ProjectToken,
     removeMember,
     revokeProjectToken,
+    type Role,
     saveItemTemplate,
     saveProjectTemplate,
     setMember,
@@ -81,11 +83,20 @@
   let members = $state<Member[]>([]);
   let addUser = $state("");
   let addRole = $state("member");
+  let roles = $state<Role[]>([]);
+  function roleLabel(name: string): string {
+    return ["admin", "member", "viewer"].includes(name)
+      ? t(`psettings.roles.${name}` as "psettings.roles.admin")
+      : name;
+  }
   const candidates = $derived(
     people.users.filter((u) => !members.some((m) => m.user_id === u.id)),
   );
   async function loadMembers(): Promise<void> {
-    members = await listMembers(project);
+    [members, roles] = await Promise.all([
+      listMembers(project),
+      listRoles().then((r) => r.items),
+    ]);
   }
 
   // ---- tokens ----
@@ -219,12 +230,8 @@
                     await loadMembers();
                   })}
               >
-                {#each ["admin", "member", "viewer"] as r (r)}
-                  <option value={r}
-                    >{t(
-                      `psettings.roles.${r}` as "psettings.roles.admin",
-                    )}</option
-                  >
+                {#each roles as r (r.name)}
+                  <option value={r.name}>{roleLabel(r.name)}</option>
                 {/each}
               </select>
               <button
@@ -261,12 +268,8 @@
               {/each}
             </select>
             <select aria-label={t("psettings.role")} bind:value={addRole}>
-              {#each ["admin", "member", "viewer"] as r (r)}
-                <option value={r}
-                  >{t(
-                    `psettings.roles.${r}` as "psettings.roles.admin",
-                  )}</option
-                >
+              {#each roles as r (r.name)}
+                <option value={r.name}>{roleLabel(r.name)}</option>
               {/each}
             </select>
             <button class="primary" type="submit"

@@ -749,11 +749,24 @@ export interface AuditEntry {
   ts: number;
 }
 
-export interface RightRow {
-  action: string;
-  viewer: boolean;
-  member: boolean;
-  admin: boolean;
+export interface Role {
+  name: string;
+  builtin: boolean;
+  actions: string[];
+}
+
+export function listRoles(): Promise<{ items: Role[]; actions: string[] }> {
+  return request("GET", "/roles");
+}
+
+export function saveRole(name: string, actions: string[]): Promise<Role> {
+  return request("PUT", `/admin/roles/${encodeURIComponent(name)}`, {
+    actions,
+  });
+}
+
+export function deleteRole(name: string): Promise<undefined> {
+  return request("DELETE", `/admin/roles/${encodeURIComponent(name)}`);
 }
 
 export async function listAdminUsers(): Promise<AdminUser[]> {
@@ -792,7 +805,6 @@ export async function getAudit(f: {
 
 export function getInstance(): Promise<{
   settings: Record<string, string | number | boolean>;
-  rights: RightRow[];
 }> {
   return request("GET", "/admin/instance");
 }

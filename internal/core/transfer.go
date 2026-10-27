@@ -41,7 +41,7 @@ type Export struct {
 
 // ExportProject reads everything of a project the actor may see, archived items included.
 func (s *Service) ExportProject(ctx context.Context, a auth.Actor, key string) (Export, error) {
-	p, _, err := s.access(s.db.R, a, key, roleViewer)
+	p, _, err := s.access(s.db.R, a, key, actExport)
 	if err != nil {
 		return Export{}, err
 	}
@@ -228,7 +228,7 @@ func (s *Service) ImportItems(ctx context.Context, a auth.Actor, project string,
 		return rep, err
 	}
 	defer tx.Rollback()
-	p, _, err := s.access(tx, a, project, roleMember)
+	p, _, err := s.access(tx, a, project, actImport)
 	if err != nil {
 		return rep, err
 	}

@@ -219,7 +219,7 @@ func (s *Service) GetItem(ctx context.Context, a auth.Actor, key string) (Item, 
 	if err != nil {
 		return Item{}, err
 	}
-	if _, _, err := s.access(s.db.R, a, pk, roleViewer); err != nil {
+	if _, _, err := s.access(s.db.R, a, pk, actView); err != nil {
 		return Item{}, err
 	}
 	r, err := loadRow(s.db.R, key)
@@ -310,7 +310,7 @@ func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, c
 
 	var out Item
 	err := s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, in.Project, roleMember)
+		p, _, err := s.access(tx, a, in.Project, actItemCreate)
 		if err != nil {
 			return err
 		}
@@ -497,7 +497,7 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 	}
 	var out Item
 	err = s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, pk, roleMember)
+		p, _, err := s.access(tx, a, pk, actItemUpdate)
 		if err != nil {
 			return err
 		}

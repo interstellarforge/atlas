@@ -12,6 +12,9 @@ func (s *Server) registerAdmin(mux *http.ServeMux, protect func(http.HandlerFunc
 	mux.Handle("PATCH /api/v1/admin/users/{id}", protect(s.adminPatchUser))
 	mux.Handle("GET /api/v1/admin/audit", protect(s.adminAudit))
 	mux.Handle("GET /api/v1/admin/instance", protect(s.adminInstance))
+	mux.Handle("GET /api/v1/roles", protect(s.roles))
+	mux.Handle("PUT /api/v1/admin/roles/{name}", protect(s.adminSaveRole))
+	mux.Handle("DELETE /api/v1/admin/roles/{name}", protect(s.adminDeleteRole))
 }
 
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
@@ -77,11 +80,45 @@ func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
 }
 
-// adminInstance shows the effective, read-only instance settings (they come from the environment) and the rights matrix.
+// adminInstance shows the effective, read-only instance settings (they come from the environment).
 func (s *Server) adminInstance(w http.ResponseWriter, r *http.Request) {
 	if a := actor(r); !a.IsAdmin || a.Kind != "human" {
 		writeError(w, http.StatusForbidden, "forbidden", "not allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"settings": s.instance, "rights": core.RightsMatrix()})
+	writeJSON(w, http.StatusOK, map[string]any{"settings": s.instance})
+}
+
+// roles lists the project roles with their actions, and the action names the matrix is built from.
+func (s *Server) roles(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.Roles(r.Context(), actor(r))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "actions": core.Actions})
+}
+
+// adminSaveRole creates a custom role or edits viewer, member or a custom role: {"actions": [...]}.
+func (s *Server) adminSaveRole(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Actions []string `json:"actions"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	role, err := s.core.SaveRole(r.Context(), actor(r), r.PathValue("name"), in.Actions)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, role)
+}
+
+func (s *Server) adminDeleteRole(w http.ResponseWriter, r *http.Request) {
+	if err := s.core.DeleteRole(r.Context(), actor(r), r.PathValue("name")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

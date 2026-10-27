@@ -177,27 +177,3 @@ func (s *Service) AuditLog(ctx context.Context, a auth.Actor, f AuditFilter) ([]
 	}
 	return out, rows.Err()
 }
-
-// RightRow is one line of the rights matrix: what each project role may do. It documents what the
-// code enforces (the minimum role each service demands); a test keeps the two in step.
-type RightRow struct {
-	Action string `json:"action"`
-	Viewer bool   `json:"viewer"`
-	Member bool   `json:"member"`
-	Admin  bool   `json:"admin"`
-}
-
-func RightsMatrix() []RightRow {
-	return []RightRow{
-		{"view", true, true, true},
-		{"export", true, true, true},
-		{"item.create", false, true, true},
-		{"item.update", false, true, true},
-		{"comment", false, true, true},
-		{"import", false, true, true},
-		{"workflow", false, false, true},
-		{"project.update", false, false, true},
-		{"members", false, false, true},
-		{"tokens", false, false, true},
-	}
-}

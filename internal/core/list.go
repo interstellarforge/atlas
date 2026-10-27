@@ -22,7 +22,7 @@ func (s *Service) filterProjects(a auth.Actor, f ItemFilter) ([]int64, error) {
 	var ids []int64
 	if len(keys) > 0 {
 		for _, k := range keys {
-			p, _, err := s.access(s.db.R, a, k, roleViewer)
+			p, _, err := s.access(s.db.R, a, k, actView)
 			if err != nil {
 				return nil, err
 			}

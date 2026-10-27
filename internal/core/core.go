@@ -117,27 +117,6 @@ func batchFrom(ctx context.Context) any {
 
 // ---- authorization ----
 
-type role int
-
-const (
-	roleNone role = iota
-	roleViewer
-	roleMember
-	roleAdmin
-)
-
-func parseRole(s string) role {
-	switch s {
-	case "admin":
-		return roleAdmin
-	case "member":
-		return roleMember
-	case "viewer":
-		return roleViewer
-	}
-	return roleNone
-}
-
 type Project struct {
 	ID         int64  `json:"-"`
 	Key        string `json:"key"`
@@ -147,49 +126,47 @@ type Project struct {
 	Role       string `json:"role,omitempty"`
 }
 
-// access resolves the project and checks the actor holds at least min on it.
+// access resolves the project and checks the actor's role grants act on it.
 // Projects the actor cannot see are reported as not found, so existence does not leak.
-func (s *Service) access(q queryer, a auth.Actor, key string, min role) (Project, role, error) {
+// A global admin holds every action. The returned string is the actor's role name.
+func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Project, string, error) {
 	scope := auth.ScopeRead
-	if min >= roleMember {
+	if act != actView && act != actExport {
 		scope = auth.ScopeWrite
 	}
 	if !a.Can(scope) {
-		return Project{}, roleNone, ErrForbidden
+		return Project{}, "", ErrForbidden
 	}
 	var p Project
 	var archived sql.NullInt64
 	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at FROM projects WHERE key = ?`, key).
 		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !a.CanProject(p.Key)) {
-		return Project{}, roleNone, ErrNotFound
+		return Project{}, "", ErrNotFound
 	}
 	if err != nil {
-		return Project{}, roleNone, err
+		return Project{}, "", err
 	}
 	if archived.Valid {
 		p.ArchivedAt = &archived.Int64
 	}
 
-	r := roleNone
-	if a.IsAdmin {
-		r = roleAdmin
-	} else {
-		var name string
-		err := q.QueryRow(`SELECT role FROM project_members WHERE project_id = ? AND user_id = ?`, p.ID, a.UserID).Scan(&name)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return Project{}, roleNone, err
+	role, allowed := "admin", true
+	if !a.IsAdmin {
+		err := q.QueryRow(`SELECT m.role, EXISTS (SELECT 1 FROM role_actions r WHERE r.role = m.role AND r.action = ?)
+			FROM project_members m WHERE m.project_id = ? AND m.user_id = ?`, string(act), p.ID, a.UserID).Scan(&role, &allowed)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Project{}, "", ErrNotFound
 		}
-		r = parseRole(name)
+		if err != nil {
+			return Project{}, "", err
+		}
 	}
-	if r == roleNone {
-		return Project{}, roleNone, ErrNotFound
+	if !allowed {
+		return Project{}, "", ErrForbidden
 	}
-	if r < min {
-		return Project{}, roleNone, ErrForbidden
-	}
-	p.Role = [...]string{"", "viewer", "member", "admin"}[r]
-	return p, r, nil
+	p.Role = role
+	return p, role, nil
 }
 
 // readableProjects lists the project ids and keys the actor may read.

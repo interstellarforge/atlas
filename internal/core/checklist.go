@@ -25,7 +25,7 @@ func (s *Service) ListChecklist(ctx context.Context, a auth.Actor, key string) (
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := s.access(s.db.R, a, pk, roleViewer); err != nil {
+	if _, _, err := s.access(s.db.R, a, pk, actView); err != nil {
 		return nil, err
 	}
 	return checklist(s.db.R, key)
@@ -134,7 +134,7 @@ func (s *Service) checklistTx(ctx context.Context, a auth.Actor, key, op string,
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
-		if _, _, err := s.access(tx, a, pk, roleMember); err != nil {
+		if _, _, err := s.access(tx, a, pk, actItemUpdate); err != nil {
 			return err
 		}
 		ref, err := refOf(tx, key)

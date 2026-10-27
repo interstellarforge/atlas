@@ -94,7 +94,7 @@ func scanItemTemplate(row interface{ Scan(...any) error }) (ItemTemplate, error)
 const itemTemplateCols = `id, name, type, title_prefix, description, priority, labels, status, checklist, subitems, project_id`
 
 func (s *Service) ListItemTemplates(ctx context.Context, a auth.Actor, key string) ([]ItemTemplate, error) {
-	p, _, err := s.access(s.db.R, a, key, roleViewer)
+	p, _, err := s.access(s.db.R, a, key, actView)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func (s *Service) SaveItemTemplate(ctx context.Context, a auth.Actor, key string
 		return ItemTemplate{}, err
 	}
 	err := s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actProjectUpdate)
 		if err != nil {
 			return err
 		}
@@ -288,7 +288,7 @@ func (s *Service) upsertItemTemplate(tx *sql.Tx, project *int64, t ItemTemplate)
 
 func (s *Service) DeleteItemTemplate(ctx context.Context, a auth.Actor, key string, id int64) error {
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actProjectUpdate)
 		if err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ type appliedTemplate struct {
 // never fails on them.
 func (s *Service) applyItemTemplate(a auth.Actor, in CreateItem) (appliedTemplate, error) {
 	out := appliedTemplate{in: in}
-	p, _, err := s.access(s.db.R, a, in.Project, roleMember)
+	p, _, err := s.access(s.db.R, a, in.Project, actItemCreate)
 	if err != nil {
 		return out, err
 	}

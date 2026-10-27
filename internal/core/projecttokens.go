@@ -25,7 +25,7 @@ func (s *Service) ListProjectTokens(ctx context.Context, a auth.Actor, key strin
 	if err := selfOnly(a); err != nil {
 		return nil, err
 	}
-	p, _, err := s.access(s.db.R, a, key, roleAdmin)
+	p, _, err := s.access(s.db.R, a, key, actTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (s *Service) CreateProjectToken(ctx context.Context, a auth.Actor, key, nam
 	var out ProjectToken
 	var plain string
 	err := s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actTokens)
 		if err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func (s *Service) RevokeProjectToken(ctx context.Context, a auth.Actor, key stri
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, roleAdmin)
+		p, _, err := s.access(tx, a, key, actTokens)
 		if err != nil {
 			return err
 		}

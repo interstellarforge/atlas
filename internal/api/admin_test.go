@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -101,7 +102,10 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
 	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "t"}, kees)
 	roles := map[string]func(*http.Request){}
-	for _, r := range []string{"viewer", "member", "admin"} {
+	if c := e.do("PUT", "/api/v1/admin/roles/commenter", map[string]any{"actions": []string{"view", "comment"}}, kees); c.Code != 200 {
+		t.Fatalf("create role: %d", c.Code)
+	}
+	for _, r := range []string{"viewer", "member", "admin", "commenter"} {
 		u, err := e.auth.CreateUser(r+"@example.com", r, "password-123", false)
 		if err != nil {
 			t.Fatal(err)
@@ -140,16 +144,75 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 			return e.do("GET", "/api/v1/projects/EXO/tokens", nil, as).Code
 		},
 	}
-	for _, row := range core.RightsMatrix() {
-		f, ok := try[row.Action]
+	matrix := decodeBody[struct {
+		Items   []core.Role
+		Actions []string
+	}](t, e.do("GET", "/api/v1/roles", nil, kees))
+	if len(matrix.Items) != 4 {
+		t.Fatalf("roles: %+v", matrix.Items)
+	}
+	for _, act := range matrix.Actions {
+		f, ok := try[act]
 		if !ok {
-			t.Fatalf("matrix row %q has no check", row.Action)
+			t.Fatalf("action %q has no check", act)
 		}
-		for role, want := range map[string]bool{"viewer": row.Viewer, "member": row.Member, "admin": row.Admin} {
-			code := f(role, roles[role])
+		for _, role := range matrix.Items {
+			want := slices.Contains(role.Actions, act)
+			code := f(role.Name, roles[role.Name])
 			if allowed := code < 300; allowed != want {
-				t.Errorf("%s as %s: matrix says %v, got HTTP %d", row.Action, role, want, code)
+				t.Errorf("%s as %s: matrix says %v, got HTTP %d", act, role.Name, want, code)
 			}
 		}
+	}
+}
+
+// TestRoleEditing: edits take effect at once, admin is fixed, assigned roles cannot be deleted and a
+// custom role with "members" cannot hand out admin.
+func TestRoleEditing(t *testing.T) {
+	e := setup(t)
+	kees := sessionOf(e, t)
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
+	u, _ := e.auth.CreateUser("lead@example.com", "lead", "password-123", false)
+	uid := strconv.FormatInt(u.ID, 10)
+	if c := e.do("PUT", "/api/v1/admin/roles/lead", map[string]any{"actions": []string{"view", "members"}}, kees).Code; c != 200 {
+		t.Fatalf("create: %d", c)
+	}
+	e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "lead"}, kees)
+	lead := loginAs(e, t, "lead@example.com", "password-123")
+	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "admin"}, lead).Code; c != 403 {
+		t.Errorf("self-promotion to admin: HTTP %d, want 403", c)
+	}
+	for name, body := range map[string]map[string]any{
+		"admin":  {"actions": []string{"view"}},
+		"noview": {"actions": []string{"comment"}},
+		"bad":    {"actions": []string{"view", "nuke"}},
+	} {
+		if c := e.do("PUT", "/api/v1/admin/roles/"+name, body, kees).Code; c < 400 {
+			t.Errorf("PUT role %s: HTTP %d, want an error", name, c)
+		}
+	}
+	if c := e.do("DELETE", "/api/v1/admin/roles/lead", nil, kees).Code; c < 400 {
+		t.Errorf("delete assigned role: HTTP %d", c)
+	}
+	if c := e.do("DELETE", "/api/v1/admin/roles/member", nil, kees).Code; c < 400 {
+		t.Errorf("delete built-in role: HTTP %d", c)
+	}
+	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "ghost"}, kees).Code; c < 400 {
+		t.Errorf("unknown role: HTTP %d", c)
+	}
+	if c := e.do("PUT", "/api/v1/admin/roles/x", map[string]any{"actions": []string{"view"}}, lead).Code; c != 403 {
+		t.Errorf("non-admin role edit: HTTP %d, want 403", c)
+	}
+	if c := e.do("PUT", "/api/v1/admin/roles/viewer", map[string]any{"actions": []string{"view"}}, kees).Code; c != 200 {
+		t.Fatalf("edit viewer: %d", c)
+	}
+	v, _ := e.auth.CreateUser("v@example.com", "v", "password-123", false)
+	e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(v.ID, 10), map[string]any{"role": "viewer"}, kees)
+	if c := e.do("GET", "/api/v1/projects/EXO/export", nil, loginAs(e, t, "v@example.com", "password-123")).Code; c != 403 {
+		t.Errorf("export after removing it from viewer: HTTP %d, want 403", c)
+	}
+	e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "viewer"}, kees)
+	if c := e.do("DELETE", "/api/v1/admin/roles/lead", nil, kees).Code; c != 204 {
+		t.Errorf("delete unused role: HTTP %d", c)
 	}
 }

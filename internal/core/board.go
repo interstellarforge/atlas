@@ -67,7 +67,7 @@ func (s *Service) currentSeq(q queryer) (int64, error) {
 
 // Board returns every status column of a project with its first page of cards.
 func (s *Service) Board(ctx context.Context, a auth.Actor, key string, f BoardFilter) (Board, error) {
-	p, _, err := s.access(s.db.R, a, key, roleViewer)
+	p, _, err := s.access(s.db.R, a, key, actView)
 	if err != nil {
 		return Board{}, err
 	}
@@ -98,7 +98,7 @@ func (s *Service) Board(ctx context.Context, a auth.Actor, key string, f BoardFi
 
 // BoardColumn returns further cards of one column, continuing from a cursor.
 func (s *Service) BoardColumn(ctx context.Context, a auth.Actor, key string, statusID int64, f BoardFilter, cursor string) (Column, error) {
-	p, _, err := s.access(s.db.R, a, key, roleViewer)
+	p, _, err := s.access(s.db.R, a, key, actView)
 	if err != nil {
 		return Column{}, err
 	}
@@ -224,7 +224,7 @@ func (s *Service) MoveItem(ctx context.Context, a auth.Actor, key string, versio
 	}
 	var out Item
 	err = s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, pk, roleMember)
+		p, _, err := s.access(tx, a, pk, actItemUpdate)
 		if err != nil {
 			return err
 		}

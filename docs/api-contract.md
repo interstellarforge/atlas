@@ -31,7 +31,9 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET | `/admin/users` | Global admin, session only |
 | PATCH | `/admin/users/{id}` | `{"is_admin"?, "active"?}`; no self-deactivation, the last active admin stays; deactivating ends sessions, tokens stop working |
 | GET | `/admin/audit` | Audit log newest first; filters `actor`, `operation` (prefix), `target`, `before` (id), `limit` (max 200) |
-| GET | `/admin/instance` | Effective instance settings (read-only, from the environment) and the rights matrix |
+| GET | `/admin/instance` | Effective instance settings (read-only, from the environment) |
+| GET | `/roles` | Project roles with their actions, plus the list of action names |
+| PUT, DELETE | `/admin/roles/{name}` | Global admin only. PUT `{"actions":[...]}` creates a custom role or replaces the actions of viewer, member or a custom role (`admin` is fixed, `view` is mandatory). DELETE refuses built-ins and roles still assigned |
 | POST | `/auth/register` | `{"email","name","password","invite"?}`: with a valid invite, or when the instance policy is `open` (optionally one email domain). Refusals count against the login rate limiter. Closed instance without invite: 403 |
 | GET | `/auth/policy` | Public: `registration` (closed/invite/open), `min_password_length`, `allowed_domain` |
 | POST | `/auth/login` | Also accepts `code` (authenticator code or recovery code). With 2FA on and no code the answer is 401 `totp_required`; a used code cannot be reused |
@@ -51,7 +53,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET/PUT | `/projects/{key}/workflow` | GET: types, hierarchy, statuses, transitions, labels, milestones, custom fields. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change |
 | POST/PATCH/DELETE | `/projects/{key}/statuses[/{id}]` | Manage statuses (project admin); delete refused while items use it. PATCH accepts `allow_create` (false: items cannot be created directly in this status, moving in stays allowed; at least one status must stay creatable). Create in a blocked status (also the default one) fails with 422 `rule_violation`, over REST, MCP and import |
 | POST/DELETE | `/projects/{key}/custom-fields[/{name}]` | Custom field definitions (project admin) |
-| GET | `/projects/{key}/members`, PUT/DELETE `/projects/{key}/members/{user}` | Roles: admin, member, viewer |
+| GET | `/projects/{key}/members`, PUT/DELETE `/projects/{key}/members/{user}` | Role: any name from `GET /roles` (built-in admin, member, viewer) |
 | GET/POST | `/users` | List users; create (global admin) |
 | GET | `/projects/{key}/board` | Every status column with `count`, `over_wip` and the first `limit` cards (default 50, max 200), plus `seq` (journal position to subscribe from). Filters: `type`, `priority`, `label`, `assignee`, `q`, `archived=1`; `fields` selects card fields |
 | GET | `/projects/{key}/board/columns/{statusId}?cursor=` | Further cards of one column |

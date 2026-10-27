@@ -29,7 +29,7 @@ func (s *Service) AddComment(ctx context.Context, a auth.Actor, key, body string
 	}
 	c := Comment{Actor: a.String(), Body: body}
 	err = s.tx(func(tx *sql.Tx) error {
-		if _, _, err := s.access(tx, a, pk, roleMember); err != nil {
+		if _, _, err := s.access(tx, a, pk, actComment); err != nil {
 			return err
 		}
 		var itemID int64
@@ -64,7 +64,7 @@ func (s *Service) ListComments(ctx context.Context, a auth.Actor, key string) ([
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := s.access(s.db.R, a, pk, roleViewer); err != nil {
+	if _, _, err := s.access(s.db.R, a, pk, actView); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.R.Query(`SELECT c.id, c.actor, c.body, c.created_at FROM comments c

@@ -9,7 +9,7 @@
 
 ## Authorization
 
-- Roles per project via `project_members` (`admin`, `member`, `viewer`).
+- Roles per project via `project_members`: built-in `admin` (fixed, all actions), `member` and `viewer` (editable) plus custom roles. Each role is a set of actions in `role_actions` (ADR-0010); every project check in `core` names an action through `Service.access`.
 - Token scopes: `read` and `write` separately, optionally limited to projects. A token never exceeds its owner's rights.
 - Enforced in `core` services, not only in handlers. SSE and `changes_since` filter by permission.
 - Required tests: permission matrix for read/write/other-project access, token scope, revoked token.
@@ -48,7 +48,7 @@
 - Changing a password requires the current one and ends every other session. Passwords, token secrets and hashes never enter the audit log (tested).
 - Deactivating a user deletes their sessions and makes their tokens fail; sign-in is refused. The last active admin cannot be demoted or deactivated, and nobody deactivates themselves.
 - Project tokens never exceed their owner: access still goes through the owner's membership. When the owner leaves the project, those tokens are revoked.
-- The rights matrix shown in the admin UI is the code's own table (`core.RightsMatrix`) and a test checks it against real requests for viewer, member and admin. See ADR-0008.
+- The rights matrix in the admin UI is the `roles`/`role_actions` data that `core.access` enforces; `TestRightsMatrixMatchesEnforcement` checks every role × action against real requests, `TestRoleEditing` the guards. Only global admins (human session) edit roles. A role holding `members` cannot grant, change or remove `admin` (no self-escalation). Defaults equal the old fixed behaviour. See ADR-0010.
 
 ### Two-factor authentication, registration and deletion
 
