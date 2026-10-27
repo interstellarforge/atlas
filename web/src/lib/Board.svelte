@@ -672,7 +672,6 @@
     gap: var(--space-4);
     overflow-x: auto;
     scroll-snap-type: x proximity;
-    padding-bottom: var(--space-2);
   }
   .column {
     position: relative;

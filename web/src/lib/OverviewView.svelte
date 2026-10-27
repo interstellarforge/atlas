@@ -52,7 +52,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    max-width: 900px;
     padding: 20px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
