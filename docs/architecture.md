@@ -55,6 +55,7 @@ Browser (Svelte SPA) --REST+SSE--> ATLAS SERVER (one Go binary) <--MCP-- Claude/
 | `auth` | Sessions, tokens, scopes, actor context | `db` |
 | `media` | Upload validation, thumbnails | `db` |
 | `notifications` | Inbox creation and read state | `core`, `db` |
+| `backup` | Full backup and restore of the data directory (CLI only) | `db` |
 | `scheduler` | Built-in jobs, outbox processing (v1.5) | `core` |
 
 Rules:

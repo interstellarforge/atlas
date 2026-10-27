@@ -152,6 +152,8 @@
     letter-spacing: -0.035em;
   }
   .back {
+    display: inline-block;
+    padding: 4px 0; /* WCAG 2.2 target size minimum */
     color: #d7e8ff;
     font-size: var(--atlas-fs-sm);
   }

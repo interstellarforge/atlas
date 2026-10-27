@@ -91,7 +91,11 @@ func (d *DB) backup(dir string) error {
 		return err
 	}
 	name := fmt.Sprintf("pre-migrate-%s.db", time.Now().UTC().Format("20060102T150405Z"))
-	dest := filepath.Join(dir, name)
+	return d.Snapshot(filepath.Join(dir, name))
+}
+
+// Snapshot writes a consistent copy of the live database to dest (which must not exist) without stopping writers.
+func (d *DB) Snapshot(dest string) error {
 	// VACUUM INTO gives a consistent copy; the path is ours, but escape quotes anyway.
 	_, err := d.W.Exec(`VACUUM INTO '` + strings.ReplaceAll(dest, `'`, `''`) + `'`)
 	return err

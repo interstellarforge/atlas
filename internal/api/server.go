@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/tokens/{id}", protect(s.revokeToken))
 	s.registerWork(mux, protect)
 	s.registerBoard(mux, protect)
+	s.registerTransfer(mux, protect)
 	mux.Handle("GET /api/v1/events", protect(s.events))
 	mux.Handle("GET /api/v1/changes", protect(s.changes))
 	if s.mcpStats != nil {

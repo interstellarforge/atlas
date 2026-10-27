@@ -14,6 +14,7 @@ import (
 
 	"github.com/kees/atlas/internal/api"
 	"github.com/kees/atlas/internal/auth"
+	"github.com/kees/atlas/internal/backup"
 	"github.com/kees/atlas/internal/config"
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
@@ -55,6 +56,15 @@ func run() error {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})))
 
+	if len(os.Args) == 3 && os.Args[1] == "restore" {
+		// Offline by design: the database must not be open while it is replaced.
+		m, err := backup.Restore(os.Args[2], cfg.DataDir)
+		if err != nil {
+			return err
+		}
+		slog.Info("restored", "from", os.Args[2], "files", len(m.Files), "generation", m.Generation)
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "uploads"), 0o750); err != nil {
 		return err
 	}
@@ -87,7 +97,7 @@ func run() error {
 	uploads := media.NewStore(filepath.Join(cfg.DataDir, "uploads"), media.Limits{MaxBytes: cfg.UploadMaxBytes, MaxPixels: cfg.UploadMaxMegapixels})
 	svc.SetMedia(uploads)
 	if len(os.Args) > 1 {
-		return runCommand(svc, os.Args[1:])
+		return runCommand(svc, database, cfg.DataDir, os.Args[1:])
 	}
 	feed := events.New(database, svc)
 	svc.SetNotifier(feed.Hub().Notify)

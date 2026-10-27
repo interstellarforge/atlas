@@ -78,6 +78,23 @@ Process peak RSS (`/usr/bin/time -l` on the `internal/media` test binary, Apple 
 
 Reproduce: `ATLAS_BENCH_IMAGE=<file> /usr/bin/time -l <media.test> -test.run Thumbnail`. Not measured: how long the Go runtime keeps that memory after the thumbnail, concurrent uploads, corrupt images, WebP at 20 MP.
 
+## v1.0 validation (REL, 2026-10-27)
+
+Hardware: developer Mac (Apple Silicon, arm64, SSD), loopback. **Not representative low-end hardware**; this is the main gap in this validation. Reproduce: `ATLAS_BENCH=1 go test ./benchmarks -run Concurrent -v`, `benchmarks/rss.sh`, `docker run -m 384m`.
+
+| Target | Result | Verdict |
+|---|---|---|
+| Idle RSS <= 100 MB | 21.8 MB (native, 10.000 items); container idle 41 MiB | met on this machine |
+| Normal use <= 200 MB | 19.8 MB after 2.000 requests (native); container 75 MiB after login + 3.000 requests, with `-m 384m` | met on this machine |
+| Container 384 MB | image 25.9 MB; 75 MiB in use under that limit; large-image thumbnails peak at ~135 MB (see below) | met |
+| Board p95 <= 150 ms | 5 concurrent clients, real HTTP, 10.000 items: p50 14 ms, p95 28-33 ms (5 x 50 cards) | met on this machine |
+| Update p95 <= 100 ms | same run, PATCH: p50 1.8 ms, p95 9-10 ms | met on this machine |
+| >= 5 concurrent clients | 5 clients x 100 rounds, no errors | met |
+
+`synchronous=FULL` vs `NORMAL` through HTTP with 5 clients: board p95 28-33 ms and update p95 9-10 ms for both (three runs, no consistent difference). At SQLite level (Baseline 1 and `TestBaseline`) NORMAL is faster for writes (update p95 about 0.57 ms vs 0.16 ms in the latest run), but fsync cost on a Mac SSD says little about a server disk: repeat on target hardware before changing the FULL default.
+
+Not measured: low-end hardware, more than 5 clients, container memory with the 10.000-item dataset loaded (the container run used an empty database), sustained write load, import of 20.000 rows, backup duration with many uploads.
+
 ## Not measured yet
 
 Low-end hardware, concurrent writers under load, uploads, reparenting large subtrees, large-subtree comparison, MCP calls per user action beyond the two scenarios above.

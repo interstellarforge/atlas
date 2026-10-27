@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -429,5 +430,71 @@ func TestNotifications(t *testing.T) {
 	}
 	if _, unreadNow := inbox(asBob); unreadNow != 0 {
 		t.Fatalf("unread after read-all: %v", unreadNow)
+	}
+}
+
+// TestExportImportRoundTrip: an export imports into another project; the dry run writes nothing and reports
+// duplicates, errors and the key mapping; a failing row stops the whole import.
+func TestExportImportRoundTrip(t *testing.T) {
+	e := setup(t)
+	cookie, csrf := e.login(t)
+	asUser := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
+	for _, k := range []string{"SRC", "DST"} {
+		e.do("POST", "/api/v1/projects", map[string]any{"key": k, "name": k}, asUser)
+	}
+	e.do("POST", "/api/v1/items", map[string]any{"project": "SRC", "type": "epic", "title": "Platform", "labels": []string{"core"}}, asUser)
+	e.do("POST", "/api/v1/items", map[string]any{"project": "SRC", "type": "story", "title": "Login", "parent": "SRC-1"}, asUser)
+	e.do("POST", "/api/v1/items/SRC-1/comments", map[string]any{"body": "hello"}, asUser)
+
+	w := e.do("GET", "/api/v1/projects/SRC/export", nil, asUser)
+	if w.Code != 200 {
+		t.Fatalf("export: %d %s", w.Code, w.Body)
+	}
+	exported := w.Body.Bytes()
+	if !strings.Contains(string(exported), `"hello"`) {
+		t.Fatalf("export misses comments: %s", exported)
+	}
+	if w := e.do("GET", "/api/v1/projects/SRC/export?format=csv", nil, asUser); w.Code != 200 || !strings.Contains(w.Body.String(), "SRC-2,story,Login") {
+		t.Fatalf("csv export: %d %s", w.Code, w.Body)
+	}
+
+	post := func(path string, body []byte) map[string]any {
+		r := httptest.NewRequest("POST", path, bytes.NewReader(body))
+		asUser(r)
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, r)
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body)
+		}
+		return decodeBody[map[string]any](t, rec)
+	}
+	rep := post("/api/v1/projects/DST/import?dry_run=1", exported)
+	if rep["applied"] != false || rep["created"] != 2.0 {
+		t.Fatalf("dry run: %v", rep)
+	}
+	if w := e.do("GET", "/api/v1/items/DST-1", nil, asUser); w.Code != 404 {
+		t.Fatalf("dry run wrote an item: %d", w.Code)
+	}
+	rep = post("/api/v1/projects/DST/import", exported)
+	mapping, _ := rep["mapping"].(map[string]any)
+	if rep["applied"] != true || mapping["SRC-2"] != "DST-2" {
+		t.Fatalf("import: %v", rep)
+	}
+	if w := e.do("GET", "/api/v1/items/DST-2", nil, asUser); !strings.Contains(w.Body.String(), `"parent":"DST-1"`) {
+		t.Fatalf("parent not remapped: %s", w.Body)
+	}
+	// Importing again finds both rows as duplicates and creates nothing.
+	rep = post("/api/v1/projects/DST/import", exported)
+	if dups, _ := rep["duplicates"].([]any); len(dups) != 2 || rep["created"] != 0.0 {
+		t.Fatalf("duplicates: %v", rep)
+	}
+	// One bad row (unknown status) rejects the whole file.
+	bad := []byte(`{"items":[{"type":"task","title":"fine"},{"type":"task","title":"broken","status":"Nope"}]}`)
+	rep = post("/api/v1/projects/DST/import", bad)
+	if errs, _ := rep["errors"].([]any); rep["applied"] != false || len(errs) != 1 {
+		t.Fatalf("bad row: %v", rep)
+	}
+	if w := e.do("GET", "/api/v1/items?project=DST&q=fine", nil, asUser); strings.Contains(w.Body.String(), `"fine"`) {
+		t.Fatalf("partial import leaked: %s", w.Body)
 	}
 }

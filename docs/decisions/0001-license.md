@@ -9,7 +9,7 @@ Atlas is open source and self-hosted, offered possibly as a network service. The
 
 ## Decision
 
-Proposed: AGPL-3.0. Modified versions offered as a network service must remain open source. Alternative: MIT (more permissive, no such guarantee).
+AGPL-3.0 (see `LICENSE`). Modified versions offered as a network service must remain open source. Alternative: MIT (more permissive, no such guarantee).
 
 ## Consequences
 

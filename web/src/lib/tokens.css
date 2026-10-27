@@ -244,8 +244,8 @@ textarea {
 
 input[type="checkbox"] {
   min-height: 0;
-  inline-size: 17px;
-  block-size: 17px;
+  inline-size: 24px; /* WCAG 2.2 target size minimum */
+  block-size: 24px;
   accent-color: var(--color-accent);
 }
 

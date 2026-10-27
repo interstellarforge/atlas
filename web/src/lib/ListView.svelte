@@ -202,6 +202,14 @@
   }
   .head,
   .line {
+    display: grid;
+    grid-template-columns:
+      6rem minmax(14rem, 1fr)
+      5rem 8rem 6rem 8rem 7rem 7rem;
+    gap: var(--space-3);
+    align-items: center;
+    min-width: 60rem;
+    padding: 0 var(--space-3);
     height: 100%;
     font-size: 12px;
     border-bottom: 1px solid var(--color-border);
@@ -215,8 +223,8 @@
     border-bottom: 1px solid var(--color-border);
   }
   .head button {
-    min-height: 0;
-    padding: 0;
+    min-height: 24px; /* WCAG 2.2 target size minimum */
+    padding: 0 2px;
     border: none;
     background: none;
     color: inherit;
