@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/crypto v0.58.0
+	golang.org/x/image v0.47.0
 	modernc.org/sqlite v1.61.0
 )
 

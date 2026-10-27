@@ -8,6 +8,7 @@
     type User,
   } from "./lib/api";
   import Board from "./lib/Board.svelte";
+  import Brand from "./lib/Brand.svelte";
   import { connect, disconnect, realtime } from "./lib/events.svelte";
   import { t } from "./lib/i18n";
   import { loadPeople } from "./lib/people.svelte";
@@ -68,7 +69,10 @@
 {:else if !user}
   <main class="center">
     <form class="card" onsubmit={submit}>
-      <h1>{t("auth.login.title")}</h1>
+      <div class="auth-header">
+        <Brand />
+        <h1>{t("auth.login.title")}</h1>
+      </div>
       <label>
         {t("auth.login.email")}
         <input
@@ -87,14 +91,14 @@
           required
         />
       </label>
-      {#if error}<p class="error" role="alert">{error}</p>{/if}
+      {#if error}<p class="banner error" role="alert">{error}</p>{/if}
       <button class="primary" type="submit">{t("auth.login.submit")}</button>
     </form>
   </main>
 {:else}
   <div class="shell">
     <header>
-      <strong>{t("app.name")}</strong>
+      <Brand />
       <nav aria-label={t("nav.main")}>
         <a
           href="#/"
@@ -114,7 +118,7 @@
       </nav>
       <span class="spacer"></span>
       <span class="live" class:off={!realtime.connected} role="status">
-        <span aria-hidden="true">●</span>
+        <span aria-hidden="true" class="dot">●</span>
         <span class="sr-only"
           >{realtime.connected ? t("nav.live") : t("nav.offline")}</span
         >
@@ -154,25 +158,40 @@
     min-height: 100dvh;
     display: grid;
     place-items: center;
-    padding: var(--space-4);
+    padding: var(--space-6);
+    background:
+      radial-gradient(
+        ellipse at 80% 75%,
+        color-mix(in srgb, var(--color-accent) 17%, transparent),
+        transparent 42%
+      ),
+      var(--color-bg);
   }
   .card {
-    width: min(24rem, 100%);
+    width: min(430px, 100%);
     display: grid;
     gap: var(--space-4);
-    padding: var(--space-6);
+    padding: 32px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--atlas-radius-xl);
+    box-shadow: var(--atlas-shadow-lg);
+  }
+  .auth-header {
+    display: grid;
+    justify-items: center;
+    gap: var(--space-3);
+    text-align: center;
+  }
+  .card button {
+    width: 100%;
   }
   label {
     display: grid;
-    gap: var(--space-1);
-    font-size: 0.875rem;
+    gap: 6px;
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-semibold);
     color: var(--color-muted);
-  }
-  .error {
-    margin: 0;
   }
   .shell {
     display: flex;
@@ -180,45 +199,63 @@
     height: 100dvh;
   }
   header {
+    flex: none;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
+    gap: var(--space-3) 22px;
+    min-height: var(--atlas-topbar-h);
+    padding: var(--space-2) 28px;
     background: var(--color-surface);
     border-bottom: 1px solid var(--color-border);
   }
   nav {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-3);
+    align-items: center;
+    gap: var(--space-1);
   }
   nav a {
+    padding: 10px 13px;
+    border-radius: var(--radius);
     color: var(--color-muted);
+    font-weight: var(--atlas-fw-semibold);
     text-decoration: none;
+    white-space: nowrap;
+  }
+  nav a:hover {
+    background: var(--color-soft);
   }
   nav a[aria-current="page"] {
-    color: var(--color-text);
-    font-weight: 600;
+    color: var(--color-accent);
+    background: var(--color-accent-soft);
   }
   .spacer {
     flex: 1;
   }
   .live {
-    color: #2e9e5b;
-    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-success);
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-semibold);
   }
   .live.off {
-    color: var(--color-muted);
+    color: var(--color-warning);
+  }
+  .dot {
+    font-size: 0.7rem;
   }
   main {
     flex: 1;
     min-height: 0;
-    padding: var(--space-4);
+    padding: 28px;
   }
   .page {
     height: 100%;
     min-height: 0;
+    max-width: 1600px;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
@@ -228,5 +265,26 @@
   .page > :global(.project) {
     flex: 1;
     min-height: 0;
+  }
+  @media (max-width: 900px) {
+    header {
+      padding: var(--space-2) 16px;
+    }
+    main {
+      padding: 20px 16px;
+    }
+  }
+  @media (max-width: 600px) {
+    header {
+      padding: var(--space-2) 12px;
+      gap: var(--space-2);
+    }
+    nav a {
+      padding: 9px;
+      font-size: var(--atlas-fs-sm);
+    }
+    main {
+      padding: 14px 12px 24px;
+    }
   }
 </style>

@@ -12,13 +12,14 @@ Tools are thin adapters over `core` services (same as REST). Tool names, descrip
 | `workflow_get` | Types, statuses, labels for a project |
 | `board_get` | Compact board overview |
 | `items_search` | Filter and search items |
-| `item_get` | One item in detail |
+| `item_get` | One item in detail (links, checklist, last 10 comments) |
 | `items_write` | Create, update, move, batch |
 | `comment_add` | Agent updates and comments |
+| `checklist_write` | Add, tick, rename, remove checklist items |
 | `changes_since` | Delta since a cursor |
 | `attachments` | List metadata, link attachments |
 
-Implemented: `projects_list`, `workflow_get`, `board_get` (10 cards per column by default), `items_search`, `item_get`, `items_write` (ops `create`/`update`/`move`, `clear` nulls assignee/due_at/parent), `changes_since`, `comment_add`, resources `atlas://projects/{key}/board`, `atlas://projects/{key}/workflow`, `atlas://items/{key}` (same compact shapes, same 16 KiB cap, same project scoping). Every tool call is logged with tool, actor, ms, bytes and error flag. Limits: 120 requests/minute per token (HTTP 429 + `Retry-After`), 500 mutations/hour per token (tool error `rate_limited`), 16 KiB per result (tool error `too_large`). Counters are in memory and reset on restart. Not yet: `projects_write`, attachments tool (needs media storage), mass-delete guard (nothing is deletable yet), aggregated metrics (p95, truncation rate).
+Implemented: `projects_list`, `workflow_get`, `board_get` (10 cards per column by default), `items_search`, `item_get`, `items_write` (ops `create`/`update`/`move`, `clear` nulls assignee/due_at/parent), `changes_since`, `comment_add`, `attachments` (metadata and fetch path, never contents), `checklist_write` (add/set/remove, applied one by one), resources `atlas://projects/{key}/board`, `atlas://projects/{key}/workflow`, `atlas://items/{key}` (same compact shapes, same 16 KiB cap, same project scoping). Every tool call is logged with tool, actor, ms, bytes and error flag. Limits: 120 requests/minute per token (HTTP 429 + `Retry-After`), 500 mutations/hour per token (tool error `rate_limited`), 16 KiB per result (tool error `too_large`). Counters are in memory and reset on restart. Not yet: `projects_write`, uploading through MCP (no base64), mass-delete guard (nothing is deletable yet), aggregated metrics (p95, truncation rate).
 `items_write` failures are tool errors (`isError`) with `{"error":{"code","message","current"?},"operation":N,"applied":false}`; partial mode returns per-operation `error` entries instead. Idempotency records live 24 h per actor+key (`idempotency_records`).
 
 ## Response rules

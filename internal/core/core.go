@@ -10,6 +10,7 @@ import (
 
 	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/db"
+	"github.com/kees/atlas/internal/media"
 )
 
 var (
@@ -46,6 +47,7 @@ type Service struct {
 	notify func()
 	// outer is set on the per-batch copy of the service: tx() then joins the batch transaction.
 	outer *sql.Tx
+	media *media.Store
 }
 
 // SetNotifier registers a callback that runs after every committed mutation, so realtime

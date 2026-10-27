@@ -185,6 +185,25 @@
       "blocks": "blocked by",
       "relates": "relates to",
       "duplicates": "duplicated by"
-    }
+    },
+    "checklist": "Checklist",
+    "noChecklist": "No checklist items.",
+    "checklistAdd": "New checklist item",
+    "checklistAddButton": "Add item",
+    "checklistRemove": "Remove {text}",
+    "checklistFailed": "Could not change the checklist: {message}",
+    "comments": "Comments",
+    "noComments": "No comments yet.",
+    "commentLabel": "Add a comment (Markdown)",
+    "commentSubmit": "Comment",
+    "commentFailed": "Could not post the comment: {message}",
+    "agentToken": "Agent (token {id})",
+    "attachments": "Attachments",
+    "noAttachments": "No attachments.",
+    "attachmentAdd": "Add an image (PNG, JPEG or WebP; or paste a screenshot)",
+    "attachmentFailed": "Could not add the image: {message}",
+    "attachmentTooLarge": "The image is too large.",
+    "attachmentOpen": "Open {name} in full size",
+    "attachmentDims": "{width} × {height}"
   }
 }

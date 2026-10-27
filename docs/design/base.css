@@ -1,0 +1,18 @@
+/* No global reset: scope to .atlas-root to protect existing app code. */
+.atlas-root, .atlas-root * { box-sizing: border-box; }
+.atlas-root { min-height: 100vh; margin: 0; background: var(--atlas-bg); color: var(--atlas-text); font: var(--atlas-fw-regular) var(--atlas-fs-md)/var(--atlas-lh-normal) var(--atlas-font); -webkit-font-smoothing: antialiased; }
+.atlas-root button, .atlas-root input, .atlas-root select, .atlas-root textarea { font: inherit; }
+.atlas-root button { cursor: pointer; }
+.atlas-root a { color: var(--atlas-accent); text-decoration: none; }
+.atlas-root a:hover { text-decoration: underline; }
+.atlas-root :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--atlas-focus); outline-offset: 3px; box-shadow: 0 0 0 5px var(--atlas-focus-halo);
+}
+.atlas-root [hidden] { display: none !important; }
+.atlas-root h1,.atlas-root h2,.atlas-root h3,.atlas-root p { margin: 0; }
+.atlas-root h1 { font-size: var(--atlas-fs-2xl); line-height: var(--atlas-lh-tight); letter-spacing: -.035em; }
+.atlas-root h2 { font-size: var(--atlas-fs-xl); line-height: var(--atlas-lh-tight); letter-spacing: -.02em; }
+.atlas-root h3 { font-size: var(--atlas-fs-lg); line-height: var(--atlas-lh-tight); }
+.atlas-root .atlas-muted { color: var(--atlas-text-muted); }
+.atlas-root .atlas-sr-only { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (prefers-reduced-motion: reduce) { .atlas-root *, .atlas-root *::before, .atlas-root *::after { scroll-behavior:auto !important; animation-duration:.01ms !important; transition-duration:.01ms !important; } }

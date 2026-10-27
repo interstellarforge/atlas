@@ -53,7 +53,7 @@ func TestMCPWithSDKClient(t *testing.T) {
 	for _, tl := range tools.Tools {
 		names[tl.Name] = true
 	}
-	for _, want := range []string{"projects_list", "workflow_get", "board_get", "items_search", "item_get", "items_write", "comment_add", "changes_since"} {
+	for _, want := range []string{"projects_list", "workflow_get", "board_get", "items_search", "item_get", "items_write", "comment_add", "changes_since", "attachments"} {
 		if !names[want] {
 			t.Errorf("tool %s missing", want)
 		}
@@ -63,6 +63,15 @@ func TestMCPWithSDKClient(t *testing.T) {
 		"operations": []any{map[string]any{"op": "create", "project": "EXO", "type": "task", "title": "from agent"}}}})
 	if err != nil || res.IsError {
 		t.Fatalf("items_write: %v %+v", err, res)
+	}
+
+	// Checklist and comments are readable in item_get after an agent wrote them.
+	if res, err = session.CallTool(ctx, &sdk.CallToolParams{Name: "checklist_write", Arguments: map[string]any{"key": "EXO-2", "add": []any{"step one"}}}); err != nil || res.IsError {
+		t.Fatalf("checklist_write: %v %+v", err, res)
+	}
+	if res, err = session.CallTool(ctx, &sdk.CallToolParams{Name: "item_get", Arguments: map[string]any{"key": "EXO-2"}}); err != nil || res.IsError ||
+		!strings.Contains(res.Content[0].(*sdk.TextContent).Text, `"checklist":[{"id":1,"text":"step one","done":false}]`) {
+		t.Fatalf("item_get checklist: %v %+v", err, res)
 	}
 
 	// Resources: readable inside the token's projects, hidden outside them.

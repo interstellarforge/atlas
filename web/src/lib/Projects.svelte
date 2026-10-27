@@ -72,44 +72,62 @@
 <style>
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: var(--atlas-fs-lg);
   }
   .projects {
     list-style: none;
     margin: 0;
     padding: 0;
     display: grid;
-    gap: var(--space-2);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
   }
   .projects li {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
+    min-height: 96px;
+    padding: 20px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
+  }
+  .projects li:hover {
+    border-color: var(--color-border-strong);
   }
   .projects a {
     display: flex;
-    gap: var(--space-3);
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
     color: var(--color-text);
+    font-weight: var(--atlas-fw-semibold);
     text-decoration: none;
   }
   .card {
     display: grid;
-    gap: var(--space-3);
-    max-width: 24rem;
-    padding: var(--space-4);
+    gap: 14px;
+    max-width: 700px;
+    padding: 20px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
   }
   label {
     display: grid;
-    gap: var(--space-1);
-    font-size: 0.875rem;
+    gap: 6px;
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-semibold);
     color: var(--color-muted);
+  }
+  @media (max-width: 900px) {
+    .projects {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 600px) {
+    .projects {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

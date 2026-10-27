@@ -119,7 +119,9 @@
         {#each g.items as item (item.key)}
           <li>
             <a class="mono" href={itemHref(item.key)}>{item.key}</a>
-            <span class="chip">{t(`types.${item.type}` as "types.epic")}</span>
+            <span class="chip type"
+              >{t(`types.${item.type}` as "types.epic")}</span
+            >
             <span class="title">{item.title}</span>
             {#if item.blocked}<span class="chip warn">{t("board.blocked")}</span
               >{/if}
@@ -149,44 +151,50 @@
     height: 100%;
     overflow-y: auto;
   }
+  .group {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    overflow: hidden;
+  }
   .group h2 {
-    margin: 0 0 var(--space-2);
-    font-size: 0.95rem;
+    margin: 0;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    font-size: var(--atlas-fs-md);
+    font-weight: var(--atlas-fw-bold);
+    background: var(--color-soft);
+    border-bottom: 1px solid var(--color-border);
   }
   ul {
     list-style: none;
     margin: 0;
     padding: 0;
-    display: grid;
-    gap: var(--space-1);
   }
   li {
+    height: 44px;
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    gap: 10px;
+    min-width: 0;
+    padding: 0 14px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  li:last-child {
+    border-bottom: 0;
   }
   .mono {
+    font: 700 11px var(--font-mono);
     color: var(--color-muted);
-    font-variant-numeric: tabular-nums;
   }
   .title {
     flex: 1;
-    min-width: 10rem;
-  }
-  .chip {
-    padding: 0 var(--space-2);
-    font-size: 0.7rem;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    color: var(--color-muted);
-  }
-  .chip.warn {
-    color: var(--color-danger);
-    border-color: var(--color-danger);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

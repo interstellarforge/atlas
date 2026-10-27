@@ -15,6 +15,7 @@ import (
 	"github.com/kees/atlas/internal/db"
 	"github.com/kees/atlas/internal/events"
 	"github.com/kees/atlas/internal/mcp"
+	"github.com/kees/atlas/internal/media"
 	"github.com/kees/atlas/migrations"
 )
 
@@ -41,7 +42,10 @@ func setup(t *testing.T) env {
 	svc := core.New(d, a)
 	feed := events.New(d, svc)
 	svc.SetNotifier(feed.Hub().Notify)
-	h := api.New(api.Deps{DB: d, Auth: a, Core: svc, Feed: feed, SPA: spa, MCP: mcp.Handler(svc, feed)}).Handler()
+	const maxUpload = 200 << 10
+	store := media.NewStore(t.TempDir(), media.Limits{MaxBytes: maxUpload, MaxPixels: 1_000_000})
+	svc.SetMedia(store)
+	h := api.New(api.Deps{DB: d, Auth: a, Core: svc, Feed: feed, SPA: spa, MCP: mcp.Handler(svc, feed), Media: store, MaxUpload: maxUpload}).Handler()
 	return env{h: h, auth: a}
 }
 

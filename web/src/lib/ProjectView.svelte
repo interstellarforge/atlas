@@ -57,20 +57,20 @@
 </script>
 
 <section class="project">
-  <div class="head">
-    <a href="#/">{t("project.back")}</a>
+  <div class="hero">
+    <a class="back" href="#/">{t("project.back")}</a>
     <h1>{project}</h1>
-    <nav aria-label={t("project.views")}>
-      {#each tabs as tab (tab.view)}
-        <a
-          href="#/p/{project}{tab.suffix}"
-          aria-current={view === tab.view ? "page" : undefined}
-          >{t(tab.label)}</a
-        >
-      {/each}
-    </nav>
   </div>
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  <nav class="tabs" aria-label={t("project.views")}>
+    {#each tabs as tab (tab.view)}
+      <a
+        href="#/p/{project}{tab.suffix}"
+        aria-current={view === tab.view ? "page" : undefined}
+        >{t(tab.label)}</a
+      >
+    {/each}
+  </nav>
+  {#if error}<p class="banner error" role="alert">{error}</p>{/if}
   {#if workflow}
     <div class="view">
       {#if view === "board"}
@@ -104,29 +104,91 @@
     gap: var(--space-3);
     min-height: 0;
   }
-  .head {
+  .hero {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--space-4);
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    min-height: 120px;
+    padding: 20px 28px;
+    border-radius: var(--radius-lg);
+    background: linear-gradient(115deg, var(--atlas-hero-1), var(--atlas-hero-2));
+    color: var(--atlas-hero-text);
   }
-  nav {
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    opacity: 0.75;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 71% 29%, #fff 0 1px, transparent 2px),
+      radial-gradient(circle at 89% 15%, #fff 0 1px, transparent 2px),
+      radial-gradient(circle at 49% 62%, #8bc7ff 0 1px, transparent 2px),
+      radial-gradient(
+        ellipse 31% 90% at 104% 115%,
+        rgb(79 165 255 / 65%) 1%,
+        transparent 70%
+      );
+  }
+  .hero h1 {
+    color: #fff;
+    font-size: var(--atlas-fs-2xl);
+    letter-spacing: -0.035em;
+  }
+  .back {
+    color: #d7e8ff;
+    font-size: var(--atlas-fs-sm);
+  }
+  .tabs {
     display: flex;
     gap: var(--space-1);
-  }
-  nav a {
-    padding: var(--space-1) var(--space-3);
-    text-decoration: none;
-    color: var(--color-muted);
-    border-radius: var(--radius);
-  }
-  nav a[aria-current="page"] {
-    color: var(--color-text);
+    width: max-content;
+    max-width: 100%;
+    padding: var(--space-1);
+    overflow: auto;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+  .tabs a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 7px 15px;
+    border-radius: var(--radius);
+    color: var(--color-muted);
+    font-weight: var(--atlas-fw-semibold);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .tabs a:hover {
+    background: var(--color-soft);
+  }
+  .tabs a[aria-current="page"] {
+    color: var(--color-accent-soft-text);
+    background: var(--color-accent-soft);
   }
   .view {
     flex: 1;
     min-height: 0;
+  }
+  @media (max-width: 600px) {
+    .hero {
+      min-height: 100px;
+      padding: 16px;
+      border-radius: var(--radius-md);
+    }
+    .tabs {
+      width: 100%;
+    }
+    .tabs a {
+      padding: 7px 10px;
+      font-size: var(--atlas-fs-sm);
+    }
   }
 </style>

@@ -14,7 +14,7 @@
   import { itemHref } from "./routes";
   import VirtualList from "./VirtualList.svelte";
 
-  const ROW = 40;
+  const ROW = 48; // --atlas-list-row-h
   const FIELDS =
     "key,type,title,status,priority,assignee,due_at,blocked,updated_at,archived_at";
   type SortKey = "key" | "priority" | "due" | "updated";
@@ -195,37 +195,36 @@
     display: flex;
     flex-direction: column;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
     background: var(--color-surface);
     overflow-x: auto;
   }
   .head,
   .line {
-    display: grid;
-    grid-template-columns:
-      6rem minmax(14rem, 1fr)
-      5rem 8rem 6rem 8rem 7rem 7rem;
-    gap: var(--space-3);
-    align-items: center;
-    min-width: 60rem;
-    padding: 0 var(--space-3);
+    height: 100%;
+    font-size: 12px;
+    border-bottom: 1px solid var(--color-border);
   }
   .head {
-    height: 36px;
-    font-size: 0.8rem;
+    height: 44px;
+    font-size: 11px;
+    font-weight: var(--atlas-fw-bold);
     color: var(--color-muted);
+    background: var(--color-soft);
     border-bottom: 1px solid var(--color-border);
   }
   .head button {
+    min-height: 0;
     padding: 0;
     border: none;
     background: none;
     color: inherit;
+    font-weight: inherit;
     text-decoration: underline;
   }
   .head button.active {
-    color: var(--color-text);
-    font-weight: 600;
+    color: var(--color-accent);
+    font-weight: 700;
   }
   .rows {
     flex: 1;
@@ -238,7 +237,10 @@
     border-bottom: 1px solid var(--color-border);
   }
   .line.archived {
-    opacity: 0.6;
+    opacity: 0.62;
+  }
+  .line:hover {
+    background: var(--color-soft);
   }
   .line > span {
     overflow: hidden;
@@ -246,8 +248,8 @@
     white-space: nowrap;
   }
   .mono {
+    font: 700 11px var(--font-mono);
     color: var(--color-muted);
-    font-variant-numeric: tabular-nums;
   }
   .blocked {
     color: var(--color-danger);

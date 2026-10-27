@@ -230,3 +230,51 @@ func TestMCPCommentsAndResponseCap(t *testing.T) {
 		t.Fatalf("cap: %v %s", err, r.Result.Content[0].Text)
 	}
 }
+
+func TestCommentsAndChecklistREST(t *testing.T) {
+	e := setup(t)
+	cookie, csrf := e.login(t)
+	asUser := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, asUser)
+	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "t"}, asUser)
+	_, read, _ := e.auth.CreateToken(1, "ro", []string{auth.ScopeRead}, nil, nil)
+	asReader := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+read) }
+
+	if w := e.do("POST", "/api/v1/items/EXO-1/comments", map[string]any{"body": "hello **world**"}, asUser); w.Code != 201 {
+		t.Fatalf("comment: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("POST", "/api/v1/items/EXO-1/comments", map[string]any{"body": "x"}, asReader); w.Code != 403 {
+		t.Fatalf("read-only token commented: %d", w.Code)
+	}
+	if w := e.do("POST", "/api/v1/items/EXO-1/comments", map[string]any{"body": "  "}, asUser); w.Code != 400 {
+		t.Fatalf("empty comment: %d", w.Code)
+	}
+	list := decodeBody[struct{ Items []map[string]any }](t, e.do("GET", "/api/v1/items/EXO-1/comments", nil, asReader))
+	if len(list.Items) != 1 || list.Items[0]["body"] != "hello **world**" {
+		t.Fatalf("comments: %v", list.Items)
+	}
+
+	for _, text := range []string{"one", "two"} {
+		if w := e.do("POST", "/api/v1/items/EXO-1/checklist", map[string]any{"text": text}, asUser); w.Code != 201 {
+			t.Fatalf("add: %d %s", w.Code, w.Body)
+		}
+	}
+	if w := e.do("PATCH", "/api/v1/items/EXO-1/checklist/2", map[string]any{"done": true}, asUser); w.Code != 200 {
+		t.Fatalf("tick: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("PATCH", "/api/v1/items/EXO-1/checklist/2", map[string]any{"done": false}, asReader); w.Code != 403 {
+		t.Fatalf("read-only token ticked: %d", w.Code)
+	}
+	// An id of another item must not be reachable through this item's URL.
+	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "t2"}, asUser)
+	if w := e.do("PATCH", "/api/v1/items/EXO-2/checklist/2", map[string]any{"done": true}, asUser); w.Code != 404 {
+		t.Fatalf("cross-item checklist edit: %d", w.Code)
+	}
+	if w := e.do("DELETE", "/api/v1/items/EXO-1/checklist/1", nil, asUser); w.Code != 204 {
+		t.Fatalf("remove: %d", w.Code)
+	}
+	cl := decodeBody[struct{ Items []map[string]any }](t, e.do("GET", "/api/v1/items/EXO-1/checklist", nil, asReader))
+	if len(cl.Items) != 1 || cl.Items[0]["done"] != true {
+		t.Fatalf("checklist: %v", cl.Items)
+	}
+}

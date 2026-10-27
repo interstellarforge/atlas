@@ -17,6 +17,7 @@ import (
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
 	"github.com/kees/atlas/internal/events"
+	"github.com/kees/atlas/internal/media"
 )
 
 const maxBodyBytes = 1 << 20
@@ -30,6 +31,8 @@ type Deps struct {
 	CookieSecure bool
 	SPA          fs.FS
 	MCP          http.Handler
+	Media        *media.Store
+	MaxUpload    int64 // bytes per uploaded file
 }
 
 type Server struct {
@@ -40,10 +43,12 @@ type Server struct {
 	cookieSecure bool
 	spa          fs.FS
 	mcp          http.Handler
+	media        *media.Store
+	maxUpload    int64
 }
 
 func New(d Deps) *Server {
-	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP}
+	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, media: d.Media, maxUpload: d.MaxUpload}
 }
 
 func (s *Server) Handler() http.Handler {

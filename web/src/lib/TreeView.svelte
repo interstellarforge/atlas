@@ -5,7 +5,7 @@
   import { itemHref } from "./routes";
   import VirtualList from "./VirtualList.svelte";
 
-  const ROW = 36;
+  const ROW = 44; // --atlas-hierarchy-row-h
   const FIELDS = "key,type,title,status,priority,parent,blocked,version";
 
   interface Row {
@@ -105,7 +105,9 @@
             <span class="toggle"></span>
           {/if}
           <a class="mono" href={itemHref(r.item.key)}>{r.item.key}</a>
-          <span class="chip">{t(`types.${r.item.type}` as "types.epic")}</span>
+          <span class="chip type"
+            >{t(`types.${r.item.type}` as "types.epic")}</span
+          >
           <span class="title">{r.item.title}</span>
           {#if r.item.blocked}<span class="chip warn">{t("board.blocked")}</span
             >{/if}
@@ -127,28 +129,34 @@
     flex: 1;
     min-height: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
     background: var(--color-surface);
+    overflow: hidden;
   }
   .line {
     height: 100%;
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding-right: var(--space-3);
+    gap: 10px;
+    padding-right: 14px;
     border-bottom: 1px solid var(--color-border);
-    font-size: 0.875rem;
+    font-size: 12px;
+    min-width: 0;
+  }
+  .line:hover {
+    background: var(--color-soft);
   }
   .toggle {
-    width: 1.5rem;
+    width: 20px;
+    min-height: 26px;
     padding: 0;
     border: none;
     background: none;
     color: var(--color-muted);
   }
   .mono {
+    font: 700 11px var(--font-mono);
     color: var(--color-muted);
-    font-variant-numeric: tabular-nums;
   }
   .title {
     flex: 1;
@@ -156,17 +164,5 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .chip {
-    padding: 0 var(--space-2);
-    font-size: 0.7rem;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    color: var(--color-muted);
-    white-space: nowrap;
-  }
-  .chip.warn {
-    color: var(--color-danger);
-    border-color: var(--color-danger);
   }
 </style>

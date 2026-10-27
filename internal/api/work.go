@@ -25,6 +25,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, core.ErrForbidden):
 		writeError(w, http.StatusForbidden, "forbidden", "not allowed")
+	case errors.Is(err, core.ErrTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "too_large", "file exceeds the upload limits")
 	case errors.As(err, &inv):
 		writeError(w, http.StatusBadRequest, "invalid", inv.Msg)
 	case errors.As(err, &rule):
@@ -65,6 +67,7 @@ func (s *Server) registerWork(mux *http.ServeMux, protect func(http.HandlerFunc)
 	mux.Handle("GET /api/v1/items/{key}/links", protect(s.listLinks))
 	mux.Handle("POST /api/v1/items/{key}/links", protect(s.addLink))
 	mux.Handle("DELETE /api/v1/items/{key}/links/{type}/{target}", protect(s.removeLink))
+	s.registerNotes(mux, protect)
 }
 
 // ---- users, projects, members ----

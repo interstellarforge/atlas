@@ -32,11 +32,11 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET/PATCH | `/items/{key}` | Read; update (needs `version` in body or `If-Match`). Archive via `{"archived": true}`; there is no hard delete |
 | POST | `/items/{key}/move` | `{"version","status"?,"after"?,"before"?}`: status and/or position between neighbour keys (same project and target column, else 422). Omitting both neighbours appends. Conflicts return 409 |
 | POST | `/items/batch` | Up to 25 mutations |
-| GET/POST | `/items/{key}/comments` | Comments |
-| GET/POST/PATCH | `/items/{key}/checklist` | Checklist items |
+| GET/POST | `/items/{key}/comments` | Comments, oldest first; body is Markdown (rendered client-side, raw HTML off), max 10.000 characters |
+| GET/POST, PATCH/DELETE `/items/{key}/checklist[/{id}]` | Checklist items (max 100); PATCH `{"text"?,"done"?}`. Changes do not bump the item version; event type `checklist.changed` |
 | GET/POST | `/items/{key}/links` (POST `{"type","target"}`), DELETE `/items/{key}/links/{type}/{target}` | Relations; `blocks` cycles are refused |
-| GET/POST | `/items/{key}/attachments` | Metadata / upload |
-| GET | `/attachments/{id}` , `/attachments/{id}/thumb` | Streaming download |
+| GET/POST | `/items/{key}/attachments` | Metadata / upload (multipart, part `file`; PNG, JPEG, WebP; max 10 MB and 20 MP by default; 400 for wrong type or content, 413 over the limits; max 50 per item). Names are generated; the original name is kept for display |
+| GET | `/attachments/{id}` , `/attachments/{id}/thumb` | Authorised streaming download (`nosniff`, sandbox CSP); thumbnail is a JPEG with longest edge 320 px, generated on first request. No delete yet |
 | GET | `/changes?since=<seq>` | Delta sync |
 | GET | `/events` | SSE |
 | GET | `/notifications`, POST `/notifications/{id}/read` | Inbox |
@@ -62,7 +62,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 ## SSE `/events`
 
 - Frame: `id: 1842` + `data: {"seq":1842,"type":"item.updated","project":"EXO","key":"EXO-42"}` (default message event).
-- Types now: `item.created`, `item.updated`, `item.moved`, `item.archived`, `project.created`, `project.updated`, `board.rebalanced` (clients refetch the board). Planned: `item.deleted`, `comment.added`, `notification.created`.
+- Types now: `item.created`, `item.updated`, `item.moved`, `item.archived`, `project.created`, `project.updated`, `board.rebalanced` (clients refetch the board). `comment.added`, `checklist.changed` and `attachment.added` (carry the item key). Planned: `item.deleted`, `notification.created`.
 - Control events: `hello` (`{"generation","seq"}`, first frame; a changed `generation` means the database was replaced, so reload), `resync_required` (`{"seq"}`).
 - `Last-Event-ID` (or `?since=`) resumes from `change_events`. A cursor ahead of the journal or behind its oldest entry gives `resync_required`. Retention: `ATLAS_EVENT_RETENTION_DAYS` (default 7), always keeping the newest 1000.
 - Keepalive comment every 20 s. Events are filtered by the caller's project access. A stream ends after 10 minutes so credentials are re-checked on reconnect.

@@ -1,0 +1,9 @@
+{
+  "nav":{"projects":"Projects","myItems":"My items","tokens":"API tokens","logout":"Log out","theme":"Switch theme"},
+  "project":{"name":"Atlas Core","subtitle":"Core platform · Workstream overview","board":"Board","list":"List","backlog":"Backlog","hierarchy":"Hierarchy","crossProject":"All projects","readOnly":"Read-only","newProject":"New project"},
+  "filter":{"search":"Search items…","type":"All types","priority":"Priority","assignee":"Assignee","label":"Labels","archived":"Archived","clear":"Clear filters","mobile":"Filters and card fields","fields":"Card fields","add":"Add item"},
+  "board":{"loadMore":"Load more","empty":"No work items in this status","emptyHint":"Drop an item here or create one.","blocked":"Blocked","wip":"WIP","over":"Over limit","drag":"Drag item","archive":"Archive or restore"},
+  "detail":{"edit":"Edit work item","details":"Details","description":"Description","title":"Title","status":"Status","parent":"Parent","customFields":"Custom fields","links":"Related work","addLink":"Add link","save":"Save changes","discard":"Discard","archive":"Archive","close":"Close detail","due":"Due date","labels":"Labels","priority":"Priority","assignee":"Assignee","comment":"Comments not included in restyling"},
+  "auth":{"heading":"Welcome back","subtitle":"Sign in to your Atlas workspace.","email":"Email address","password":"Password","remember":"Stay signed in","forgot":"Forgot password?","login":"Sign in","footer":"By Interstellarforge · Designed for focus"},
+  "states":{"emptyTitle":"Your projects will appear here","emptyBody":"Create a project to start planning work.","notFound":"Page not found","reconnecting":"Reconnecting…","connected":"Live updates on","elsewhere":"This item was changed elsewhere. Review the latest version before saving.","success":"Changes saved successfully.","error":"Unable to save your changes. Please try again.","tokenEmpty":"No API tokens yet"}
+}

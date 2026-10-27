@@ -328,3 +328,99 @@ export function removeLink(
 ): Promise<undefined> {
   return request<undefined>("DELETE", `/items/${key}/links/${type}/${target}`);
 }
+
+export interface Comment {
+  id: number;
+  actor: string;
+  body: string;
+  created_at: number;
+}
+
+export interface ChecklistItem {
+  id: number;
+  text: string;
+  done: boolean;
+}
+
+export async function getComments(key: string): Promise<Comment[]> {
+  return (await request<{ items: Comment[] }>("GET", `/items/${key}/comments`))
+    .items;
+}
+
+export function addComment(key: string, body: string): Promise<Comment> {
+  return request<Comment>("POST", `/items/${key}/comments`, { body });
+}
+
+export async function getChecklist(key: string): Promise<ChecklistItem[]> {
+  return (
+    await request<{ items: ChecklistItem[] }>("GET", `/items/${key}/checklist`)
+  ).items;
+}
+
+export function addChecklistItem(
+  key: string,
+  text: string,
+): Promise<ChecklistItem> {
+  return request<ChecklistItem>("POST", `/items/${key}/checklist`, { text });
+}
+
+export function updateChecklistItem(
+  key: string,
+  id: number,
+  patch: { text?: string; done?: boolean },
+): Promise<ChecklistItem> {
+  return request<ChecklistItem>(
+    "PATCH",
+    `/items/${key}/checklist/${String(id)}`,
+    patch,
+  );
+}
+
+export function removeChecklistItem(
+  key: string,
+  id: number,
+): Promise<undefined> {
+  return request<undefined>("DELETE", `/items/${key}/checklist/${String(id)}`);
+}
+
+export interface Attachment {
+  id: number;
+  filename: string;
+  mime: string;
+  size: number;
+  width: number;
+  height: number;
+  url: string;
+  thumb_url: string;
+}
+
+export async function getAttachments(key: string): Promise<Attachment[]> {
+  return (
+    await request<{ items: Attachment[] }>("GET", `/items/${key}/attachments`)
+  ).items;
+}
+
+// Multipart upload; the browser sets the content type and boundary itself.
+export async function uploadAttachment(
+  key: string,
+  file: File,
+): Promise<Attachment> {
+  const body = new FormData();
+  body.append("file", file, file.name);
+  const res = await fetch(`/api/v1/items/${key}/attachments`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrfToken },
+    body,
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: { code?: string; message?: string };
+  };
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      data.error?.code ?? "unknown",
+      data.error?.message ?? res.statusText,
+    );
+  }
+  return data as unknown as Attachment;
+}

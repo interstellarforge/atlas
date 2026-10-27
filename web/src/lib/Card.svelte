@@ -49,7 +49,7 @@
 >
   <header>
     <span class="key">{card.key}</span>
-    <span class="chip">{t(`types.${card.type}` as "types.epic")}</span>
+    <span class="chip type">{t(`types.${card.type}` as "types.epic")}</span>
     {#if showProject && card.project}<span class="chip">{card.project}</span
       >{/if}
     {#if card.blocked}<span class="chip warn">{t("board.blocked")}</span>{/if}
@@ -98,46 +98,58 @@
 
 <style>
   .card {
-    height: 88px;
-    padding: var(--space-2) var(--space-3);
+    height: var(--atlas-card-h);
+    padding: 8px 9px;
     display: grid;
     grid-template-rows: auto 1fr auto;
-    gap: var(--space-1);
+    gap: 2px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
+    box-shadow: var(--atlas-shadow-sm);
     overflow: hidden;
   }
+  .card:hover {
+    border-color: var(--color-border-strong);
+  }
   .card.blocked {
-    border-left: 3px solid var(--color-danger);
+    border-left: 4px solid var(--color-danger);
+    padding-left: 6px;
   }
   .card.archived {
-    opacity: 0.6;
+    opacity: 0.62;
+    border-style: dashed;
   }
   .card.dragging {
     opacity: 0.35;
+    border-style: dashed;
   }
   header,
   footer {
     display: flex;
     align-items: center;
-    gap: var(--space-1);
+    gap: 5px;
     min-width: 0;
   }
+  header {
+    min-height: 17px;
+  }
+  footer {
+    min-height: 21px;
+  }
   .key {
-    font-size: 0.75rem;
+    font: 700 11px var(--font-mono);
     color: var(--color-muted);
-    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   .title {
     margin: 0;
-    font-size: 0.875rem;
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
+    font-size: 13px;
+    font-weight: var(--atlas-fw-semibold);
+    line-height: 1.23;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .title a {
     color: inherit;
@@ -146,50 +158,46 @@
   .title a:hover {
     text-decoration: underline;
   }
-  .chip {
-    padding: 0 var(--space-2);
-    font-size: 0.7rem;
-    line-height: 1.5;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    color: var(--color-muted);
-    white-space: nowrap;
+  footer .chip {
+    max-width: 73px;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 7rem;
-  }
-  .chip.warn {
-    color: var(--color-danger);
-    border-color: var(--color-danger);
   }
   .spacer {
     flex: 1;
+    min-width: 0;
   }
   .handle {
-    padding: 0 var(--space-2);
+    min-height: 0;
+    padding: 2px 6px;
     border: none;
     background: none;
     color: var(--color-muted);
     cursor: grab;
     touch-action: none;
-    line-height: 1.4;
+    line-height: 1.2;
   }
   .link {
-    padding: 0;
+    min-height: 0;
+    padding: 2px 0;
     border: none;
     background: none;
     color: var(--color-muted);
     font-size: 0.7rem;
+    font-weight: var(--atlas-fw-regular);
     text-decoration: underline;
   }
   .avatar {
+    flex: none;
     display: grid;
     place-items: center;
-    width: 1.4rem;
-    height: 1.4rem;
-    font-size: 0.6rem;
+    width: 24px;
+    height: 24px;
+    font-size: var(--atlas-fs-xs);
+    font-weight: var(--atlas-fw-bold);
+    border: 1px solid var(--color-border);
     border-radius: 50%;
-    background: var(--color-accent);
-    color: var(--color-accent-text);
+    background: var(--color-accent-soft);
+    color: var(--color-accent-soft-text);
   }
 </style>

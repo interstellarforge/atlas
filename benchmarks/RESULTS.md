@@ -57,6 +57,18 @@ Browser (built-in browser, same data): the board with ~2.000 cards per column re
 
 `tools/list` for the 8 current tools: 5.978 bytes of JSON (about 1.5k tokens, estimate at 4 bytes/token). Every tool call logs one line (`mcp call tool= ms= bytes= error=`); no aggregation or p95 yet.
 
+## Image upload and thumbnails (REL, 2026-10-27)
+
+Process peak RSS (`/usr/bin/time -l` on the `internal/media` test binary, Apple Silicon Mac): validating and thumbnailing one 20 MP image. Upload validation reads only the header; the thumbnail decodes the full image, one at a time.
+
+| Image (5000 x 4000) | File | Peak RSS |
+|---|---|---|
+| idle test binary | | 10,8 MB |
+| JPEG | 1,6 MB | 84,7 MB |
+| PNG | 0,5 MB | 134,4 MB |
+
+Reproduce: `ATLAS_BENCH_IMAGE=<file> /usr/bin/time -l <media.test> -test.run Thumbnail`. Not measured: how long the Go runtime keeps that memory after the thumbnail, concurrent uploads, corrupt images, WebP at 20 MP.
+
 ## Not measured yet
 
 Low-end hardware, concurrent writers under load, uploads, reparenting large subtrees, large-subtree comparison, MCP metrics.

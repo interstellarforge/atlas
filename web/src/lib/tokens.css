@@ -1,48 +1,204 @@
+/* Atlas design system v1.0 tokens (docs/design). The app's own names (--color-*, --space-*, --radius)
+   are aliases of the --atlas-* values, so components can use either. */
 :root {
-  color-scheme: light dark;
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-6: 1.5rem;
-  --radius: 0.5rem;
+  --atlas-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --atlas-font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --atlas-radius-xs: 5px;
+  --atlas-radius-sm: 8px;
+  --atlas-radius-md: 12px;
+  --atlas-radius-lg: 16px;
+  --atlas-radius-xl: 22px;
+  --atlas-radius-pill: 9999px;
+  --atlas-space-0: 0;
+  --atlas-space-1: 4px;
+  --atlas-space-2: 8px;
+  --atlas-space-3: 12px;
+  --atlas-space-4: 16px;
+  --atlas-space-5: 20px;
+  --atlas-space-6: 24px;
+  --atlas-space-8: 32px;
+  --atlas-space-10: 40px;
+  --atlas-space-12: 48px;
+  --atlas-fs-xs: 11px;
+  --atlas-fs-sm: 12px;
+  --atlas-fs-md: 14px;
+  --atlas-fs-base: 15px;
+  --atlas-fs-lg: 17px;
+  --atlas-fs-xl: 22px;
+  --atlas-fs-2xl: 28px;
+  --atlas-lh-tight: 1.2;
+  --atlas-lh-normal: 1.45;
+  --atlas-lh-relaxed: 1.6;
+  --atlas-fw-regular: 400;
+  --atlas-fw-medium: 500;
+  --atlas-fw-semibold: 600;
+  --atlas-fw-bold: 700;
+  --atlas-topbar-h: 68px;
+  --atlas-card-h: 88px; /* hard virtualization contract */
+  --atlas-column-header-h: 52px;
+  --atlas-list-row-h: 48px;
+  --atlas-backlog-row-h: 44px;
+  --atlas-hierarchy-row-h: 44px;
+  --atlas-column-w: 292px;
+  --atlas-panel-w: 500px;
+  --atlas-ease: cubic-bezier(.2,.7,.25,1);
+  --atlas-duration: 150ms;
+}
 
-  --color-bg: #f7f8fa;
-  --color-surface: #ffffff;
-  --color-border: #d9dde3;
-  --color-text: #14181f;
-  --color-muted: #566070;
-  --color-accent: #2457d6;
-  --color-accent-text: #ffffff;
-  --color-danger: #b42318;
-  --color-focus: #2457d6;
+:root {
+  color-scheme: light;
+  --atlas-bg: #F3F6FB;
+  --atlas-surface: #FFFFFF;
+  --atlas-surface-raised: #FFFFFF;
+  --atlas-surface-soft: #EAF1FA;
+  --atlas-surface-hover: #E3EDF9;
+  --atlas-surface-disabled: #EBEFF6;
+  --atlas-border: #CDD9E8;
+  --atlas-border-strong: #98ACC4;
+  --atlas-text: #11243E;
+  --atlas-text-muted: #435B78;
+  --atlas-text-subtle: #536B87;
+  --atlas-placeholder: #62758F;
+  --atlas-accent: #165DBA;
+  --atlas-accent-hover: #0E4E9E;
+  --atlas-accent-on: #FFFFFF;
+  --atlas-accent-soft: #E1EDFF;
+  --atlas-accent-soft-on: #164C9C;
+  --atlas-focus: #165DBA;
+  --atlas-focus-halo: #FFFFFF;
+  --atlas-danger: #B22342;
+  --atlas-danger-soft: #FCE8ED;
+  --atlas-warning: #865200;
+  --atlas-warning-soft: #FFF0D6;
+  --atlas-success: #086F50;
+  --atlas-success-soft: #DDF6EB;
+  --atlas-info: #155BAD;
+  --atlas-info-soft: #E2EFFF;
+  --atlas-purple: #6B36AF;
+  --atlas-purple-soft: #F0E6FF;
+  --atlas-hero-1: #0B1E39;
+  --atlas-hero-2: #173F7C;
+  --atlas-hero-text: #FAFCFF;
+  --atlas-shadow-sm: 0 1px 3px rgb(11 33 64 / 7%);
+  --atlas-shadow-md: 0 8px 28px rgb(14 37 75 / 10%);
+  --atlas-shadow-lg: 0 24px 64px rgb(9 24 51 / 18%);
+  --atlas-overlay: rgb(7 16 32 / 54%);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --color-bg: #0f1218;
-    --color-surface: #171b23;
-    --color-border: #2a303b;
-    --color-text: #e8ebf0;
-    --color-muted: #9aa4b2;
-    --color-accent: #6b93f5;
-    --color-accent-text: #0f1218;
-    --color-danger: #f97066;
-    --color-focus: #6b93f5;
-  }
+  color-scheme: dark;
+  --atlas-bg: #07111F;
+  --atlas-surface: #0E1B2D;
+  --atlas-surface-raised: #12233B;
+  --atlas-surface-soft: #172B46;
+  --atlas-surface-hover: #1B3453;
+  --atlas-surface-disabled: #18263A;
+  --atlas-border: #304761;
+  --atlas-border-strong: #58708C;
+  --atlas-text: #F3F7FF;
+  --atlas-text-muted: #BDCEE3;
+  --atlas-text-subtle: #A9BFDA;
+  --atlas-placeholder: #A4B7D1;
+  --atlas-accent: #82BBFF;
+  --atlas-accent-hover: #A1D0FF;
+  --atlas-accent-on: #071A33;
+  --atlas-accent-soft: #183D6D;
+  --atlas-accent-soft-on: #D8EAFF;
+  --atlas-focus: #ADDAFF;
+  --atlas-focus-halo: #07111F;
+  --atlas-danger: #FF9AAE;
+  --atlas-danger-soft: #532235;
+  --atlas-warning: #FFD08A;
+  --atlas-warning-soft: #4D351D;
+  --atlas-success: #73E2B8;
+  --atlas-success-soft: #153F36;
+  --atlas-info: #94C9FF;
+  --atlas-info-soft: #1C3B61;
+  --atlas-purple: #CEB0FF;
+  --atlas-purple-soft: #3A285A;
+  --atlas-hero-1: #071427;
+  --atlas-hero-2: #143D77;
+  --atlas-hero-text: #FAFCFF;
+  --atlas-shadow-sm: 0 2px 7px rgb(0 0 0 / 20%);
+  --atlas-shadow-md: 0 12px 32px rgb(0 0 0 / 27%);
+  --atlas-shadow-lg: 0 24px 66px rgb(0 0 0 / 52%);
+  --atlas-overlay: rgb(0 5 13 / 70%);
+}
 }
 
 :root[data-theme="dark"] {
-  --color-bg: #0f1218;
-  --color-surface: #171b23;
-  --color-border: #2a303b;
-  --color-text: #e8ebf0;
-  --color-muted: #9aa4b2;
-  --color-accent: #6b93f5;
-  --color-accent-text: #0f1218;
-  --color-danger: #f97066;
-  --color-focus: #6b93f5;
+  color-scheme: dark;
+  --atlas-bg: #07111F;
+  --atlas-surface: #0E1B2D;
+  --atlas-surface-raised: #12233B;
+  --atlas-surface-soft: #172B46;
+  --atlas-surface-hover: #1B3453;
+  --atlas-surface-disabled: #18263A;
+  --atlas-border: #304761;
+  --atlas-border-strong: #58708C;
+  --atlas-text: #F3F7FF;
+  --atlas-text-muted: #BDCEE3;
+  --atlas-text-subtle: #A9BFDA;
+  --atlas-placeholder: #A4B7D1;
+  --atlas-accent: #82BBFF;
+  --atlas-accent-hover: #A1D0FF;
+  --atlas-accent-on: #071A33;
+  --atlas-accent-soft: #183D6D;
+  --atlas-accent-soft-on: #D8EAFF;
+  --atlas-focus: #ADDAFF;
+  --atlas-focus-halo: #07111F;
+  --atlas-danger: #FF9AAE;
+  --atlas-danger-soft: #532235;
+  --atlas-warning: #FFD08A;
+  --atlas-warning-soft: #4D351D;
+  --atlas-success: #73E2B8;
+  --atlas-success-soft: #153F36;
+  --atlas-info: #94C9FF;
+  --atlas-info-soft: #1C3B61;
+  --atlas-purple: #CEB0FF;
+  --atlas-purple-soft: #3A285A;
+  --atlas-hero-1: #071427;
+  --atlas-hero-2: #143D77;
+  --atlas-hero-text: #FAFCFF;
+  --atlas-shadow-sm: 0 2px 7px rgb(0 0 0 / 20%);
+  --atlas-shadow-md: 0 12px 32px rgb(0 0 0 / 27%);
+  --atlas-shadow-lg: 0 24px 66px rgb(0 0 0 / 52%);
+  --atlas-overlay: rgb(0 5 13 / 70%);
+}
+
+/* Aliases used by the existing components. */
+:root {
+  --font-sans: var(--atlas-font);
+  --font-mono: var(--atlas-font-mono);
+  --space-1: var(--atlas-space-1);
+  --space-2: var(--atlas-space-2);
+  --space-3: var(--atlas-space-3);
+  --space-4: var(--atlas-space-4);
+  --space-5: var(--atlas-space-5);
+  --space-6: var(--atlas-space-6);
+  --radius: var(--atlas-radius-sm);
+  --radius-md: var(--atlas-radius-md);
+  --radius-lg: var(--atlas-radius-lg);
+  --color-bg: var(--atlas-bg);
+  --color-surface: var(--atlas-surface);
+  --color-soft: var(--atlas-surface-soft);
+  --color-hover: var(--atlas-surface-hover);
+  --color-border: var(--atlas-border);
+  --color-border-strong: var(--atlas-border-strong);
+  --color-text: var(--atlas-text);
+  --color-muted: var(--atlas-text-muted);
+  --color-accent: var(--atlas-accent);
+  --color-accent-text: var(--atlas-accent-on);
+  --color-accent-soft: var(--atlas-accent-soft);
+  --color-accent-soft-text: var(--atlas-accent-soft-on);
+  --color-danger: var(--atlas-danger);
+  --color-danger-soft: var(--atlas-danger-soft);
+  --color-warning: var(--atlas-warning);
+  --color-warning-soft: var(--atlas-warning-soft);
+  --color-success: var(--atlas-success);
+  --color-success-soft: var(--atlas-success-soft);
+  --color-focus: var(--atlas-focus);
 }
 
 *,
@@ -53,40 +209,69 @@
 
 body {
   margin: 0;
-  font-family: var(--font-sans);
+  font: var(--atlas-fw-regular) var(--atlas-fs-md) / var(--atlas-lh-normal) var(--font-sans);
   background: var(--color-bg);
   color: var(--color-text);
-  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-focus);
+  outline: 3px solid var(--color-focus);
   outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--atlas-focus-halo);
 }
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
 input,
-select {
+select,
+textarea {
   min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg);
+  min-height: 40px;
+  padding: var(--space-2) 11px;
+  background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
 
+input[type="checkbox"] {
+  min-height: 0;
+  inline-size: 17px;
+  block-size: 17px;
+  accent-color: var(--color-accent);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--atlas-placeholder);
+}
+
+textarea {
+  resize: vertical;
+}
+
 button {
-  padding: var(--space-2) var(--space-3);
+  min-height: 38px;
+  padding: var(--space-2) 14px;
   background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+  font-weight: var(--atlas-fw-semibold);
   cursor: pointer;
+  transition:
+    background var(--atlas-duration) var(--atlas-ease),
+    border-color var(--atlas-duration) var(--atlas-ease);
+}
+
+button:hover:not(:disabled) {
+  background: var(--color-hover);
 }
 
 button.primary {
@@ -95,14 +280,20 @@ button.primary {
   border-color: var(--color-accent);
 }
 
+button.primary:hover:not(:disabled) {
+  background: var(--atlas-accent-hover);
+}
+
 button:disabled {
-  opacity: 0.6;
-  cursor: default;
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 
 h1 {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: var(--atlas-fs-xl);
+  line-height: var(--atlas-lh-tight);
+  letter-spacing: -0.02em;
 }
 
 a {
@@ -124,4 +315,75 @@ a {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 600px) {
+  :root {
+    --atlas-topbar-h: 60px;
+    --atlas-column-w: 286px;
+    --atlas-panel-w: 100vw;
+  }
+}
+
+/* Chip: shared by cards, rows and the item panel. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 21px;
+  padding: 1px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--atlas-radius-pill);
+  background: var(--color-soft);
+  color: var(--color-muted);
+  font-size: var(--atlas-fs-xs);
+  font-weight: var(--atlas-fw-semibold);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.chip.type {
+  border-color: transparent;
+  background: var(--atlas-purple-soft);
+  color: var(--atlas-purple);
+}
+.chip.warn {
+  border-color: transparent;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+.chip.tag {
+  background: var(--color-soft);
+}
+
+/* Banner: error, conflict (changed elsewhere) and success messages. */
+.banner {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid currentcolor;
+  border-radius: var(--radius-md);
+  font-size: var(--atlas-fs-sm);
+  background: var(--atlas-info-soft);
+  color: var(--atlas-info);
+}
+.banner.error {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+.banner.conflict {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+.banner.ok {
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }

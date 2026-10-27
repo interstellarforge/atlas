@@ -19,6 +19,7 @@ import (
 	"github.com/kees/atlas/internal/db"
 	"github.com/kees/atlas/internal/events"
 	"github.com/kees/atlas/internal/mcp"
+	"github.com/kees/atlas/internal/media"
 	"github.com/kees/atlas/migrations"
 	"github.com/kees/atlas/web"
 )
@@ -83,6 +84,8 @@ func run() error {
 	}
 
 	svc := core.New(database, authSvc)
+	uploads := media.NewStore(filepath.Join(cfg.DataDir, "uploads"), media.Limits{MaxBytes: cfg.UploadMaxBytes, MaxPixels: cfg.UploadMaxMegapixels})
+	svc.SetMedia(uploads)
 	if len(os.Args) > 1 {
 		return runCommand(svc, os.Args[1:])
 	}
@@ -95,7 +98,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr: cfg.Addr,
-		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, CookieSecure: cfg.CookieSecure,
+		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, Media: uploads, MaxUpload: cfg.UploadMaxBytes, CookieSecure: cfg.CookieSecure,
 			SPA: web.Dist(), MCP: mcp.Handler(svc, feed)}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,

@@ -119,7 +119,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    font-size: 0.875rem;
+    font-size: var(--atlas-fs-sm);
     color: var(--color-muted);
   }
   .fields {
@@ -127,7 +127,11 @@
   }
   .fields summary {
     cursor: pointer;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
     padding: var(--space-2) var(--space-3);
+    font-weight: var(--atlas-fw-semibold);
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
     background: var(--color-surface);
@@ -143,5 +147,6 @@
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
+    box-shadow: var(--atlas-shadow-md);
   }
 </style>

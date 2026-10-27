@@ -14,6 +14,8 @@
   } from "./api";
   import { onChange, onResync } from "./events.svelte";
   import { t } from "./i18n";
+  import ItemAttachments from "./ItemAttachments.svelte";
+  import ItemNotes from "./ItemNotes.svelte";
   import { people } from "./people.svelte";
 
   let {
@@ -242,6 +244,13 @@
     // Edits in progress are never overwritten: when the item changes elsewhere the user decides.
     const offChange = onChange((event) => {
       if (event.key !== itemKey) return;
+      // Checklist and comments reload themselves and never conflict with the form.
+      if (
+        event.type === "checklist.changed" ||
+        event.type === "comment.added" ||
+        event.type === "attachment.added"
+      )
+        return;
       if (dirty) {
         stale = true;
         return;
@@ -273,7 +282,7 @@
   <header>
     <h2 id="item-panel-title">{itemKey}</h2>
     {#if item}
-      <span class="chip">{t(`types.${item.type}` as "types.epic")}</span>
+      <span class="chip type">{t(`types.${item.type}` as "types.epic")}</span>
       {#if item.archived_at !== null}<span class="chip"
           >{t("board.archived")}</span
         >{/if}
@@ -289,22 +298,22 @@
   </header>
 
   {#if loadError}
-    <p class="error" role="alert">{t("item.loadFailed")}</p>
+    <p class="banner error" role="alert">{t("item.loadFailed")}</p>
   {:else if !item || !form}
     <p>{t("item.loading")}</p>
   {:else}
     <form onsubmit={save}>
       {#if stale}
-        <p class="error" role="alert">
+        <p class="banner conflict" role="alert">
           {error || t("item.changed")}
           <button type="button" onclick={() => void load()}
             >{t("item.reload")}</button
           >
         </p>
       {:else if error}
-        <p class="error" role="alert">{error}</p>
+        <p class="banner error" role="alert">{error}</p>
       {:else if notice && !dirty}
-        <p class="ok" role="status">{notice}</p>
+        <p class="banner ok" role="status">{notice}</p>
       {/if}
 
       <label>
@@ -388,7 +397,7 @@
       {/if}
 
       <div class="actions">
-        <button type="submit" disabled={!dirty || saving}>
+        <button class="primary" type="submit" disabled={!dirty || saving}>
           {saving ? t("item.saving") : t("item.save")}
         </button>
         <button
@@ -410,7 +419,7 @@
 
     <section aria-labelledby="item-links">
       <h3 id="item-links">{t("item.links")}</h3>
-      {#if linkError}<p class="error" role="alert">{linkError}</p>{/if}
+      {#if linkError}<p class="banner error" role="alert">{linkError}</p>{/if}
       {#if links && links.outgoing.length + links.incoming.length > 0}
         <ul>
           {#each links.outgoing as l (`out-${l.type}-${l.key}`)}
@@ -455,11 +464,13 @@
           {t("item.linkTarget")}
           <input bind:value={linkTarget} />
         </label>
-        <button type="submit" disabled={!linkTarget.trim()}
+        <button class="primary" type="submit" disabled={!linkTarget.trim()}
           >{t("item.addLink")}</button
         >
       </form>
     </section>
+    <ItemAttachments {itemKey} />
+    <ItemNotes {itemKey} />
   {/if}
 </dialog>
 
@@ -468,17 +479,18 @@
     margin: 0 0 0 auto;
     height: 100dvh;
     max-height: 100dvh;
-    width: min(36rem, 100vw);
+    width: min(var(--atlas-panel-w), 100vw);
     max-width: 100vw;
-    padding: var(--space-4);
+    padding: 20px 24px;
     background: var(--color-surface);
     color: var(--color-text);
     border: none;
     border-left: 1px solid var(--color-border);
+    box-shadow: var(--atlas-shadow-lg);
     overflow-y: auto;
   }
   dialog::backdrop {
-    background: rgb(0 0 0 / 0.4);
+    background: var(--atlas-overlay);
   }
   header,
   .actions,
@@ -492,9 +504,16 @@
     align-items: center;
     margin-bottom: var(--space-3);
   }
-  h2,
+  h2 {
+    margin: 0;
+    font: 700 var(--atlas-fs-md) var(--font-mono);
+  }
   h3 {
     margin: 0;
+    padding-bottom: 7px;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 13px;
+    font-weight: var(--atlas-fw-bold);
   }
   form {
     display: flex;
@@ -505,7 +524,8 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
-    font-size: 0.8rem;
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-semibold);
     color: var(--color-muted);
     flex: 1;
     min-width: 8rem;
@@ -541,18 +561,6 @@
     margin: 0;
     font-size: 0.75rem;
     color: var(--color-muted);
-  }
-  .chip {
-    padding: 0 var(--space-2);
-    font-size: 0.7rem;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    color: var(--color-muted);
-  }
-  .chip.warn,
-  .error {
-    color: var(--color-danger);
-    border-color: var(--color-danger);
   }
   .error,
   .ok {

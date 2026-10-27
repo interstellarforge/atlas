@@ -535,7 +535,8 @@
   .tools summary {
     cursor: pointer;
     margin-bottom: var(--space-2);
-    font-size: 0.85rem;
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-bold);
     color: var(--color-muted);
   }
   .toolbar {
@@ -566,40 +567,59 @@
     padding-bottom: var(--space-2);
   }
   .column {
-    flex: 0 0 300px;
+    flex: 0 0 var(--atlas-column-w);
     min-height: 0;
     display: flex;
     flex-direction: column;
-    background: color-mix(in srgb, var(--color-surface) 60%, var(--color-bg));
+    padding: var(--space-2);
+    background: var(--color-soft);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
     scroll-snap-align: start;
   }
   .column.over {
     border-color: var(--color-accent);
+    background: var(--color-accent-soft);
   }
   .column header {
+    flex: none;
+    height: var(--atlas-column-header-h);
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
+    align-items: center;
     gap: var(--space-2);
-    padding: var(--space-3);
+    padding: 0 6px;
   }
   h2 {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: 13px;
+    font-weight: var(--atlas-fw-bold);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .count {
-    font-size: 0.8rem;
+    margin-left: auto;
+    padding: 3px 7px;
+    font: 600 11px var(--font-mono);
     color: var(--color-muted);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-pill);
+    white-space: nowrap;
   }
-  .count.warn,
+  .count.warn {
+    color: var(--color-danger);
+    border-color: var(--color-danger);
+    font-weight: 700;
+  }
   .warn-text {
     color: var(--color-danger);
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
   }
-  .warn-text {
-    font-size: 0.75rem;
+  .column:has(.count.warn) {
+    border-color: var(--color-danger);
   }
   .body {
     position: relative;
@@ -620,9 +640,9 @@
     position: absolute;
     left: var(--space-2);
     right: var(--space-2);
-    height: 3px;
+    height: 4px;
     margin-top: -2px;
-    border-radius: 2px;
+    border-radius: var(--atlas-radius-pill);
     background: var(--color-accent);
     pointer-events: none;
   }
@@ -636,11 +656,12 @@
     border: 1px solid var(--color-accent);
     border-radius: var(--radius);
     pointer-events: none;
-    box-shadow: 0 6px 18px rgb(0 0 0 / 0.3);
+    box-shadow: var(--atlas-shadow-lg);
+    transform: rotate(-1.5deg);
   }
   @media (max-width: 640px) {
     .column {
-      flex-basis: 85vw;
+      flex-basis: var(--atlas-column-w);
     }
   }
 </style>

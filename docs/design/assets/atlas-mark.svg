@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none" role="img" aria-labelledby="t"><title id="t">Atlas mark</title>
+<defs><linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#BCE2FF"/><stop offset="1" stop-color="#3C86EF"/></linearGradient><linearGradient id="orbit" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#3D85DE"/><stop offset="1" stop-color="#FFAD66"/></linearGradient></defs>
+<path d="M14 61L38 14a3 3 0 0 1 5 0l24 47h-12L40.5 31 26 61H14Z" fill="url(#blue)"/>
+<path d="M18 25a32 32 0 0 1 40-7M67 31a31 31 0 0 1-5 33" stroke="url(#orbit)" stroke-width="4" stroke-linecap="round"/>
+<circle cx="61" cy="20" r="6" fill="#FFB26B"/>
+</svg>

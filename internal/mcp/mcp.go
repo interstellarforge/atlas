@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -27,6 +28,7 @@ const (
 	boardLimit     = 10
 	boardLimitMax  = 50
 	changesLimit   = 50
+	recentComments = 10
 )
 
 // Handler serves /mcp. Each request gets its own stateless server bound to the actor the
@@ -120,7 +122,7 @@ func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Act
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "item_get",
-		Description: "Read one work item in detail, including its links. Pass fields to keep the result small.",
+		Description: "Read one work item in detail: links, checklist and the last 10 comments. Pass fields to keep the result small.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in getIn) (*sdk.CallToolResult, any, error) {
 		it, err := svc.GetItem(ctx, a, in.Key)
@@ -138,7 +140,18 @@ func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Act
 		if err != nil {
 			return nil, nil, err
 		}
-		return result(map[string]any{"item": it, "links": links})
+		checklist, err := svc.ListChecklist(ctx, a, in.Key)
+		if err != nil {
+			return nil, nil, err
+		}
+		comments, err := svc.ListComments(ctx, a, in.Key)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(comments) > recentComments {
+			comments = comments[len(comments)-recentComments:]
+		}
+		return result(map[string]any{"item": it, "links": links, "checklist": checklist, "comments": comments})
 	})
 
 	type boardIn struct {
@@ -227,6 +240,69 @@ func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Act
 			return nil, nil, err
 		}
 		return result(c)
+	})
+	type checklistIn struct {
+		Key string   `json:"key" jsonschema:"item key, e.g. EXO-42"`
+		Add []string `json:"add,omitempty" jsonschema:"texts of new checklist items"`
+		Set []struct {
+			ID   int64   `json:"id"`
+			Done *bool   `json:"done,omitempty"`
+			Text *string `json:"text,omitempty"`
+		} `json:"set,omitempty" jsonschema:"change existing items (tick, untick or rename)"`
+		Remove []int64 `json:"remove,omitempty" jsonschema:"ids of items to remove"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "checklist_write",
+		Description: "Add, tick/untick, rename or remove checklist items of a work item. Items are changed one by one in the order add, set, remove; read the checklist with item_get.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in checklistIn) (*sdk.CallToolResult, any, error) {
+		n := len(in.Add) + len(in.Set) + len(in.Remove)
+		if n == 0 || n > core.MaxBatch {
+			return nil, nil, fmt.Errorf("give 1-%d changes", core.MaxBatch)
+		}
+		if r, ok := quota(writes, a, n); !ok {
+			return r, nil, nil
+		}
+		for _, text := range in.Add {
+			if _, err := svc.AddChecklistItem(ctx, a, in.Key, text); err != nil {
+				return nil, nil, err
+			}
+		}
+		for _, c := range in.Set {
+			if _, err := svc.UpdateChecklistItem(ctx, a, in.Key, c.ID, core.ChecklistPatch{Text: c.Text, Done: c.Done}); err != nil {
+				return nil, nil, err
+			}
+		}
+		for _, id := range in.Remove {
+			if err := svc.RemoveChecklistItem(ctx, a, in.Key, id); err != nil {
+				return nil, nil, err
+			}
+		}
+		items, err := svc.ListChecklist(ctx, a, in.Key)
+		if err != nil {
+			return nil, nil, err
+		}
+		return result(map[string]any{"checklist": items})
+	})
+
+	type attachmentsIn struct {
+		Key string `json:"key" jsonschema:"item key, e.g. EXO-42"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "attachments",
+		Description: "List an item's image attachments: filename, mime, size, pixels and a url path to fetch them (needs your token). No file contents are returned.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in attachmentsIn) (*sdk.CallToolResult, any, error) {
+		list, err := svc.ListAttachments(ctx, a, in.Key)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]map[string]any, 0, len(list))
+		for _, at := range list {
+			out = append(out, map[string]any{"id": at.ID, "filename": at.Filename, "mime": at.Mime, "size": at.Size,
+				"width": at.Width, "height": at.Height, "url": at.URL, "thumb_url": at.ThumbURL})
+		}
+		return result(map[string]any{"items": out})
 	})
 
 	return s
