@@ -11,10 +11,12 @@ The first design handoff kept the horizontal top bar. The target references (`de
 
 1. **Sidebar + topbar shell** (`Shell.svelte`): fixed 248 px sidebar (collapsible to 72 px, remembered in `localStorage`), compact topbar with breadcrumb, live indicator and theme toggle. Below 900 px the sidebar becomes an accessible drawer (dialog role, focus trap, Escape closes). Only existing routes are linked; no fake destinations.
 2. **Tokens stay in `tokens.css`** (`--atlas-*`, with the old `--color-*` aliases). Primary button fill (`--atlas-primary`) is separate from the link colour so white button text keeps AA contrast in dark mode.
-3. **No icon or font dependency.** Icons are inline SVG paths in `icons.ts`; the hero planet is SVG (`HeroArt`), not a bitmap; fonts are the system stack. No WebGL, no animation loops; `prefers-reduced-motion` stays respected.
+3. **No icon or font dependency.** Icons are inline SVG paths in `icons.ts`; the hero, login and sidebar art are WebP files from the brand pack in `web/src/assets/atlas/` (`HeroArt` renders them as `<img>`); the brand logo is the pack's horizontal logo image (`Brand`), the app icon when the sidebar is collapsed; fonts are the system stack. No WebGL, no animation loops; `prefers-reduced-motion` stays respected.
 4. **Card height 140 px, slot 148 px.** Richer cards (type, key, two-line title, two labels, priority, due date, assignee) need more than 88 px. The virtualizer keeps fixed row heights; `--atlas-card-h` and `SLOT` in `Board.svelte` change together. Dynamic measurement was not adopted: it would complicate drag position maths.
 5. **Item detail** stays a native `<dialog>` (focus trap, Escape, focus return) but grows to 780 px with a properties column. Fields are associated to one form with the `form` attribute, so layout is free of the form's DOM position. Only changed fields are sent (unchanged behaviour).
-6. **Project pages get real data only.** Cards show item counts from the board endpoint; the workflow page edits statuses through the existing endpoints; API tokens use the existing token endpoints (the page was a stub before).
+6. **Creating an item uses the item panel.** `ItemPanel` has a create mode (empty draft, type and template pickers); saving calls `createItem`, applies the other fields with one `updateItem` and opens the new item. The separate "new item" dialog was removed.
+7. **Whole card is clickable; statuses reorder by dragging.** A card opens its item on click (5 px drag threshold, Enter, Ctrl/Cmd and middle click open a new tab); the title stays a real link. Workflow statuses are reordered with a grip (pointer or Up/Down keys), optimistic with rollback, written through the existing `updateStatus` endpoint.
+8. **Project pages get real data only.** Cards show item counts from the board endpoint; the workflow page edits statuses through the existing endpoints; API tokens use the existing token endpoints (the page was a stub before).
 
 ## Consequences
 

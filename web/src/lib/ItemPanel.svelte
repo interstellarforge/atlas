@@ -1,14 +1,17 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
   import {
     addLink,
     ApiError,
+    createItem,
     getFollowing,
     getItem,
     getLinks,
     type ItemDetail,
+    type ItemTemplate,
     type Links,
+    listItemTemplates,
     removeLink,
     setFollowing,
     updateItem,
@@ -21,15 +24,24 @@
   import ItemNotes from "./ItemNotes.svelte";
   import { people } from "./people.svelte";
   import PriorityIndicator from "./PriorityIndicator.svelte";
+  import { navigate } from "./router.svelte";
+  import { itemHref } from "./routes";
   import StatusChip from "./StatusChip.svelte";
   import { statusTone } from "./statusTone";
   import TypeIcon from "./TypeIcon.svelte";
 
+  // With `create` the panel is an empty draft: saving creates the item and then opens it.
   let {
-    itemKey,
+    itemKey = "",
+    create,
     workflow,
     onclose,
-  }: { itemKey: string; workflow: Workflow; onclose: () => void } = $props();
+  }: {
+    itemKey?: string;
+    create?: { project: string; status: string };
+    workflow: Workflow;
+    onclose: () => void;
+  } = $props();
 
   const PRIORITIES = ["low", "normal", "high", "urgent"];
   const LINK_TYPES = ["blocks", "relates", "duplicates"] as const;
@@ -49,6 +61,7 @@
   }
 
   let dialog: HTMLDialogElement;
+  let titleInput = $state<HTMLInputElement | undefined>();
   let item = $state<ItemDetail | undefined>();
   let links = $state<Links | undefined>();
   let form = $state<Form | undefined>();
@@ -61,6 +74,10 @@
   let linkTarget = $state("");
   let linkError = $state("");
   let following = $state(false);
+  let draftType = $state("task");
+  let template = $state("");
+  let templates = $state<ItemTemplate[]>([]);
+  const shownType = $derived(create ? draftType : (item?.type ?? ""));
 
   const dateTime = new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -174,7 +191,46 @@
     error = "";
   }
 
+  function draft(status: string): ItemDetail {
+    return {
+      key: "",
+      type: "task",
+      title: "",
+      description: "",
+      parent: null,
+      status,
+      priority: "normal",
+      assignee: null,
+      due_at: null,
+      labels: [],
+      milestone: null,
+      custom_data: {},
+      blocked: false,
+      version: 0,
+      archived_at: null,
+      updated_at: Date.now(),
+    };
+  }
+
+  // A template pre-fills type and status (still editable); the server adds the rest on create.
+  function pickTemplate(): void {
+    const tpl = templates.find((x) => x.name === template);
+    if (!tpl || !form) return;
+    draftType = tpl.type;
+    if (
+      workflow.statuses.some((st) => st.name === tpl.status && st.allow_create)
+    )
+      form.status = tpl.status;
+  }
+
   async function load(): Promise<void> {
+    if (create) {
+      apply(draft(create.status));
+      void tick().then(() => titleInput?.focus());
+      if (workflow.item_templates.length > 0)
+        templates = await listItemTemplates(create.project).catch(() => []);
+      return;
+    }
     try {
       const [it, l, f] = await Promise.all([
         getItem(itemKey),
@@ -217,6 +273,25 @@
     error = "";
     notice = "";
     try {
+      if (create && form) {
+        // Title, status and parent go in the create call; the rest follows as an update.
+        const rest = { ...patch };
+        delete rest.title;
+        delete rest.status;
+        delete rest.parent;
+        const made = await createItem({
+          project: create.project,
+          type: draftType,
+          title: form.title,
+          status: form.status,
+          ...(form.parent.trim() && { parent: form.parent.trim() }),
+          ...(template && { template }),
+        });
+        if (Object.keys(rest).length > 0)
+          await updateItem(made.key, made.version, rest);
+        navigate(itemHref(made.key).slice(1));
+        return;
+      }
       apply(await updateItem(item.key, item.version, patch));
       notice = t("item.saved");
     } catch (e) {
@@ -314,10 +389,10 @@
   onclick={backdropClick}
 >
   <header class="bar">
-    {#if item}<TypeIcon type={item.type} />{/if}
-    <h2 id="item-panel-title">{itemKey}</h2>
+    {#if item}<TypeIcon type={shownType} />{/if}
+    <h2 id="item-panel-title">{create ? t("board.newItem") : itemKey}</h2>
     {#if item}
-      <span class="chip type">{t(`types.${item.type}` as "types.epic")}</span>
+      <span class="chip type">{t(`types.${shownType}` as "types.epic")}</span>
       {#if item.archived_at !== null}<span class="chip"
           >{t("board.archived")}</span
         >{/if}
@@ -326,7 +401,7 @@
         >{/if}
     {/if}
     <span class="spacer"></span>
-    {#if item}
+    {#if item && !create}
       <button
         type="button"
         class="ghost"
@@ -371,8 +446,10 @@
       <div class="titlebar">
         <input
           class="title"
+          bind:this={titleInput}
           form="item-form"
           aria-label={t("item.title")}
+          placeholder={create ? t("board.itemTitle") : undefined}
           bind:value={form.title}
           required
           maxlength="500"
@@ -394,18 +471,47 @@
               rows="7"
               placeholder={t("item.descriptionHint")}></textarea>
           </section>
-          <div class="panel"><ItemAttachments {itemKey} /></div>
-          <div class="panel"><ItemNotes {itemKey} /></div>
+          {#if !create}
+            <div class="panel"><ItemAttachments {itemKey} /></div>
+            <div class="panel"><ItemNotes {itemKey} /></div>
+          {/if}
         </div>
 
         <aside class="side">
           <section class="panel" aria-labelledby="item-props">
             <h3 id="item-props">{t("item.properties")}</h3>
             <div class="props">
+              {#if create}
+                {#if templates.length > 0}
+                  <label class="prop">
+                    <span class="plabel">{t("board.template")}</span>
+                    <select
+                      form="item-form"
+                      bind:value={template}
+                      onchange={pickTemplate}
+                    >
+                      <option value="">{t("board.noTemplate")}</option>
+                      {#each templates as tpl (tpl.id)}
+                        <option value={tpl.name}>{tpl.name}</option>
+                      {/each}
+                    </select>
+                  </label>
+                {/if}
+                <label class="prop">
+                  <span class="plabel">{t("item.type")}</span>
+                  <select form="item-form" bind:value={draftType}>
+                    {#each workflow.types as typ (typ)}
+                      <option value={typ}
+                        >{t(`types.${typ}` as "types.epic")}</option
+                      >
+                    {/each}
+                  </select>
+                </label>
+              {/if}
               <label class="prop">
                 <span class="plabel">{t("item.status")}</span>
                 <select form="item-form" bind:value={form.status}>
-                  {#each workflow.statuses as st (st.id)}
+                  {#each create ? workflow.statuses.filter((st) => st.allow_create) : workflow.statuses as st (st.id)}
                     <option value={st.name}>{st.name}</option>
                   {/each}
                 </select>
@@ -486,94 +592,98 @@
                 </label>
               {/each}
             </div>
-            <p class="meta">
-              {t("item.updated", { date: dateTime.format(item.updated_at) })}
-            </p>
+            {#if !create}<p class="meta">
+                {t("item.updated", { date: dateTime.format(item.updated_at) })}
+              </p>{/if}
           </section>
 
-          <section class="panel" aria-labelledby="item-links">
-            <h3 id="item-links">{t("item.links")}</h3>
-            {#if linkError}<p class="banner error" role="alert">
-                {linkError}
-              </p>{/if}
-            {#if links && links.outgoing.length + links.incoming.length > 0}
-              <ul class="linklist">
-                {#each links.outgoing as l (`out-${l.type}-${l.key}`)}
-                  <li>
-                    <span class="dir"
-                      >{t(`item.out.${l.type}` as "item.out.blocks")}</span
-                    >
-                    <a
-                      class="lkey"
-                      href="#/p/{l.key.slice(
-                        0,
-                        l.key.lastIndexOf('-'),
-                      )}/{l.key}">{l.key}</a
-                    >
-                    <span class="ltitle">{l.title}</span>
-                    <span class="chip">{l.status}</span>
-                    <button
-                      type="button"
-                      class="iconbtn small"
-                      aria-label={t("item.removeLink", { key: l.key })}
-                      onclick={() =>
-                        void changeLink(() =>
-                          removeLink(itemKey, l.type, l.key),
-                        )}><Icon name="close" size={14} /></button
-                    >
-                  </li>
-                {/each}
-                {#each links.incoming as l (`in-${l.type}-${l.key}`)}
-                  <li>
-                    <span class="dir"
-                      >{t(`item.in.${l.type}` as "item.in.blocks")}</span
-                    >
-                    <a
-                      class="lkey"
-                      href="#/p/{l.key.slice(
-                        0,
-                        l.key.lastIndexOf('-'),
-                      )}/{l.key}">{l.key}</a
-                    >
-                    <span class="ltitle">{l.title}</span>
-                    <span class="chip">{l.status}</span>
-                  </li>
-                {/each}
-              </ul>
-            {:else}
-              <p class="meta">{t("item.noLinks")}</p>
-            {/if}
-            <form class="linkform" onsubmit={submitLink}>
-              <select aria-label={t("item.linkType")} bind:value={linkType}>
-                {#each LINK_TYPES as lt (lt)}
-                  <option value={lt}>{t(`item.out.${lt}`)}</option>
-                {/each}
-              </select>
-              <input
-                aria-label={t("item.linkTarget")}
-                placeholder={t("item.linkTarget")}
-                bind:value={linkTarget}
-              />
-              <button
-                class="primary"
-                type="submit"
-                disabled={!linkTarget.trim()}
-                ><Icon name="link" size={14} />{t("item.addLink")}</button
-              >
-            </form>
-          </section>
+          {#if !create}
+            <section class="panel" aria-labelledby="item-links">
+              <h3 id="item-links">{t("item.links")}</h3>
+              {#if linkError}<p class="banner error" role="alert">
+                  {linkError}
+                </p>{/if}
+              {#if links && links.outgoing.length + links.incoming.length > 0}
+                <ul class="linklist">
+                  {#each links.outgoing as l (`out-${l.type}-${l.key}`)}
+                    <li>
+                      <span class="dir"
+                        >{t(`item.out.${l.type}` as "item.out.blocks")}</span
+                      >
+                      <a
+                        class="lkey"
+                        href="#/p/{l.key.slice(
+                          0,
+                          l.key.lastIndexOf('-'),
+                        )}/{l.key}">{l.key}</a
+                      >
+                      <span class="ltitle">{l.title}</span>
+                      <span class="chip">{l.status}</span>
+                      <button
+                        type="button"
+                        class="iconbtn small"
+                        aria-label={t("item.removeLink", { key: l.key })}
+                        onclick={() =>
+                          void changeLink(() =>
+                            removeLink(itemKey, l.type, l.key),
+                          )}><Icon name="close" size={14} /></button
+                      >
+                    </li>
+                  {/each}
+                  {#each links.incoming as l (`in-${l.type}-${l.key}`)}
+                    <li>
+                      <span class="dir"
+                        >{t(`item.in.${l.type}` as "item.in.blocks")}</span
+                      >
+                      <a
+                        class="lkey"
+                        href="#/p/{l.key.slice(
+                          0,
+                          l.key.lastIndexOf('-'),
+                        )}/{l.key}">{l.key}</a
+                      >
+                      <span class="ltitle">{l.title}</span>
+                      <span class="chip">{l.status}</span>
+                    </li>
+                  {/each}
+                </ul>
+              {:else}
+                <p class="meta">{t("item.noLinks")}</p>
+              {/if}
+              <form class="linkform" onsubmit={submitLink}>
+                <select aria-label={t("item.linkType")} bind:value={linkType}>
+                  {#each LINK_TYPES as lt (lt)}
+                    <option value={lt}>{t(`item.out.${lt}`)}</option>
+                  {/each}
+                </select>
+                <input
+                  aria-label={t("item.linkTarget")}
+                  placeholder={t("item.linkTarget")}
+                  bind:value={linkTarget}
+                />
+                <button
+                  class="primary"
+                  type="submit"
+                  disabled={!linkTarget.trim()}
+                  ><Icon name="link" size={14} />{t("item.addLink")}</button
+                >
+              </form>
+            </section>
+          {/if}
         </aside>
       </div>
     </div>
 
     <footer class="foot">
-      <button type="button" disabled={dirty} onclick={toggleArchive}>
-        <Icon
-          name={item.archived_at === null ? "archive" : "restore"}
-          size={16}
-        />
-        {item.archived_at === null ? t("item.archive") : t("item.restore")}
-      </button>
+      {#if !create}
+        <button type="button" disabled={dirty} onclick={toggleArchive}>
+          <Icon
+            name={item.archived_at === null ? "archive" : "restore"}
+            size={16}
+          />
+          {item.archived_at === null ? t("item.archive") : t("item.restore")}
+        </button>
+      {/if}
       <span class="spacer"></span>
       {#if dirty}<span class="unsaved">{t("item.unsaved")}</span>{/if}
       <button
@@ -589,7 +699,11 @@
         form="item-form"
         disabled={!dirty || saving}
       >
-        {saving ? t("item.saving") : t("item.save")}
+        {saving
+          ? t("item.saving")
+          : create
+            ? t("board.submit")
+            : t("item.save")}
       </button>
     </footer>
   {/if}

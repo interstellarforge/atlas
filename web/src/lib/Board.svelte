@@ -6,7 +6,6 @@
     archiveItem,
     type Card,
     type Column,
-    createItem,
     emptyFilters,
     filterQuery,
     type Filters,
@@ -15,8 +14,6 @@
     getCard,
     getCrossBoard,
     getItems,
-    type ItemTemplate,
-    listItemTemplates,
     moveItem,
     type Workflow,
   } from "./api";
@@ -27,6 +24,7 @@
   import FiltersBar from "./Filters.svelte";
   import { t } from "./i18n";
   import Icon from "./Icon.svelte";
+  import ItemPanel from "./ItemPanel.svelte";
   import { route } from "./router.svelte";
   import { matchProject } from "./routes";
   import { statusTone, toneVar } from "./statusTone";
@@ -64,42 +62,21 @@
 
   // On a phone the filters start collapsed, so the columns get the screen.
   let filtersOpen = $state(!matchMedia("(max-width: 900px)").matches);
-  let dialog = $state<HTMLDialogElement | undefined>();
+  // Status the empty "new item" panel starts in; undefined while it is closed.
+  let drafting = $state<string | undefined>();
   const openKey = $derived(matchProject(route.path)?.item);
-
-  let newType = $state("task");
-  let newTitle = $state("");
-  let newStatus = $state("");
 
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let dirty = false;
 
-  let itemTemplates = $state<ItemTemplate[]>([]);
-  let newTemplate = $state("");
-
-  // Choosing a template pre-fills type and status (still editable); the server adds the rest on create.
-  function pickTemplate(): void {
-    const tpl = itemTemplates.find((x) => x.name === newTemplate);
-    if (!tpl) return;
-    newType = tpl.type;
-    if (
-      workflow?.statuses.some((st) => st.name === tpl.status && st.allow_create)
-    )
-      newStatus = tpl.status;
-  }
-
   function openNew(status?: string): void {
-    if (status) newStatus = status;
-    newTemplate = "";
-    if (project !== undefined && (workflow?.item_templates.length ?? 0) > 0)
-      void listItemTemplates(project).then((list) => (itemTemplates = list));
-    dialog?.showModal();
+    drafting =
+      status ?? workflow?.statuses.find((st) => st.allow_create)?.name ?? "";
   }
 
-  // New cards start in the first status unless another is chosen.
+  // Opening the created item replaces the draft panel.
   $effect(() => {
-    if (!newStatus && workflow)
-      newStatus = workflow.statuses.find((st) => st.allow_create)?.name ?? "";
+    if (openKey) drafting = undefined;
   });
 
   async function load(): Promise<void> {
@@ -430,26 +407,6 @@
       fail(e);
     }
   }
-
-  async function add(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    if (project === undefined) return;
-    try {
-      await createItem({
-        project,
-        type: newType,
-        title: newTitle,
-        ...(newStatus && { status: newStatus }),
-        ...(newTemplate && { template: newTemplate }),
-      });
-      newTitle = "";
-      error = "";
-      dialog?.close();
-      await load();
-    } catch (e) {
-      fail(e);
-    }
-  }
 </script>
 
 <section class="board">
@@ -483,54 +440,14 @@
     </div>
   </div>
 
-  {#if !cross && workflow}
-    <dialog class="newdialog" bind:this={dialog} aria-labelledby="new-title">
-      <form class="add" onsubmit={add}>
-        <h2 id="new-title">{t("board.newItem")}</h2>
-        {#if itemTemplates.length > 0}
-          <label>
-            {t("board.template")}
-            <select bind:value={newTemplate} onchange={pickTemplate}>
-              <option value="">{t("board.noTemplate")}</option>
-              {#each itemTemplates as tpl (tpl.id)}
-                <option value={tpl.name}>{tpl.name}</option>
-              {/each}
-            </select>
-          </label>
-        {/if}
-        <label>
-          {t("board.type")}
-          <select bind:value={newType}>
-            {#each workflow.types as typ (typ)}
-              <option value={typ}>{t(`types.${typ}` as "types.epic")}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          {t("board.itemTitle")}
-          <input
-            bind:value={newTitle}
-            required
-            maxlength="500"
-            autocomplete="off"
-          />
-        </label>
-        <label>
-          {t("board.status")}
-          <select bind:value={newStatus}>
-            {#each workflow.statuses.filter((st) => st.allow_create) as st (st.id)}
-              <option value={st.name}>{st.name}</option>
-            {/each}
-          </select>
-        </label>
-        <div class="buttons">
-          <button type="button" onclick={() => dialog?.close()}
-            >{t("board.cancel")}</button
-          >
-          <button class="primary" type="submit">{t("board.submit")}</button>
-        </div>
-      </form>
-    </dialog>
+  {#if !cross && workflow && project !== undefined && drafting !== undefined}
+    <ItemPanel
+      create={{ project, status: drafting }}
+      {workflow}
+      onclose={() => {
+        drafting = undefined;
+      }}
+    />
   {/if}
 
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
@@ -675,39 +592,6 @@
     align-items: center;
     gap: 6px;
     min-height: 38px;
-  }
-  .newdialog {
-    width: min(420px, calc(100vw - 32px));
-    padding: 0;
-    color: var(--color-text);
-    background: var(--atlas-surface-raised);
-    border: 1px solid var(--color-border);
-    border-radius: var(--atlas-radius-lg);
-    box-shadow: var(--atlas-shadow-lg);
-  }
-  .newdialog::backdrop {
-    background: var(--atlas-overlay);
-  }
-  .add {
-    display: grid;
-    gap: var(--space-3);
-    padding: 20px;
-  }
-  .add h2 {
-    margin: 0;
-    font-size: var(--atlas-fs-lg);
-  }
-  .add label {
-    display: grid;
-    gap: 6px;
-    font-size: var(--atlas-fs-sm);
-    font-weight: var(--atlas-fw-semibold);
-    color: var(--color-muted);
-  }
-  .buttons {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
   }
   .columns {
     flex: 1;

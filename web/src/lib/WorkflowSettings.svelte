@@ -24,6 +24,14 @@
   );
   const categories = ["todo", "active", "completed"] as const;
 
+  // The order shown while dragging or right after a drop; cleared when the server's workflow arrives (or a save fails).
+  let local = $state<StatusInfo[] | undefined>();
+  let dragging = $state<number | undefined>();
+  let announcement = $state("");
+  let table = $state<HTMLElement | undefined>();
+  let localFor: Workflow | undefined;
+  const list = $derived(local && localFor === workflow ? local : statuses);
+
   async function run(action: () => Promise<unknown>): Promise<void> {
     error = "";
     try {
@@ -48,15 +56,82 @@
     return run(() => updateStatus(project, status.id, { wip_limit: limit }));
   }
 
-  // Positions are plain numbers, so moving a status swaps its position with its neighbour's.
-  function move(index: number, by: -1 | 1): Promise<void> {
-    const a = statuses[index];
-    const b = statuses[index + by];
-    if (!a || !b) return Promise.resolve();
-    return run(async () => {
-      await updateStatus(project, a.id, { position: b.position });
-      await updateStatus(project, b.id, { position: a.position });
+  // Positions are plain numbers: the new order takes over the existing set of positions, and only the rows that end up elsewhere are written.
+  async function commit(order: StatusInfo[], moved: StatusInfo): Promise<void> {
+    const changed = order.flatMap((st, i) => {
+      const position = statuses[i]?.position;
+      return position === undefined || st.position === position
+        ? []
+        : [{ id: st.id, position }];
     });
+    if (changed.length === 0) {
+      local = undefined;
+      return;
+    }
+    local = order;
+    localFor = workflow;
+    await run(async () => {
+      try {
+        for (const c of changed)
+          await updateStatus(project, c.id, { position: c.position });
+      } catch (e) {
+        local = undefined;
+        throw e;
+      }
+    });
+    announcement = t("workflow.moved", {
+      name: moved.name,
+      n: order.findIndex((st) => st.id === moved.id) + 1,
+    });
+  }
+
+  function reorder(from: number, to: number): StatusInfo[] {
+    const next = [...list];
+    const [item] = next.splice(from, 1);
+    if (item) next.splice(to, 0, item);
+    return next;
+  }
+
+  function gripKey(event: KeyboardEvent, index: number): void {
+    const to = index + (event.key === "ArrowUp" ? -1 : 1);
+    if (
+      (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+      to < 0 ||
+      to >= list.length
+    )
+      return;
+    event.preventDefault();
+    const moved = list[index];
+    if (moved) void commit(reorder(index, to), moved);
+  }
+
+  function gripDown(event: PointerEvent, index: number): void {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    local = [...list];
+    localFor = workflow;
+    dragging = index;
+  }
+
+  function gripMove(event: PointerEvent): void {
+    if (dragging === undefined || !table) return;
+    const rows = [...table.querySelectorAll<HTMLElement>("[data-status]")];
+    const over = rows.findIndex((row) => {
+      const r = row.getBoundingClientRect();
+      return event.clientY >= r.top && event.clientY < r.bottom;
+    });
+    if (over < 0 || over === dragging) return;
+    local = reorder(dragging, over);
+    dragging = over;
+  }
+
+  function gripUp(): void {
+    if (dragging === undefined || !local) return;
+    const moved = local[dragging];
+    const order = local;
+    dragging = undefined;
+    if (moved) void commit(order, moved);
   }
 
   function add(event: SubmitEvent): Promise<void> {
@@ -82,8 +157,14 @@
       </div>
     </div>
     {#if error}<p class="banner error" role="alert">{error}</p>{/if}
+    <p class="sr-only" aria-live="polite">{announcement}</p>
 
-    <div class="table" role="table" aria-label={t("workflow.title")}>
+    <div
+      class="table"
+      role="table"
+      aria-label={t("workflow.title")}
+      bind:this={table}
+    >
       <div class="row headrow" role="row">
         <span role="columnheader">#</span>
         <span role="columnheader">{t("workflow.status")}</span>
@@ -92,24 +173,30 @@
         <span role="columnheader">{t("workflow.allowCreate")}</span>
         <span role="columnheader" class="sr-only">{t("workflow.actions")}</span>
       </div>
-      {#each statuses as status, i (status.id)}
-        <div class="row" role="row">
+      {#each list as status, i (status.id)}
+        <div
+          class="row"
+          class:lifted={dragging === i}
+          role="row"
+          data-status={status.id}
+        >
           <span class="order">
             <button
               type="button"
-              class="mini"
-              aria-label={t("workflow.moveUp", { name: status.name })}
-              disabled={i === 0}
-              onclick={() => void move(i, -1)}
-              ><Icon name="arrow-up" size={14} /></button
-            >
-            <button
-              type="button"
-              class="mini"
-              aria-label={t("workflow.moveDown", { name: status.name })}
-              disabled={i === statuses.length - 1}
-              onclick={() => void move(i, 1)}
-              ><Icon name="arrow-down" size={14} /></button
+              class="mini grip"
+              aria-label={t("workflow.grip", { name: status.name })}
+              onpointerdown={(e) => {
+                gripDown(e, i);
+              }}
+              onpointermove={gripMove}
+              onpointerup={gripUp}
+              onpointercancel={() => {
+                dragging = undefined;
+                local = undefined;
+              }}
+              onkeydown={(e) => {
+                gripKey(e, i);
+              }}><Icon name="drag" size={16} /></button
             >
           </span>
           <span class="name">
@@ -248,7 +335,7 @@
   }
   .row {
     display: grid;
-    grid-template-columns: 76px minmax(0, 1.6fr) 150px 130px 70px 44px;
+    grid-template-columns: 44px minmax(0, 1.6fr) 150px 130px 70px 44px;
     align-items: center;
     gap: var(--space-3);
     min-height: 56px;
@@ -268,6 +355,14 @@
   .order {
     display: flex;
     gap: 2px;
+  }
+  .grip {
+    cursor: grab;
+    touch-action: none;
+  }
+  .row.lifted {
+    background: var(--color-soft);
+    box-shadow: var(--atlas-shadow-sm);
   }
   .name {
     display: flex;
@@ -326,15 +421,17 @@
   }
   @media (max-width: 800px) {
     .row {
-      grid-template-columns: minmax(0, 1fr) 44px;
+      grid-template-columns: 44px minmax(0, 1fr);
     }
     .headrow {
       display: none;
     }
-    .order,
-    .row select,
-    .row .wip {
+    .row > * {
+      grid-column: 2;
+    }
+    .row > .order {
       grid-column: 1;
+      grid-row: 1;
     }
     .add {
       grid-template-columns: minmax(0, 1fr);

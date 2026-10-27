@@ -104,3 +104,10 @@ Statuskleur: statussen hebben een categorie, geen kleur. `statusTone.ts`: eerste
 **Bewust weggelaten** (geen backend, dus geen nepdata): dashboard met statistieken, globale zoekbalk, AI/MCP-widget, My Items, sprint/estimate/timeline/docs/roadmap, projectteams en deadlines op projectkaarten, transitions/automation-tabs in de workflow-instellingen, "show on board" per status, notificatietabs Mentions/Assignments/AI. Artwork: `web/src/assets/atlas/` (hero 1400x350, login 1600x2000, sidebar 800x600, 6 projectcovers 1280x720, app-icon als merkteken, `web/public/favicon.png`). Hero, login en sidebar gebruiken de donkere variant in beide thema's omdat de overlaytekst wit is; de lichte varianten uit het brandpack zijn niet gebruikt. Covers zijn lazy-loaded; de projectkleur bepaalt de cover (`projectCoverName`).
 
 Bekende beperkingen: geen screenreader-test; zie `docs/accessibility.md`.
+
+## UIX 16-18 (afronding)
+
+- **Nieuw item**: opent `ItemPanel` in aanmaakmodus (leeg concept; bijlagen, checklist, comments en links verschijnen na het aanmaken).
+- **Kaart**: hele kaart klikbaar (drempel 5 px tegen slepen; Enter; Ctrl/Cmd- en middelklik in nieuw tabblad); cursor `pointer`, `grabbing` tijdens slepen.
+- **Workflow-instellingen**: statussen herordenen met een greep (muis/pen/touch) of Up/Down op de greep; optimistic met rollback; aria-live melding. Pijlknoppen en locale-keys `workflow.moveUp/moveDown` zijn vervallen.
+- **Logo**: horizontaal logo uit het brandpack, uitgefade randen (ingebakken achtergrond); app-icon in ingeklapte sidebar; `public/favicon.png`.

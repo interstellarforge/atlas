@@ -6,6 +6,7 @@
   import { personName } from "./people.svelte";
   import { cardFields } from "./prefs.svelte";
   import PriorityIndicator from "./PriorityIndicator.svelte";
+  import { navigate } from "./router.svelte";
   import { itemHref } from "./routes";
   import TypeIcon from "./TypeIcon.svelte";
 
@@ -41,10 +42,43 @@
   const archived = $derived(Boolean(card.archived_at));
 
   // The whole card drags with mouse or pen. Touch keeps the handle so the column can still scroll.
+  let downAt: { x: number; y: number } | undefined;
+
   function startFromCard(event: PointerEvent): void {
+    downAt = { x: event.clientX, y: event.clientY };
     if (readonly || !onhandle || event.pointerType === "touch") return;
     if ((event.target as Element).closest("button, a")) return;
     onhandle(event);
+  }
+
+  // The title stays a real link; a click anywhere else on the card (not after a drag) opens the item too.
+  function open(newTab: boolean): void {
+    const href = itemHref(card.key);
+    if (newTab) window.open(href, "_blank", "noopener");
+    else navigate(href.slice(1));
+  }
+
+  function clickCard(event: MouseEvent): void {
+    if ((event.target as Element).closest("button, a")) return;
+    if (
+      downAt &&
+      Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 5
+    )
+      return;
+    open(event.ctrlKey || event.metaKey);
+  }
+
+  function auxClick(event: MouseEvent): void {
+    if (event.button !== 1 || (event.target as Element).closest("button, a"))
+      return;
+    event.preventDefault();
+    open(true);
+  }
+
+  function keyCard(event: KeyboardEvent): void {
+    onkeydown?.(event);
+    if (event.key === "Enter" && event.target === event.currentTarget)
+      open(event.ctrlKey || event.metaKey);
   }
 </script>
 
@@ -60,8 +94,10 @@
   tabindex="0"
   aria-label="{card.key}: {card.title}"
   aria-current={selected ? "true" : undefined}
-  {onkeydown}
+  onkeydown={keyCard}
   onpointerdown={startFromCard}
+  onclick={clickCard}
+  onauxclick={auxClick}
 >
   <header>
     <TypeIcon type={card.type} size={14} />
@@ -134,7 +170,7 @@
     border-radius: var(--atlas-radius-md);
     box-shadow: var(--atlas-shadow-sm);
     overflow: hidden;
-    cursor: grab;
+    cursor: pointer;
     transition:
       border-color var(--atlas-duration) var(--atlas-ease),
       box-shadow var(--atlas-duration) var(--atlas-ease);
@@ -161,6 +197,7 @@
     border-style: dashed;
   }
   .card.dragging {
+    cursor: grabbing;
     opacity: 0.35;
     border-style: dashed;
   }

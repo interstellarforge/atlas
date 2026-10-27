@@ -1,64 +1,46 @@
 <script lang="ts">
+  import logoDark from "../assets/atlas/logo-dark.webp";
+  import logoLight from "../assets/atlas/logo-light.webp";
   import markDark from "../assets/atlas/mark-dark.png";
   import markLight from "../assets/atlas/mark-light.png";
   import { t } from "./i18n";
   import { theme } from "./theme.svelte";
 
-  let { compact = false, by = true }: { compact?: boolean; by?: boolean } =
-    $props();
+  let { compact = false }: { compact?: boolean } = $props();
+  const dark = $derived(theme.current === "dark");
 </script>
 
-<span class="brand">
+{#if compact}
   <img
     class="mark"
-    src={theme.current === "dark" ? markDark : markLight}
+    src={dark ? markDark : markLight}
     width="128"
     height="128"
-    alt=""
+    alt={t("app.name")}
   />
-  {#if !compact}
-    <span class="words">
-      <span class="name">{t("app.name")}</span>
-      {#if by}<span class="by">{t("app.by")}</span>{/if}
-    </span>
-  {/if}
-</span>
+{:else}
+  <img
+    class="logo"
+    src={dark ? logoDark : logoLight}
+    width="1600"
+    height="380"
+    alt={t("app.name")}
+  />
+{/if}
 
 <style>
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 800;
-    letter-spacing: 0.055em;
-    font-size: 20px;
-    text-transform: uppercase;
-    color: var(--color-text);
-  }
-  .words {
-    display: grid;
-    gap: 2px;
-    line-height: 1;
-  }
-  .by {
-    font-size: 8.5px;
-    font-weight: var(--atlas-fw-semibold);
-    letter-spacing: 0.12em;
-    white-space: nowrap;
-    color: var(--atlas-text-subtle);
-  }
   .mark {
     width: 34px;
     height: 34px;
   }
-  @media (max-width: 600px) {
-    .brand {
-      font-size: 16px;
-      gap: 7px;
-    }
-    .mark {
-      width: 27px;
-      height: 27px;
-    }
+  /* The logo art has a baked background; fade its edges so it blends into the surface. */
+  .logo {
+    display: block;
+    height: 44px;
+    width: auto;
+    mask-image:
+      linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent),
+      linear-gradient(0deg, transparent, #000 12%, #000 88%, transparent);
+    mask-composite: intersect;
   }
 </style>
