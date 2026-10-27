@@ -106,8 +106,7 @@
     tabs.filter(
       (tab) =>
         (tab.view !== "settings" || canAdmin) &&
-        (tab.view !== "time" || workflow?.time_tracking === true) &&
-        (tab.view !== "readme" || repository !== null),
+        (tab.view !== "time" || workflow?.time_tracking === true),
     ),
   );
 

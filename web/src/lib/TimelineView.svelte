@@ -149,7 +149,7 @@
 
 <section class="timeline">
   <div class="bar">
-    <div class="group" role="group" aria-label={t("timeline.title")}>
+    <div class="seg" role="group" aria-label={t("timeline.title")}>
       <button
         type="button"
         aria-pressed={tab === "plan"}
@@ -162,7 +162,7 @@
       >
     </div>
     {#if tab === "plan"}
-      <div class="group">
+      <div class="seg">
         {#each ["week", "month", "quarter"] as const as z (z)}
           <button
             type="button"
@@ -173,7 +173,7 @@
           >
         {/each}
       </div>
-      <div class="group">
+      <div class="seg">
         <button
           type="button"
           onclick={() => {
@@ -194,7 +194,7 @@
           }}>{t("timeline.next")}</button
         >
       </div>
-      <div class="group">
+      <div class="seg">
         <button
           type="button"
           aria-pressed={chart}
@@ -206,7 +206,7 @@
           onclick={() => (chart = false)}>{t("timeline.listView")}</button
         >
       </div>
-      <span class="muted range">{date.format(from)} – {date.format(to)}</span>
+      <span class="range">{date.format(from)} – {date.format(to)}</span>
     {/if}
   </div>
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
@@ -217,18 +217,23 @@
     {:else if chart}
       <p class="muted">{t("timeline.chartHint")}</p>
       <div class="chart">
+        <div class="plot" aria-hidden="true">
+          {#each ticks as tk (tk.at)}<i class="grid" style:left="{tk.at}%"
+            ></i>{/each}
+          {#if Date.now() >= from && Date.now() <= to}
+            <i class="today" style:left="{pct(Date.now())}%"
+              ><em>{t("timeline.today")}</em></i
+            >
+          {/if}
+        </div>
         <div class="axis" aria-hidden="true">
           {#each ticks as tk (tk.at)}<span style:left="{tk.at}%"
               >{tk.label}</span
             >{/each}
         </div>
-        {#if Date.now() >= from && Date.now() <= to}
-          <i class="today" style:left="{pct(Date.now())}%" aria-hidden="true"
-          ></i>
-        {/if}
         {#each timeline.milestones as m (m.id)}
           <div class="row">
-            <span class="label"><b>◆</b> {m.name}</span>
+            <span class="label milestone"><b>◆</b> {m.name}</span>
             <div class="track">
               <i
                 class="diamond"
@@ -318,31 +323,56 @@
     overflow-y: auto;
     align-content: start;
   }
-  .bar,
-  .group {
+  .bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-3);
   }
-  .bar {
-    gap: var(--space-4);
+  .seg {
+    display: inline-flex;
+    padding: 3px;
+    gap: 2px;
+    background: var(--color-soft);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-md);
   }
-  .group button[aria-pressed="true"] {
-    font-weight: var(--atlas-fw-bold);
-    outline: 2px solid currentcolor;
+  .seg button {
+    min-height: 32px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: calc(var(--atlas-radius-md) - 3px);
+    background: transparent;
+    color: var(--color-muted);
+    font-weight: var(--atlas-fw-semibold);
+  }
+  .seg button:hover {
+    color: var(--color-text);
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: 0 0 0 1px var(--color-border);
+    outline: 0;
+  }
+  .seg button:focus-visible {
+    outline: 2px solid var(--atlas-primary);
+    outline-offset: 1px;
   }
   .range {
     margin-left: auto;
+    color: var(--color-muted);
+    font-size: var(--atlas-fs-sm);
   }
   .chart {
     position: relative;
     display: flex;
     flex-direction: column;
-    padding: 0 0 var(--space-2);
+    flex: none;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--atlas-radius-lg);
+    overflow: hidden;
   }
   .axis,
   .row {
@@ -351,32 +381,61 @@
   }
   .axis {
     position: relative;
-    height: 28px;
+    display: block;
+    height: 32px;
+    margin-left: 28%;
     border-bottom: 1px solid var(--color-border);
   }
   .axis span {
     position: absolute;
-    top: 6px;
-    transform: translateX(-50%);
+    top: 8px;
+    padding-left: 6px;
     font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-semibold);
     color: var(--color-muted);
   }
-  .axis {
-    display: block;
-    margin-left: min(28%, 100%);
+  /* Grid lines and the today marker live in one overlay aligned with the track column. */
+  .plot {
+    position: absolute;
+    inset: 0 0 0 28%;
+    pointer-events: none;
+  }
+  .grid {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-left: 1px dashed var(--color-border);
   }
   .today {
     position: absolute;
-    top: 28px;
+    top: 0;
     bottom: 0;
-    width: 2px;
-    margin-left: 28%;
+    z-index: 1;
+    border-left: 2px solid var(--atlas-danger);
+  }
+  .today em {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    padding: 1px 8px;
+    transform: translateX(-50%);
+    border-radius: 6px 6px 0 0;
     background: var(--atlas-danger);
-    pointer-events: none;
+    color: #fff;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: var(--atlas-fw-semibold);
   }
   .row {
     align-items: center;
-    min-height: 34px;
+    min-height: 40px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .row:last-child {
+    border-bottom: 0;
+  }
+  .row:hover {
+    background: var(--color-soft);
   }
   .label {
     padding: 0 var(--space-3);
@@ -386,19 +445,28 @@
     color: inherit;
     text-decoration: none;
   }
+  a.label:hover {
+    text-decoration: underline;
+  }
+  .label.milestone {
+    font-weight: var(--atlas-fw-semibold);
+  }
   .key {
+    margin-right: 4px;
+    color: var(--color-muted);
     font-weight: var(--atlas-fw-semibold);
   }
   .track {
     position: relative;
-    height: 34px;
+    height: 40px;
   }
   .item {
     position: absolute;
-    top: 9px;
+    top: 12px;
     height: 16px;
     border-radius: 8px;
     background: var(--atlas-st-todo);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%);
   }
   .item.active {
     background: var(--atlas-st-active);
@@ -408,11 +476,12 @@
   }
   .diamond {
     position: absolute;
-    top: 10px;
+    top: 13px;
     width: 14px;
     height: 14px;
     margin-left: -7px;
     transform: rotate(45deg);
+    border-radius: 2px;
     background: var(--atlas-st-review);
   }
   .list {
@@ -428,5 +497,9 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
+    padding: 10px var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-md);
   }
 </style>

@@ -876,6 +876,65 @@ export async function getAudit(f: {
   ).items;
 }
 
+export interface McpClient {
+  actor: string;
+  label?: string;
+  name?: string;
+  user_agent?: string;
+  first_seen: number;
+  last_seen: number;
+  requests: number;
+  calls: number;
+  errors: number;
+  last_tool?: string;
+  connected: boolean;
+}
+
+export interface McpCall {
+  ts: number;
+  actor: string;
+  tool: string;
+  ms: number;
+  bytes: number;
+  error?: string;
+}
+
+export interface McpStats {
+  status: string;
+  started_at: number;
+  calls: number;
+  connected: number;
+  clients: McpClient[];
+  recent: McpCall[];
+  tools: Record<
+    string,
+    { calls: number; errors: number; p95_ms: number; mean_bytes: number }
+  >;
+}
+
+export function getMcpStats(): Promise<McpStats> {
+  return request("GET", "/mcp/stats");
+}
+
+export interface LogEntry {
+  ts: number;
+  level: string;
+  msg: string;
+  attrs?: Record<string, string>;
+}
+
+export async function getLogs(f: {
+  level: string;
+  q: string;
+}): Promise<LogEntry[]> {
+  return (
+    await request<{ items: LogEntry[] }>(
+      "GET",
+      `/admin/logs${query({ ...f, limit: 200 })}`,
+    )
+  ).items;
+}
+
 export function getInstance(): Promise<{
   settings: Record<string, string | number | boolean>;
 }> {

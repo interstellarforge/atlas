@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -140,10 +141,46 @@ func TestMCPMassArchiveGuardAndStats(t *testing.T) {
 
 	w := e.do("GET", "/api/v1/mcp/stats", nil, asUser)
 	stats := decodeBody[struct {
-		Calls int
-		Tools map[string]struct{ Calls, Errors int }
+		Calls     int
+		Connected int
+		Clients   []struct {
+			Actor, Name string
+			Connected   bool
+		}
+		Recent []struct{ Tool, Error string }
+		Tools  map[string]struct{ Calls, Errors int }
 	}](t, w)
 	if stats.Calls != 3 || stats.Tools["items_write"].Calls != 3 || stats.Tools["items_write"].Errors != 1 {
 		t.Fatalf("stats: %s", w.Body)
+	}
+	if stats.Connected != 1 || len(stats.Clients) != 1 || !stats.Clients[0].Connected || stats.Clients[0].Name != "test 1" || !strings.HasPrefix(stats.Clients[0].Actor, "token:pat-") {
+		t.Fatalf("clients: %s", w.Body)
+	}
+	if len(stats.Recent) != 3 || stats.Recent[0].Error != "" || stats.Recent[1].Error != "confirmation_required" {
+		t.Fatalf("recent calls (newest first): %s", w.Body)
+	}
+	if w := e.do("GET", "/api/v1/mcp/stats", nil, func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+write) }); w.Code != http.StatusForbidden {
+		t.Fatalf("a token read the connection list: %d", w.Code)
+	}
+}
+
+func TestHardeningHeadersAndMCPBodyLimit(t *testing.T) {
+	e := setup(t)
+	h := e.do("GET", "/api/v1/health", nil, nil).Header()
+	if h.Get("Permissions-Policy") == "" || h.Get("Cross-Origin-Opener-Policy") != "same-origin" || h.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("security headers missing: %v", h)
+	}
+	if h.Get("Strict-Transport-Security") != "" {
+		t.Fatal("HSTS sent although cookies are not secure-only")
+	}
+	_, tok, _ := e.auth.CreateToken(1, "big", []string{auth.ScopeRead}, nil, nil)
+	w := e.do("POST", "/mcp", nil, func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+tok)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Accept", "application/json, text/event-stream")
+		r.Body = io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping","params":{"x":"` + strings.Repeat("a", 2<<20) + `"}}`))
+	})
+	if w.Code == http.StatusOK {
+		t.Fatalf("a 2 MiB MCP request was accepted: %s", w.Body.String()[:80])
 	}
 }

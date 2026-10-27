@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminSystem from "./AdminSystem.svelte";
   import {
     type AdminUser,
     ApiError,
@@ -46,6 +47,8 @@
     "templates",
     "rights",
     "audit",
+    "logs",
+    "mcp",
     "mail",
     "instance",
   ] as const;
@@ -754,6 +757,8 @@
       </div>
     {/if}
   </section>
+{:else if active === "logs" || active === "mcp"}
+  <AdminSystem kind={active} />
 {:else if active === "mail"}
   {#if mail}
     <form

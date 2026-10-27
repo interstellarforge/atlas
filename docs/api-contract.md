@@ -47,7 +47,8 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET, POST, DELETE | `/admin/invites[/{id}]` | POST `{"email"?,"is_admin","days"}` returns the `code` once; single use; with an email only that address may redeem it |
 | GET | `/admin/audit/export` | CSV (default) or `?format=json` (JSON lines) with the filters of `/admin/audit`; at most 50.000 entries per download (continue with `before`) |
 | GET, POST, DELETE | `/item-templates[/{id}]` | Instance-wide item templates (read: any user; write: global admin); usable in every project, a project template of the same name wins |
-| GET | `/mcp/stats` | Aggregate MCP call metrics per tool (calls, errors, bytes, p95 ms, paginated, too_large); in memory, reset on restart |
+| GET | `/mcp/stats` | Admin only. MCP status, start time, `connected` count, `clients` (token label, client name, last seen, counts) and the 200 `recent` calls, plus the per-tool aggregate (calls, errors, bytes, p95 ms, paginated, too_large); in memory, reset on restart |
+| GET | `/admin/logs` | Admin only. Recent server log lines newest first, from an in-memory window of 1000; `level` (default info), `q` (text), `limit` (max 500) |
 | GET/POST/PATCH | `/projects`, `/projects/{key}` | Projects |
 | GET/POST, PATCH/DELETE `/projects/{key}/milestones[/{id}]` | Milestones with progress (`total`, `done` = active items in a completed status). Changes need a project admin; PATCH `{"name"?,"due_at"?,"released"?}`; delete refused while items use it. Items get one via `milestone` (name or null) on create/update; filter with `?milestone=` |
 | GET/PUT/PATCH | `/projects/{key}/workflow` | GET: types, hierarchy, statuses (each with `requires`), transitions, labels, milestones, custom fields, `merge_columns`. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change. PATCH `{"merge_columns":bool}` shows statuses of one category in one board column (needs the `workflow` action; ADR-0011) |
