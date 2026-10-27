@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"regexp"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -27,7 +29,7 @@ func addResources(s *sdk.Server, svc *core.Service, a auth.Actor) {
 				}
 				v, err := h(ctx, m)
 				if err != nil {
-					return nil, err
+					return nil, resourceError(err)
 				}
 				b, err := json.Marshal(v)
 				if err != nil {
@@ -67,4 +69,13 @@ func addResources(s *sdk.Server, svc *core.Service, a auth.Actor) {
 			}
 			return map[string]any{"item": it, "links": links}, nil
 		}, itemURI)
+}
+
+// resourceError keeps core messages and hides everything else behind a generic error (logged here).
+func resourceError(err error) error {
+	if info := core.ErrorInfo(err); info.Code != "internal" {
+		return errors.New(info.Message)
+	}
+	slog.Error("mcp resource failed", "err", err)
+	return errors.New("internal error")
 }

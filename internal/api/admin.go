@@ -1,10 +1,13 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 
+	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/core"
+	"github.com/kees/atlas/internal/logbuf"
 )
 
 func (s *Server) registerAdmin(mux *http.ServeMux, protect func(http.HandlerFunc) http.Handler) {
@@ -12,6 +15,7 @@ func (s *Server) registerAdmin(mux *http.ServeMux, protect func(http.HandlerFunc
 	mux.Handle("PATCH /api/v1/admin/users/{id}", protect(s.adminPatchUser))
 	mux.Handle("GET /api/v1/admin/audit", protect(s.adminAudit))
 	mux.Handle("GET /api/v1/admin/instance", protect(s.adminInstance))
+	mux.Handle("GET /api/v1/admin/logs", protect(s.adminLogs))
 	mux.Handle("GET /api/v1/admin/mail", protect(s.adminMail))
 	mux.Handle("PUT /api/v1/admin/mail", protect(s.adminSaveMail))
 	mux.Handle("DELETE /api/v1/admin/mail", protect(s.adminClearMail))
@@ -51,30 +55,10 @@ func (s *Server) adminPatchUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", "give is_admin, active, reset_totp and/or force_password_reset")
 		return
 	}
-	a := actor(r)
-	if in.ResetTOTP {
-		if err := s.core.ResetUserTOTP(r.Context(), a, id); err != nil {
-			s.fail(w, r, err)
-			return
-		}
-	}
-	if in.ForcePasswordReset {
-		if err := s.core.ForcePasswordReset(r.Context(), a, id); err != nil {
-			s.fail(w, r, err)
-			return
-		}
-	}
-	if in.IsAdmin != nil {
-		if err := s.core.SetUserAdmin(r.Context(), a, id, *in.IsAdmin); err != nil {
-			s.fail(w, r, err)
-			return
-		}
-	}
-	if in.Active != nil {
-		if err := s.core.SetUserActive(r.Context(), a, id, *in.Active); err != nil {
-			s.fail(w, r, err)
-			return
-		}
+	if err := s.core.UpdateUser(r.Context(), actor(r), id, core.AdminUserPatch{IsAdmin: in.IsAdmin, Active: in.Active,
+		ResetTOTP: in.ResetTOTP, ForcePasswordReset: in.ForcePasswordReset}); err != nil {
+		s.fail(w, r, err)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -173,4 +157,25 @@ func (s *Server) adminTestMail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// adminLogs serves the recent server log (newest first): ?level=debug|info|warn|error, ?q= text, ?limit=.
+func (s *Server) adminLogs(w http.ResponseWriter, r *http.Request) {
+	if a := actor(r); a.Kind != auth.KindHuman || !a.IsAdmin {
+		writeError(w, http.StatusForbidden, "forbidden", "administrators only")
+		return
+	}
+	f := logbuf.Filter{MinLevel: slog.LevelInfo, Query: r.URL.Query().Get("q")}
+	if l := r.URL.Query().Get("level"); l != "" {
+		if err := f.MinLevel.UnmarshalText([]byte(l)); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid", "level must be debug, info, warn or error")
+			return
+		}
+	}
+	f.Limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	items := []logbuf.Entry{}
+	if s.logs != nil {
+		items = s.logs.List(f)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }

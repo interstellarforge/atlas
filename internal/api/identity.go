@@ -47,7 +47,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	key := "register|" + clientKey(r)
+	key := "register|" + s.clientKey(r)
 	if s.auth.Throttled(key) {
 		w.Header().Set("Retry-After", "900")
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts")

@@ -104,6 +104,9 @@ func (s *Service) DeleteAccount(ctx context.Context, a auth.Actor, password stri
 				return rule("you are the only admin of a project; give someone else admin first")
 			}
 		}
+		if err := scrubAuditPII(tx, a); err != nil {
+			return err
+		}
 		now := s.nowMs()
 		junk := make([]byte, 32)
 		_, _ = rand.Read(junk)
@@ -199,10 +202,18 @@ func (s *Service) RemoveAvatar(ctx context.Context, a auth.Actor) error {
 	return err
 }
 
-// AvatarThumb returns the thumbnail path of a user's picture; any signed-in reader may see it (people are listed anyway).
+// AvatarThumb returns the thumbnail path of a user's picture; any signed-in person may see it (people are listed
+// anyway), a token only for people it can list.
 func (s *Service) AvatarThumb(ctx context.Context, a auth.Actor, userID int64) (string, error) {
 	if !a.Can(auth.ScopeRead) || s.media == nil {
 		return "", ErrForbidden
+	}
+	if a.Kind == auth.KindToken {
+		q, args := s.sharedUsersQuery(a)
+		var n int
+		if err := s.db.R.QueryRow(`SELECT COUNT(*) FROM (`+q+`) WHERE id = ?`, append(args, userID)...).Scan(&n); err != nil || n == 0 {
+			return "", ErrNotFound
+		}
 	}
 	var p sql.NullString
 	if err := s.db.R.QueryRow(`SELECT avatar_path FROM users WHERE id = ?`, userID).Scan(&p); err != nil || !p.Valid {
@@ -346,3 +357,18 @@ func (s *Service) ResetUserTOTP(ctx context.Context, a auth.Actor, id int64) err
 }
 
 var _ = strings.TrimSpace
+
+// scrubAuditPII removes the account's e-mail addresses from audit entries (email changes, invitations to it),
+// which would otherwise outlive the anonymised user row.
+func scrubAuditPII(tx *sql.Tx, a auth.Actor) error {
+	var email string
+	if err := tx.QueryRow(`SELECT email FROM users WHERE id = ?`, a.UserID).Scan(&email); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE audit_entries SET changes = '{}' WHERE operation = 'account.email' AND target = ?`, a.String()); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`UPDATE audit_entries SET changes = json_remove(changes, '$.email')
+		WHERE operation = 'invite.create' AND lower(json_extract(changes, '$.email')) = lower(?)`, email)
+	return err
+}

@@ -53,15 +53,29 @@ func Handler(svc *core.Service, feed *events.Feed, o Options) http.Handler {
 	}
 	h := sdk.NewStreamableHTTPHandler(func(r *http.Request) *sdk.Server {
 		a, _ := auth.ActorFrom(r.Context())
-		return newServer(svc, feed, g, a)
+		return newServer(svc, feed, g, a, o.Label)
 	}, &sdk.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
-	return rateLimit(newLimiter(requestsPerMinute, time.Minute), h)
+	limited := rateLimit(newLimiter(requestsPerMinute, time.Minute), h)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a, _ := auth.ActorFrom(r.Context())
+		o.Metrics.seen(a.String(), r.UserAgent(), labelOf(o.Label, a))
+		limited.ServeHTTP(w, r)
+	})
 }
 
 // Options tunes the server; zero values use the defaults.
 type Options struct {
 	WritesPerHour int      // mutation quota per token per hour
 	Metrics       *Metrics // shared so the API can serve the aggregate; nil keeps a private one
+	// Label names an actor for the connection list (token name and owner); optional.
+	Label func(auth.Actor) string
+}
+
+func labelOf(f func(auth.Actor) string, a auth.Actor) func() string {
+	if f == nil {
+		return nil
+	}
+	return func() string { return f(a) }
 }
 
 // guards are the process-wide counters shared by every per-request server.
@@ -70,10 +84,10 @@ type guards struct {
 	metrics          *Metrics
 }
 
-func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *sdk.Server {
+func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, label func(auth.Actor) string) *sdk.Server {
 	writes := g.writes
 	s := sdk.NewServer(&sdk.Implementation{Name: serverName, Version: serverVersion}, nil)
-	s.AddReceivingMiddleware(logCalls(a, g.metrics))
+	s.AddReceivingMiddleware(logCalls(a, g.metrics, label))
 	addResources(s, svc, a)
 	readOnly := &sdk.ToolAnnotations{ReadOnlyHint: true}
 
@@ -84,7 +98,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
 		ps, err := svc.ListProjects(ctx, a)
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		items := make([]map[string]any, 0, len(ps))
 		for _, p := range ps {
@@ -107,7 +121,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in workflowIn) (*sdk.CallToolResult, any, error) {
 		w, err := svc.GetWorkflow(ctx, a, in.Project)
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(workflowView(w))
 	})
@@ -144,7 +158,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 			IncludeArchived: in.IncludeArchived, Cursor: in.Cursor, Limit: min(limit, searchLimitMax), Fields: in.Fields,
 		})
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(page)
 	})
@@ -177,7 +191,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 			IncludeArchived: in.IncludeArchived, Cursor: in.Cursor, Limit: min(limit, searchLimitMax), Fields: in.Fields,
 		})
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(page)
 	})
@@ -191,25 +205,26 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		Assignee    *int64   `json:"assignee,omitempty" jsonschema:"user id"`
 		Labels      []string `json:"labels,omitempty"`
 		Template    string   `json:"template,omitempty" jsonschema:"name of an item template of the project (see workflow_get)"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "issue_create",
 		Description: "Report an issue (creates a work item of type bug). Returns its key and version.",
 		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in issueCreateIn) (*sdk.CallToolResult, any, error) {
-		if r, ok := quota(writes, a, 1); !ok {
-			return r, nil, nil
+		out, failed := write(ctx, svc, writes, a, 1, "issue_create", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {
+			it, err := s.CreateItem(ctx, a, core.CreateItem{Project: in.Project, Type: "bug", Title: in.Title, Description: in.Description,
+				Priority: in.Priority, Status: in.Status, Assignee: in.Assignee, Labels: in.Labels, Template: in.Template})
+			if err != nil {
+				return nil, err
+			}
+			return core.Select(it, issueFields)
+		})
+		if failed != nil {
+			return failed, nil, nil
 		}
-		it, err := svc.CreateItem(ctx, a, core.CreateItem{Project: in.Project, Type: "bug", Title: in.Title, Description: in.Description,
-			Priority: in.Priority, Status: in.Status, Assignee: in.Assignee, Labels: in.Labels, Template: in.Template})
-		if err != nil {
-			return nil, nil, err
-		}
-		m, err := core.Select(it, issueFields)
-		if err != nil {
-			return nil, nil, err
-		}
-		return result(m)
+		return result(out)
 	})
 
 	type issueUpdateIn struct {
@@ -222,18 +237,14 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		Assignee    *int64   `json:"assignee,omitempty" jsonschema:"user id"`
 		Labels      []string `json:"labels,omitempty" jsonschema:"replaces the issue's labels"`
 		Clear       []string `json:"clear,omitempty" jsonschema:"fields to set to null: assignee"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "issue_update",
 		Description: "Change an issue's fields or status. Needs the current version (a stale one fails with a conflict that names the current version). Refuses items that are not bugs.",
 		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in issueUpdateIn) (*sdk.CallToolResult, any, error) {
-		if r, ok := quota(writes, a, 1); !ok {
-			return r, nil, nil
-		}
-		if err := svc.RequireType(ctx, a, in.Key, "bug"); err != nil {
-			return nil, nil, err
-		}
 		patch := map[string]any{}
 		if in.Title != "" {
 			patch["title"] = in.Title
@@ -259,19 +270,24 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		}
 		for _, f := range in.Clear {
 			if f != "assignee" {
-				return nil, nil, fmt.Errorf("clear supports assignee only")
+				return fail(inputError("clear supports assignee only"))
 			}
 			patch[f] = nil
 		}
-		it, err := svc.UpdateItem(ctx, a, in.Key, in.Version, patch)
-		if err != nil {
-			return nil, nil, err
+		out, failed := write(ctx, svc, writes, a, 1, "issue_update", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {
+			if err := s.RequireType(ctx, a, in.Key, "bug"); err != nil {
+				return nil, err
+			}
+			it, err := s.UpdateItem(ctx, a, in.Key, in.Version, patch)
+			if err != nil {
+				return nil, err
+			}
+			return core.Select(it, issueFields)
+		})
+		if failed != nil {
+			return failed, nil, nil
 		}
-		m, err := core.Select(it, issueFields)
-		if err != nil {
-			return nil, nil, err
-		}
-		return result(m)
+		return result(out)
 	})
 
 	type getIn struct {
@@ -285,29 +301,26 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in getIn) (*sdk.CallToolResult, any, error) {
 		it, err := svc.GetItem(ctx, a, in.Key)
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		if len(in.Fields) > 0 {
 			m, err := core.Select(it, in.Fields)
 			if err != nil {
-				return nil, nil, err
+				return fail(err)
 			}
 			return result(m)
 		}
 		links, err := svc.ListLinks(ctx, a, in.Key)
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		checklist, err := svc.ListChecklist(ctx, a, in.Key)
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
-		comments, err := svc.ListComments(ctx, a, in.Key)
+		comments, err := svc.ListRecentComments(ctx, a, in.Key, recentComments)
 		if err != nil {
-			return nil, nil, err
-		}
-		if len(comments) > recentComments {
-			comments = comments[len(comments)-recentComments:]
+			return fail(err)
 		}
 		return result(map[string]any{"item": it, "links": links, "checklist": checklist, "comments": comments})
 	})
@@ -327,7 +340,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		}
 		b, err := svc.Board(ctx, a, in.Project, core.BoardFilter{Limit: min(limit, boardLimitMax), Fields: boardFields})
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(b)
 	})
@@ -342,7 +355,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in changesIn) (*sdk.CallToolResult, any, error) {
 		if in.Since < 0 {
-			return nil, nil, errors.New("since must be >= 0")
+			return fail(inputError("since must be >= 0"))
 		}
 		limit := in.Limit
 		if limit <= 0 {
@@ -350,7 +363,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		}
 		b, err := feed.Since(a, in.Since, min(limit, 200))
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(b)
 	})
@@ -361,7 +374,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 			"Atomic by default (first failure applies nothing); partial=true applies what it can and reports each result. " +
 			"Set idempotency_key so a retry returns the first result instead of repeating the writes. " +
 			"Archiving more than 10 items per hour needs confirm_mass_archive=true.",
-		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(true)}, // archives items
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in writeIn) (*sdk.CallToolResult, any, error) {
 		if r, ok := quota(writes, a, len(in.Operations)); !ok {
 			return r, nil, nil
@@ -378,13 +391,16 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 			ops[i] = o.toCore()
 		}
 		out, err := svc.Batch(ctx, a, ops, in.Partial, in.IdempotencyKey)
+		if err != nil || out.Replayed {
+			writes.refund(a.String(), len(in.Operations))
+		}
 		var oe *core.OpError
 		if errors.As(err, &oe) {
 			info := core.ErrorInfo(oe.Err)
 			return errorResult(map[string]any{"error": info, "operation": oe.Index, "applied": false})
 		}
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(out)
 	})
@@ -392,18 +408,19 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 	type commentIn struct {
 		Key  string `json:"key" jsonschema:"item key, e.g. EXO-42"`
 		Body string `json:"body"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "comment_add",
 		Description: "Add a comment to a work item (recorded under your token). Use it for progress updates and questions.",
 		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in commentIn) (*sdk.CallToolResult, any, error) {
-		if r, ok := quota(writes, a, 1); !ok {
-			return r, nil, nil
-		}
-		c, err := svc.AddComment(ctx, a, in.Key, in.Body)
-		if err != nil {
-			return nil, nil, err
+		c, failed := write(ctx, svc, writes, a, 1, "comment_add", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (core.Comment, error) {
+			return s.AddComment(ctx, a, in.Key, in.Body)
+		})
+		if failed != nil {
+			return failed, nil, nil
 		}
 		return result(c)
 	})
@@ -417,7 +434,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in progressIn) (*sdk.CallToolResult, any, error) {
 		p, err := svc.ProjectProgress(ctx, a, in.Project)
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(p)
 	})
@@ -427,18 +444,19 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		Duration string `json:"duration" jsonschema:"90, 45m, 1.5h or 1h30m; rounded to whole minutes, 1 minute to 24 hours"`
 		Date     string `json:"date,omitempty" jsonschema:"YYYY-MM-DD, default today"`
 		Note     string `json:"note,omitempty"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "time_log",
 		Description: "Book time on a work item under your token. Needs time tracking enabled on the project and the time.log right.",
 		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in timeLogIn) (*sdk.CallToolResult, any, error) {
-		if r, ok := quota(writes, a, 1); !ok {
-			return r, nil, nil
-		}
-		e, err := svc.LogTime(ctx, a, in.Key, in.Duration, in.Date, in.Note)
-		if err != nil {
-			return nil, nil, err
+		e, failed := write(ctx, svc, writes, a, 1, "time_log", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (core.TimeEntry, error) {
+			return s.LogTime(ctx, a, in.Key, in.Duration, in.Date, in.Note)
+		})
+		if failed != nil {
+			return failed, nil, nil
 		}
 		return result(e)
 	})
@@ -458,7 +476,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in timeSummaryIn) (*sdk.CallToolResult, any, error) {
 		sum, err := svc.TimeSummary(ctx, a, in.Project, core.TimeFilter{From: in.From, To: in.To, UserID: in.User, Item: strings.ToUpper(in.Item), Period: in.Period})
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(sum)
 	})
@@ -484,12 +502,12 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		case "", "bootstrap":
 			b, err := svc.ContextBootstrapFor(ctx, a, in.Project, in.Categories, in.Limit, in.Cursor, in.MaxBytes)
 			if err != nil {
-				return nil, nil, err
+				return fail(err)
 			}
 			return result(b)
 		case "search":
 			if strings.TrimSpace(in.Query) == "" {
-				return nil, nil, errors.New("search needs a query")
+				return fail(inputError("search needs a query"))
 			}
 			limit := in.Limit
 			if limit <= 0 {
@@ -498,17 +516,17 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 			page, err := svc.ListContext(ctx, a, in.Project, core.ContextFilter{Q: strings.TrimSpace(in.Query), Categories: in.Categories, Compact: true,
 				Fields: in.Fields, Cursor: in.Cursor, Limit: min(limit, 50), MaxBytes: core.ClampContextBytes(in.MaxBytes)})
 			if err != nil {
-				return nil, nil, err
+				return fail(err)
 			}
 			return result(page)
 		case "detail":
 			page, err := svc.ContextDetails(ctx, a, in.Project, in.Keys, in.Cursor, in.MaxBytes, in.Fields)
 			if err != nil {
-				return nil, nil, err
+				return fail(err)
 			}
 			return result(page)
 		}
-		return nil, nil, errors.New("mode must be bootstrap, search or detail")
+		return fail(inputError("mode must be bootstrap, search or detail"))
 	})
 
 	type ctxSourceIn struct {
@@ -538,7 +556,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "context_write",
 		Description: "Save durable project knowledge, not task progress. Updates need expected_version. Entries start unverified; only humans verify, so verify fails for tokens.",
-		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(true)}, // archive and supersede retire entries
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in contextWriteIn) (*sdk.CallToolResult, any, error) {
 		if r, ok := quota(writes, a, 1); !ok {
 			return r, nil, nil
@@ -568,14 +586,17 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		case "verify":
 			res, err = svc.VerifyContext(ctx, a, in.Project, in.Key, in.ExpectedVersion)
 		default:
-			return nil, nil, errors.New("op must be upsert, archive, supersede or verify")
+			return fail(inputError("op must be upsert, archive, supersede or verify"))
+		}
+		if err != nil || res.Replayed {
+			writes.refund(a.String(), 1)
 		}
 		var conflict *core.ConflictError
 		if errors.As(err, &conflict) {
 			return errorResult(map[string]any{"error": core.ErrorInfo(err), "applied": false})
 		}
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		out := map[string]any{"key": res.Entry.Key, "version": res.Entry.Version, "context_version": res.ContextVersion, "state": res.Entry.Verification}
 		if res.Entry.Status != "active" {
@@ -596,40 +617,45 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 			Text *string `json:"text,omitempty"`
 		} `json:"set,omitempty" jsonschema:"change existing items (tick, untick or rename)"`
 		Remove []int64 `json:"remove,omitempty" jsonschema:"ids of items to remove"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "checklist_write",
-		Description: "Add, tick/untick, rename or remove checklist items of a work item. Items are changed one by one in the order add, set, remove; read the checklist with item_get.",
-		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+		Description: "Add, tick/untick, rename or remove checklist items of a work item. All changes apply together (add, then set, then remove) or none do; read the checklist with item_get.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(true)}, // removes checklist items
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in checklistIn) (*sdk.CallToolResult, any, error) {
 		n := len(in.Add) + len(in.Set) + len(in.Remove)
 		if n == 0 || n > core.MaxBatch {
-			return nil, nil, fmt.Errorf("give 1-%d changes", core.MaxBatch)
-		}
-		if r, ok := quota(writes, a, n); !ok {
-			return r, nil, nil
+			return fail(inputError(fmt.Sprintf("give 1-%d changes", core.MaxBatch)))
 		}
 		var id [8]byte
 		_, _ = rand.Read(id[:])
 		ctx = core.WithBatch(ctx, hex.EncodeToString(id[:])) // one batch id groups this call's audit entries
-		for _, text := range in.Add {
-			if _, err := svc.AddChecklistItem(ctx, a, in.Key, text); err != nil {
-				return nil, nil, err
+		_, failed := write(ctx, svc, writes, a, n, "checklist_write", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (struct{}, error) {
+			for _, text := range in.Add {
+				if _, err := s.AddChecklistItem(ctx, a, in.Key, text); err != nil {
+					return struct{}{}, err
+				}
 			}
-		}
-		for _, c := range in.Set {
-			if _, err := svc.UpdateChecklistItem(ctx, a, in.Key, c.ID, core.ChecklistPatch{Text: c.Text, Done: c.Done}); err != nil {
-				return nil, nil, err
+			for _, c := range in.Set {
+				if _, err := s.UpdateChecklistItem(ctx, a, in.Key, c.ID, core.ChecklistPatch{Text: c.Text, Done: c.Done}); err != nil {
+					return struct{}{}, err
+				}
 			}
-		}
-		for _, id := range in.Remove {
-			if err := svc.RemoveChecklistItem(ctx, a, in.Key, id); err != nil {
-				return nil, nil, err
+			for _, id := range in.Remove {
+				if err := s.RemoveChecklistItem(ctx, a, in.Key, id); err != nil {
+					return struct{}{}, err
+				}
 			}
+			return struct{}{}, nil
+		})
+		if failed != nil {
+			return failed, nil, nil
 		}
 		items, err := svc.ListChecklist(ctx, a, in.Key)
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		return result(map[string]any{"checklist": items})
 	})
@@ -644,7 +670,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in attachmentsIn) (*sdk.CallToolResult, any, error) {
 		list, err := svc.ListAttachments(ctx, a, in.Key)
 		if err != nil {
-			return nil, nil, err
+			return fail(err)
 		}
 		out := make([]map[string]any, 0, len(list))
 		for _, at := range list {
@@ -668,12 +694,57 @@ func quota(l *limiter, a auth.Actor, n int) (*sdk.CallToolResult, bool) {
 	return r, false
 }
 
+// write runs one mutating tool call. The quota is charged up front, so concurrent calls cannot overshoot, and
+// handed back when the call changed nothing (invalid request, failure or replayed idempotency key).
+// A non-nil result is the error or quota answer to return to the agent.
+func write[T any](ctx context.Context, svc *core.Service, l *limiter, a auth.Actor, n int, tool, key string, req any,
+	f func(ctx context.Context, s *core.Service) (T, error)) (T, *sdk.CallToolResult) {
+	var out T
+	if r, ok := quota(l, a, n); !ok {
+		return out, r
+	}
+	replayed, err := svc.Idempotent(ctx, a, key, struct {
+		Tool string
+		Req  any
+	}{tool, req}, &out, func(ctx context.Context, s *core.Service) (err error) {
+		out, err = f(ctx, s)
+		return err
+	})
+	if err != nil || replayed {
+		l.refund(a.String(), n)
+	}
+	if err != nil {
+		r, _, _ := fail(err)
+		return out, r
+	}
+	return out, nil
+}
+
+// inputError marks a bad argument the agent can fix; its text is safe to show.
+type inputError string
+
+func (e inputError) Error() string { return string(e) }
+
+// fail turns an error into a stable tool result. Core errors keep their message; anything else is logged
+// here and reported as a plain internal error, so database or implementation details never reach the client.
+func fail(err error) (*sdk.CallToolResult, any, error) {
+	var ie inputError
+	if errors.As(err, &ie) {
+		return errorResult(map[string]any{"error": core.BatchError{Code: "invalid", Message: string(ie)}})
+	}
+	info := core.ErrorInfo(err)
+	if info.Code == "internal" {
+		slog.Error("mcp tool failed", "err", err)
+	}
+	return errorResult(map[string]any{"error": info})
+}
+
 // result returns v as one compact JSON text block. Structured output is not set: it would
 // repeat the same payload and double the tokens an agent pays for.
 func result(v any) (*sdk.CallToolResult, any, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return nil, nil, err
+		return fail(err)
 	}
 	if len(b) > maxResponse {
 		// Never cut JSON in half: tell the agent how to ask for less.
@@ -825,10 +896,17 @@ func workflowView(w core.Workflow) map[string]any {
 var errTooLarge = errors.New("resource is larger than " + strconv.Itoa(maxResponse) + " bytes")
 
 // logCalls writes one compact line per tool call: what agents use, how big the answers are and how long they take.
-func logCalls(a auth.Actor, m *Metrics) sdk.Middleware {
+func logCalls(a auth.Actor, m *Metrics, label func(auth.Actor) string) sdk.Middleware {
 	return func(next sdk.MethodHandler) sdk.MethodHandler {
 		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
 			start := time.Now()
+			if r, ok := req.(interface{ ClientInfo() *sdk.Implementation }); ok {
+				if ci := r.ClientInfo(); ci != nil {
+					if m.identify(a.String(), ci.Name, ci.Version, labelOf(label, a)) {
+						slog.Info("mcp connect", "actor", a.String(), "client", ci.Name, "version", ci.Version)
+					}
+				}
+			}
 			res, err := next(ctx, method, req)
 			call, ok := req.(*sdk.CallToolRequest)
 			if !ok || method != "tools/call" {
@@ -844,8 +922,12 @@ func logCalls(a auth.Actor, m *Metrics) sdk.Middleware {
 				}
 			}
 			ms := time.Since(start).Milliseconds()
-			m.record(call.Params.Name, ms, text, isErr)
-			slog.Info("mcp call", "tool", call.Params.Name, "actor", a.String(), "ms", ms, "bytes", len(text), "error", isErr)
+			m.record(a.String(), call.Params.Name, ms, text, isErr)
+			if isErr {
+				slog.Warn("mcp call failed", "tool", call.Params.Name, "actor", a.String(), "ms", ms, "bytes", len(text), "code", errorCode(text))
+			} else {
+				slog.Info("mcp call", "tool", call.Params.Name, "actor", a.String(), "ms", ms, "bytes", len(text), "error", false)
+			}
 			return res, err
 		}
 	}

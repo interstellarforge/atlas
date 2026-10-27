@@ -58,8 +58,16 @@ func (s *Service) AddComment(ctx context.Context, a auth.Actor, key, body string
 	return c, err
 }
 
-// ListComments returns an item's comments, oldest first.
+// maxComments bounds one comment read; longer threads show their newest comments.
+const maxComments = 500
+
+// ListComments returns an item's newest comments (at most maxComments), oldest first.
 func (s *Service) ListComments(ctx context.Context, a auth.Actor, key string) ([]Comment, error) {
+	return s.ListRecentComments(ctx, a, key, maxComments)
+}
+
+// ListRecentComments returns the newest n comments of an item, oldest first.
+func (s *Service) ListRecentComments(ctx context.Context, a auth.Actor, key string, n int) ([]Comment, error) {
 	pk, err := projectOfKey(key)
 	if err != nil {
 		return nil, err
@@ -67,8 +75,8 @@ func (s *Service) ListComments(ctx context.Context, a auth.Actor, key string) ([
 	if _, _, err := s.access(s.db.R, a, pk, actView); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT c.id, c.actor, c.body, c.created_at FROM comments c
-		JOIN work_items i ON i.id = c.item_id WHERE i.key = ? ORDER BY c.id`, key)
+	rows, err := s.db.R.Query(`SELECT id, actor, body, created_at FROM (SELECT c.id, c.actor, c.body, c.created_at FROM comments c
+		JOIN work_items i ON i.id = c.item_id WHERE i.key = ? ORDER BY c.id DESC LIMIT ?) ORDER BY id`, key, min(n, maxComments))
 	if err != nil {
 		return nil, err
 	}

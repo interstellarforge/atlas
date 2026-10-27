@@ -27,7 +27,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	user, session, csrf, err := s.auth.Login(in.Email, in.Password, in.Code, clientKey(r))
+	user, session, csrf, err := s.auth.Login(in.Email, in.Password, in.Code, s.clientKey(r))
 	switch {
 	case errors.Is(err, auth.ErrTOTPRequired):
 		writeError(w, http.StatusUnauthorized, "totp_required", "enter your two-factor code")

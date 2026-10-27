@@ -59,6 +59,15 @@ func (l *limiter) take(key string, n int) (time.Duration, bool) {
 	return 0, true
 }
 
+// refund gives back n events taken earlier in the current window.
+func (l *limiter) refund(key string, n int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if b := l.hits[key]; b != nil {
+		b.n = max(0, b.n-n)
+	}
+}
+
 // rateLimit answers 429 with Retry-After when a token sends too many requests.
 func rateLimit(l *limiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -12,7 +12,7 @@ Writes `atlas.db` (consistent snapshot), the uploads it references and `manifest
 ## Restore
 
 1. Stop the server.
-2. `ATLAS_DATA_DIR=/data atlas restore /backups/atlas-2026-10-27` (the backup is verified against its manifest first; a mismatch aborts before anything changes).
+2. `ATLAS_DATA_DIR=/data atlas restore /backups/atlas-2026-10-27` (the backup is verified against its manifest first: exactly one `atlas.db`, only regular files under `uploads/`, no symlinks, matching checksums. The database is copied next to the live one, integrity-checked and given a new generation, and only then swapped in; a failure leaves the live database untouched).
 3. Start the server. The old database is kept in `<data>/backups/pre-restore-<time>/`; clients reload because the generation changed.
 
 ### Restore test (2026-10-27, native binary)
@@ -52,6 +52,8 @@ A password saved in the admin screen is encrypted with `<data dir>/mail.key`. Ba
 ## Connecting Claude Code and Codex (MCP)
 
 Atlas serves MCP over Streamable HTTP at `/mcp`. Agents authenticate with an API token (Settings > API tokens, or a project token under project settings > Tokens). Give an agent read scope to let it read project knowledge (`context_get`) and the board; add write scope only when it should create items, comment or write context. A token can be limited to projects and is revoked instantly. Note: a token for the Atlas MCP is not the Taiga server some global agent instructions call "Atlas MCP"; they are different servers.
+
+To see who is connected, open Administration > MCP: status, clients active in the last 5 minutes (token, client name, last seen, calls, errors) and the latest calls. Administration > Server log shows the latest 1000 log lines (filter by level and text); stdout remains the full log.
 
 Claude Code (from the project directory; `ATLAS_TOKEN` holds the token, `https://atlas.example.com` is your public address):
 

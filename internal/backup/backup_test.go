@@ -2,6 +2,7 @@ package backup_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -114,5 +115,36 @@ func TestRestoreRejectsTamperedBackup(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(target, "atlas.db")); err == nil {
 		t.Fatal("database was written before verification passed")
+	}
+}
+
+func TestRestoreRejectsManifestWithoutDatabase(t *testing.T) {
+	src := t.TempDir()
+	d, uploads := seed(t, src)
+	bk := filepath.Join(t.TempDir(), "bk")
+	if _, err := backup.Create(d, uploads, bk); err != nil {
+		t.Fatal(err)
+	}
+	m := filepath.Join(bk, "manifest.json")
+	b, _ := os.ReadFile(m)
+	var mf backup.Manifest
+	if err := json.Unmarshal(b, &mf); err != nil {
+		t.Fatal(err)
+	}
+	kept := mf.Files[:0]
+	for _, f := range mf.Files {
+		if f.Path != "atlas.db" {
+			kept = append(kept, f)
+		}
+	}
+	mf.Files = kept
+	b, _ = json.Marshal(mf)
+	os.WriteFile(m, b, 0o640)
+	target := t.TempDir()
+	if _, err := backup.Restore(bk, target); err == nil {
+		t.Fatal("restore accepted a manifest without atlas.db")
+	}
+	if _, err := os.Stat(filepath.Join(target, "atlas.db")); err == nil {
+		t.Fatal("database installed despite failed restore")
 	}
 }

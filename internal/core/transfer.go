@@ -56,32 +56,32 @@ func (s *Service) ExportProject(ctx context.Context, a auth.Actor, key string) (
 		if err != nil {
 			return out, err
 		}
+		keys := make([]string, 0, len(page.Items))
 		for _, m := range page.Items {
 			k, _ := m["key"].(string)
-			ei := ExportItem{}
-			if ei.Item, err = s.GetItem(ctx, a, k); err != nil {
-				return out, err
-			}
-			if ei.Checklist, err = s.ListChecklist(ctx, a, k); err != nil {
-				return out, err
-			}
-			if ei.Comments, err = s.ListComments(ctx, a, k); err != nil {
-				return out, err
-			}
-			if ei.Links, err = s.ListLinks(ctx, a, k); err != nil {
-				return out, err
-			}
-			if ei.Attachments, err = s.ListAttachments(ctx, a, k); err != nil {
-				return out, err
-			}
-			out.Items = append(out.Items, ei)
+			keys = append(keys, k)
 		}
+		items, err := s.exportPage(a, keys)
+		if err != nil {
+			return out, err
+		}
+		out.Items = append(out.Items, items...)
 		if page.NextCursor == nil {
 			return out, nil
 		}
 		cursor = *page.NextCursor
 	}
 }
+
+// CSVCell neutralises spreadsheet formulas in user-provided text; ParseImportCSV undoes it.
+func CSVCell(v string) string {
+	if v != "" && strings.ContainsRune(csvFormulaStart, rune(v[0])) {
+		return "'" + v
+	}
+	return v
+}
+
+const csvFormulaStart = "=+-@\t\r"
 
 var csvHeader = []string{"key", "type", "title", "description", "status", "priority", "parent", "labels", "due_at", "milestone", "archived"}
 
@@ -103,7 +103,8 @@ func (e Export) WriteCSV(w io.Writer) error {
 		if it.ArchivedAt != nil {
 			archived = "true"
 		}
-		_ = cw.Write([]string{it.Key, it.Type, it.Title, it.Description, it.Status, it.Priority, parent, strings.Join(it.Labels, ";"), due, milestone, archived})
+		_ = cw.Write([]string{CSVCell(it.Key), CSVCell(it.Type), CSVCell(it.Title), CSVCell(it.Description), CSVCell(it.Status), CSVCell(it.Priority),
+			CSVCell(parent), CSVCell(strings.Join(it.Labels, ";")), due, CSVCell(milestone), archived})
 	}
 	cw.Flush()
 	return cw.Error()
@@ -153,7 +154,11 @@ func ParseImportCSV(r io.Reader) ([]ImportRow, error) {
 		}
 		get := func(name string) string {
 			if i, ok := col[name]; ok && i < len(rec) {
-				return strings.TrimSpace(rec[i])
+				v := strings.TrimSpace(rec[i])
+				if len(v) > 1 && v[0] == '\'' && strings.ContainsRune(csvFormulaStart, rune(v[1])) {
+					v = v[1:]
+				}
+				return v
 			}
 			return ""
 		}
@@ -372,4 +377,109 @@ func findDuplicate(tx *sql.Tx, projectID int64, in CreateItem) (string, error) {
 		return "", nil
 	}
 	return key, err
+}
+
+// exportPage loads the details of one page of items with one query per kind instead of five per item.
+// The caller has checked access to the project.
+func (s *Service) exportPage(a auth.Actor, keys []string) ([]ExportItem, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	in := "(" + strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",") + ")"
+	args := make([]any, len(keys))
+	for i, k := range keys {
+		args[i] = k
+	}
+	byKey := make(map[string]*ExportItem, len(keys))
+	ids := map[int64]string{}
+	out := make([]ExportItem, len(keys))
+	for i, k := range keys {
+		r, err := loadRow(s.db.R, k)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = ExportItem{Item: r.Item, Checklist: []ChecklistItem{}, Comments: []Comment{}, Links: Links{Outgoing: []Link{}, Incoming: []Link{}}, Attachments: []Attachment{}}
+		byKey[k] = &out[i]
+		ids[r.id] = k
+	}
+	idArgs := make([]any, 0, len(ids))
+	for id := range ids {
+		idArgs = append(idArgs, id)
+	}
+	idIn := "(" + strings.TrimSuffix(strings.Repeat("?,", len(idArgs)), ",") + ")"
+
+	rows, err := s.db.R.Query(`SELECT i.key, c.id, c.text, c.done FROM checklist_items c JOIN work_items i ON i.id = c.item_id
+		WHERE i.key IN `+in+` ORDER BY c.position, c.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var k string
+		var c ChecklistItem
+		if err := rows.Scan(&k, &c.ID, &c.Text, &c.Done); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		byKey[k].Checklist = append(byKey[k].Checklist, c)
+	}
+	rows.Close()
+
+	if rows, err = s.db.R.Query(`SELECT i.key, c.id, c.actor, c.body, c.created_at FROM comments c
+		JOIN work_items i ON i.id = c.item_id WHERE i.key IN `+in+` ORDER BY c.id`, args...); err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var k string
+		var c Comment
+		if err := rows.Scan(&k, &c.ID, &c.Actor, &c.Body, &c.CreatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		byKey[k].Comments = append(byKey[k].Comments, c)
+	}
+	rows.Close()
+
+	if rows, err = s.db.R.Query(attachmentSelect+`WHERE i.key IN `+in+` ORDER BY c.id`, args...); err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		att, err := scanAttachment(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		byKey[att.Item].Attachments = append(byKey[att.Item].Attachments, att)
+	}
+	rows.Close()
+
+	readable, err := s.readableProjects(s.db.R, a)
+	if err != nil {
+		return nil, err
+	}
+	for _, dir := range []struct{ self, other string }{{"from_id", "to_id"}, {"to_id", "from_id"}} {
+		if rows, err = s.db.R.Query(`SELECT l.`+dir.self+`, l.type, o.key, o.title, st.name, o.project_id FROM item_links l
+			JOIN work_items o ON o.id = l.`+dir.other+` JOIN project_statuses st ON st.id = o.status_id
+			WHERE l.`+dir.self+` IN `+idIn+` ORDER BY l.id`, idArgs...); err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var self, pid int64
+			var l Link
+			if err := rows.Scan(&self, &l.Type, &l.Key, &l.Title, &l.Status, &pid); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if _, ok := readable[pid]; !ok { // never reveal items from projects the actor cannot read
+				continue
+			}
+			e := byKey[ids[self]]
+			if dir.self == "from_id" {
+				e.Links.Outgoing = append(e.Links.Outgoing, l)
+			} else {
+				e.Links.Incoming = append(e.Links.Incoming, l)
+			}
+		}
+		rows.Close()
+	}
+	return out, nil
 }

@@ -13,6 +13,7 @@ services:
       ATLAS_COOKIE_SECURE: ${ATLAS_COOKIE_SECURE:-true}
       # Optional outgoing email and the address used in its links; see docs/operations.md.
       ATLAS_REPO_ALLOW_PRIVATE: ${ATLAS_REPO_ALLOW_PRIVATE:-false}
+      ATLAS_TRUSTED_PROXIES: ${ATLAS_TRUSTED_PROXIES:-}
       ATLAS_PUBLIC_URL: ${ATLAS_PUBLIC_URL:-}
       ATLAS_SMTP_HOST: ${ATLAS_SMTP_HOST:-}
       ATLAS_SMTP_PORT: ${ATLAS_SMTP_PORT:-587}

@@ -199,3 +199,40 @@ func (s *Service) AuditLog(ctx context.Context, a auth.Actor, f AuditFilter) ([]
 	}
 	return out, rows.Err()
 }
+
+// AdminUserPatch is a set of administrator changes to one account, applied together.
+type AdminUserPatch struct {
+	IsAdmin            *bool
+	Active             *bool
+	ResetTOTP          bool
+	ForcePasswordReset bool
+}
+
+// UpdateUser applies every requested change in one transaction: all of them take effect or none does.
+func (s *Service) UpdateUser(ctx context.Context, a auth.Actor, id int64, p AdminUserPatch) error {
+	if err := adminOnly(a); err != nil {
+		return err
+	}
+	_, err := s.Idempotent(ctx, a, "", nil, nil, func(ctx context.Context, s *Service) error {
+		if p.ResetTOTP {
+			if err := s.ResetUserTOTP(ctx, a, id); err != nil {
+				return err
+			}
+		}
+		if p.ForcePasswordReset {
+			if err := s.ForcePasswordReset(ctx, a, id); err != nil {
+				return err
+			}
+		}
+		if p.IsAdmin != nil {
+			if err := s.SetUserAdmin(ctx, a, id, *p.IsAdmin); err != nil {
+				return err
+			}
+		}
+		if p.Active != nil {
+			return s.SetUserActive(ctx, a, id, *p.Active)
+		}
+		return nil
+	})
+	return err
+}

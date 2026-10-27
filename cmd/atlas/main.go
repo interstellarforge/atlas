@@ -19,6 +19,7 @@ import (
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
 	"github.com/kees/atlas/internal/events"
+	"github.com/kees/atlas/internal/logbuf"
 	"github.com/kees/atlas/internal/mcp"
 	"github.com/kees/atlas/internal/media"
 	"github.com/kees/atlas/internal/notifications"
@@ -56,7 +57,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})))
+	logs := logbuf.New()
+	slog.SetDefault(slog.New(logs.Handler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))))
 
 	if len(os.Args) == 3 && os.Args[1] == "restore" {
 		// Offline by design: the database must not be open while it is replaced.
@@ -115,13 +117,16 @@ func run() error {
 	mcpMetrics := mcp.NewMetrics()
 	srv := &http.Server{
 		Addr: cfg.Addr,
-		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, Media: uploads, MaxUpload: cfg.UploadMaxBytes, CookieSecure: cfg.CookieSecure,
-			SPA: web.Dist(), MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: cfg.MCPWritesPerHour, Metrics: mcpMetrics}), MCPStats: mcpMetrics,
+		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, Media: uploads, MaxUpload: cfg.UploadMaxBytes, CookieSecure: cfg.CookieSecure, TrustedProxies: cfg.TrustedProxies,
+			SPA: web.Dist(), MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: cfg.MCPWritesPerHour, Metrics: mcpMetrics, Label: tokenLabel(database)}), MCPStats: mcpMetrics, Logs: logs,
 			Instance: map[string]any{"upload_max_mb": cfg.UploadMaxBytes >> 20, "upload_max_megapixels": cfg.UploadMaxMegapixels / 1_000_000,
 				"mcp_writes_per_hour": cfg.MCPWritesPerHour, "event_retention_days": int(cfg.EventRetention.Hours() / 24), "cookie_secure": cfg.CookieSecure,
 				"synchronous": cfg.Synchronous}}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadTimeout:       2 * time.Minute, // headers and body; slow authenticated senders cannot hold a connection open
+
+		MaxHeaderBytes: 64 << 10,
+		IdleTimeout:    120 * time.Second,
 		// Open event streams watch their request context; cancelling it on SIGTERM lets Shutdown finish promptly.
 		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
@@ -144,4 +149,15 @@ func run() error {
 		return err
 	}
 	return nil
+}
+
+// tokenLabel names an MCP actor for the admin connection list: "token name (owner)".
+func tokenLabel(d *db.DB) func(auth.Actor) string {
+	return func(a auth.Actor) string {
+		var name, owner string
+		if err := d.R.QueryRow(`SELECT t.name, u.name FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.id = ?`, a.TokenID).Scan(&name, &owner); err != nil {
+			return ""
+		}
+		return name + " (" + owner + ")"
+	}
 }

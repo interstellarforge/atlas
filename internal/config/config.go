@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -30,6 +31,8 @@ type Config struct {
 	SMTP notifications.Settings
 	// RepoAllowPrivate lets Atlas fetch READMEs from servers on private addresses (self-hosted git on the LAN).
 	RepoAllowPrivate bool
+	// TrustedProxies are the reverse proxies whose X-Forwarded-For is believed when identifying clients for rate limits.
+	TrustedProxies []netip.Prefix
 	// PublicURL is the address users reach Atlas at, for links in emails. Optional.
 	PublicURL string
 }
@@ -66,6 +69,20 @@ func Load() (Config, error) {
 	}
 	c.MCPWritesPerHour = q
 	c.RepoAllowPrivate = os.Getenv("ATLAS_REPO_ALLOW_PRIVATE") == "true"
+	for _, f := range strings.Split(os.Getenv("ATLAS_TRUSTED_PROXIES"), ",") {
+		if f = strings.TrimSpace(f); f == "" {
+			continue
+		}
+		pf, err := netip.ParsePrefix(f)
+		if err != nil {
+			ip, ipErr := netip.ParseAddr(f)
+			if ipErr != nil {
+				return c, fmt.Errorf("ATLAS_TRUSTED_PROXIES: %q is not an IP address or CIDR range", f)
+			}
+			pf = netip.PrefixFrom(ip, ip.BitLen())
+		}
+		c.TrustedProxies = append(c.TrustedProxies, pf)
+	}
 	c.PublicURL = strings.TrimRight(os.Getenv("ATLAS_PUBLIC_URL"), "/")
 	port, err := strconv.Atoi(env("ATLAS_SMTP_PORT", "587"))
 	if err != nil || port < 1 || port > 65535 {

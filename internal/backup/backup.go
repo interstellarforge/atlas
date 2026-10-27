@@ -120,23 +120,36 @@ func Restore(src, dataDir string) (Manifest, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return m, fmt.Errorf("manifest: %w", err)
 	}
-	for _, f := range m.Files {
-		if strings.Contains(f.Path, "..") || filepath.IsAbs(f.Path) {
-			return m, fmt.Errorf("manifest path %q is not allowed", f.Path)
-		}
-		got, err := describe(filepath.Join(src, f.Path), f.Path)
-		if err != nil {
-			return m, err
-		}
-		if got.SHA256 != f.SHA256 || got.Size != f.Size {
-			return m, fmt.Errorf("%s does not match the manifest", f.Path)
-		}
+	if err := verify(src, m); err != nil {
+		return m, err
 	}
 
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return m, err
 	}
 	live := filepath.Join(dataDir, dbFile)
+	staged := live + ".restore"
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		os.Remove(staged + suffix)
+	}
+	if err := copyFile(filepath.Join(src, dbFile), staged); err != nil {
+		return m, err
+	}
+	// The staged copy is validated and re-generationed before it can touch the live database.
+	if err := prepare(staged, &m); err != nil {
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			os.Remove(staged + suffix)
+		}
+		return m, err
+	}
+	for _, f := range m.Files {
+		if f.Path == dbFile {
+			continue
+		}
+		if err := copyFile(filepath.Join(src, f.Path), filepath.Join(dataDir, f.Path)); err != nil {
+			return m, err
+		}
+	}
 	if _, err := os.Stat(live); err == nil {
 		old := filepath.Join(dataDir, "backups", "pre-restore-"+time.Now().UTC().Format("20060102T150405Z"))
 		if err := os.MkdirAll(old, 0o750); err != nil {
@@ -148,32 +161,73 @@ func Restore(src, dataDir string) (Manifest, error) {
 			}
 		}
 	}
+	return m, os.Rename(staged, live)
+}
+
+// verify requires exactly one atlas.db entry, only local regular files under uploads/, and matching checksums.
+func verify(src string, m Manifest) error {
+	dbs := 0
 	for _, f := range m.Files {
-		if f.Path == dbFile {
-			continue
+		switch {
+		case f.Path == dbFile:
+			dbs++
+		case !strings.HasPrefix(f.Path, "uploads/") || !filepath.IsLocal(f.Path):
+			return fmt.Errorf("manifest path %q is not allowed", f.Path)
 		}
-		if err := copyFile(filepath.Join(src, f.Path), filepath.Join(dataDir, f.Path)); err != nil {
-			return m, err
+		if err := regularPath(src, f.Path); err != nil {
+			return err
+		}
+		got, err := describe(filepath.Join(src, f.Path), f.Path)
+		if err != nil {
+			return err
+		}
+		if got.SHA256 != f.SHA256 || got.Size != f.Size {
+			return fmt.Errorf("%s does not match the manifest", f.Path)
 		}
 	}
-	if err := copyFile(filepath.Join(src, dbFile), live); err != nil {
-		return m, err
+	if dbs != 1 {
+		return fmt.Errorf("manifest must list %s exactly once", dbFile)
 	}
-	d, err := db.Open(live, db.Options{})
+	return nil
+}
+
+// regularPath rejects symlinks anywhere along rel below root.
+func regularPath(root, rel string) error {
+	cur := root
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink", rel)
+		}
+	}
+	return nil
+}
+
+// prepare integrity-checks the staged database and gives it a new generation.
+func prepare(path string, m *Manifest) error {
+	d, err := db.Open(path, db.Options{})
 	if err != nil {
-		return m, err
+		return err
 	}
-	defer d.Close()
 	if err := d.QuickCheck(); err != nil {
-		return m, err
+		d.Close()
+		return err
 	}
 	var gen [8]byte
 	if _, err := rand.Read(gen[:]); err != nil {
-		return m, err
+		d.Close()
+		return err
 	}
 	m.Generation = hex.EncodeToString(gen[:])
-	_, err = d.W.Exec(`UPDATE meta SET value = ? WHERE key = 'generation'`, m.Generation)
-	return m, err
+	if _, err := d.W.Exec(`UPDATE meta SET value = ? WHERE key = 'generation'`, m.Generation); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 func describe(path, rel string) (File, error) {

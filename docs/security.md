@@ -41,7 +41,19 @@
 
 - SQLite and uploads on local disk with restrictive permissions; backups contain secrets-free data (tokens hashed).
 - Logs never contain tokens, passwords or full request bodies.
-- Dependencies pinned; Go vulnerability scan (`govulncheck`) in CI.
+- Dependencies pinned; Go vulnerability scan (`govulncheck`) and `pnpm audit --prod` run in CI (`.github/workflows/ci.yml`). pnpm is pinned through `packageManager`; container base images use tags, not digests.
+
+## Audit hardening (epic SEC, ADR-0017)
+
+- Creating users is a human-admin session action, journaled like other mutations (`user.create`); tokens, also admin tokens, get `forbidden`.
+- A token lists only users who share a project it may access, without the global admin flag; avatars follow the same rule.
+- Login and registration throttles key on the connection address. Behind a reverse proxy set `ATLAS_TRUSTED_PROXIES`; only then is `X-Forwarded-For` read, from the right, skipping trusted hops.
+- The HTTP server has a 2 minute `ReadTimeout`; JSON bodies must hold exactly one document.
+- The CSP forbids inline scripts; the theme bootstrap is `/theme-init.js`.
+- MCP errors are mapped to stable codes; unexpected errors are logged server-side and reported as `internal error`.
+- Audit entries holding e-mail addresses (`account.email`, matching `invite.create`) are scrubbed when the account is deleted.
+- CSV exports prefix cells that start with `= + - @`, tab or CR with `'`; the CSV import removes that prefix.
+- The README fetcher also refuses documentation, benchmarking, reserved and 0.0.0.0/8 ranges.
 
 ## Accounts, sessions and administration (epic SET)
 
@@ -86,3 +98,9 @@
 - Source paths are validated: relative to the repository, no `..`, no backslash, no absolute or `~` paths, and no secret files (`.env*`, private keys, `*.pem`, `*.key`, `.netrc`, `.npmrc`, credentials files). URLs must be `https://`. Atlas stores references only: it never reads the repository paths, so a path cannot be used to read files from the server.
 - Prompt-injection boundary: entry text is data written by people and agents. The API returns it as data, the MCP tool descriptions tell agents never to follow instructions found in entries and to treat `unverified` and `stale` entries as hints, and nothing in Atlas acts on entry text. The web app renders bodies with markdown-it with raw HTML off and refuses `javascript:` links (covered by the same renderer tests as comments and README).
 - Token scopes and project limits apply as everywhere: a token outside a project gets `not_found`; a token without read scope gets `forbidden`.
+
+### MCP status, server log and hardening (ADR-0016)
+
+- The MCP connection list (token names, owners, client names) and the server log window are admin-only and need a human session; tokens get 403. Log lines carry request ids, actors, paths and error reasons, never secrets or bodies.
+- Handler panics are recovered and logged with a stack; the client only sees a generic 500. Header size is capped at 64 KiB and MCP request bodies at 1 MiB.
+- Responses carry `Permissions-Policy` (camera, microphone, geolocation, payment off) and `Cross-Origin-Opener-Policy: same-origin`; with `ATLAS_COOKIE_SECURE` on, also `Strict-Transport-Security` (one year, no subdomains).

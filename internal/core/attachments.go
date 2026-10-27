@@ -68,6 +68,9 @@ func cleanFilename(name string) string {
 	}, name)
 	if len(name) > maxFilenameLen {
 		ext := filepath.Ext(name)
+		if len(ext) > maxFilenameLen/2 { // an absurd extension is cut like the rest, never a negative slice bound
+			ext = ""
+		}
 		name = name[:maxFilenameLen-len(ext)] + ext
 	}
 	return name

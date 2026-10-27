@@ -33,11 +33,23 @@ func publicAddr(a netip.Addr) bool {
 		if b[0] == 100 && b[1]&0xc0 == 64 { // 100.64.0.0/10
 			return false
 		}
-		if b[0] == 192 && b[1] == 0 && b[2] == 0 { // 192.0.0.0/24
-			return false
+		for _, n := range reservedV4 {
+			if n.Contains(a) {
+				return false
+			}
 		}
 	}
+	if a.Is6() && netip.MustParsePrefix("2001:db8::/32").Contains(a) { // documentation
+		return false
+	}
 	return true
+}
+
+// reservedV4 are special-purpose IPv4 ranges (RFC 6890 and friends) that are not routable on the public internet.
+var reservedV4 = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("192.0.0.0/24"), netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"), netip.MustParsePrefix("198.18.0.0/15"), netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("240.0.0.0/4"),
 }
 
 // Fetcher downloads repository files over https. The check happens when the connection is made, on the address

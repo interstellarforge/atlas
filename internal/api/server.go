@@ -6,10 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -17,6 +21,7 @@ import (
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
 	"github.com/kees/atlas/internal/events"
+	"github.com/kees/atlas/internal/logbuf"
 	"github.com/kees/atlas/internal/media"
 )
 
@@ -32,9 +37,12 @@ type Deps struct {
 	SPA          fs.FS
 	MCP          http.Handler
 	MCPStats     http.Handler   // aggregate MCP call metrics; may be nil
+	Logs         *logbuf.Buffer // recent server log records for administrators; may be nil
 	Instance     map[string]any // effective settings shown read-only to admins
 	Media        *media.Store
 	MaxUpload    int64 // bytes per uploaded file
+	// TrustedProxies are the proxies whose X-Forwarded-For is believed; empty means the connection address is the client.
+	TrustedProxies []netip.Prefix
 }
 
 type Server struct {
@@ -46,13 +54,15 @@ type Server struct {
 	spa          fs.FS
 	mcp          http.Handler
 	mcpStats     http.Handler
+	logs         *logbuf.Buffer
 	instance     map[string]any
 	media        *media.Store
 	maxUpload    int64
+	proxies      []netip.Prefix
 }
 
 func New(d Deps) *Server {
-	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, mcpStats: d.MCPStats, instance: d.Instance, media: d.Media, maxUpload: d.MaxUpload}
+	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, mcpStats: d.MCPStats, logs: d.Logs, instance: d.Instance, media: d.Media, maxUpload: d.MaxUpload, proxies: d.TrustedProxies}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -79,7 +89,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/events", protect(s.events))
 	mux.Handle("GET /api/v1/changes", protect(s.changes))
 	if s.mcpStats != nil {
-		mux.Handle("GET /api/v1/mcp/stats", protect(s.mcpStats.ServeHTTP))
+		// Admins only: the answer says who is connected.
+		mux.Handle("GET /api/v1/mcp/stats", protect(func(w http.ResponseWriter, r *http.Request) {
+			if a := actor(r); a.Kind != auth.KindHuman || !a.IsAdmin {
+				writeError(w, http.StatusForbidden, "forbidden", "administrators only")
+				return
+			}
+			s.mcpStats.ServeHTTP(w, r)
+		}))
 	}
 	if s.mcp != nil {
 		// MCP is POST-only, so the method-based scope check would demand write for reads;
@@ -89,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 				writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 				return
 			}
+			r.Body = http.MaxBytesReader(w, r.Body, mcpMaxBody)
 			s.mcp.ServeHTTP(w, r)
 		})
 	}
@@ -97,13 +115,18 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.Handle("/", s.spaHandler())
 
-	return s.logRequests(s.auth.Authenticate(securityHeaders(mux)))
+	return s.logRequests(s.auth.Authenticate(securityHeaders(s.cookieSecure, mux)))
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+func securityHeaders(hsts bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		if hsts { // cookies are secure-only, so the deployment is https: tell browsers to stay on it
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
@@ -113,10 +136,16 @@ func securityHeaders(next http.Handler) http.Handler {
 type statusWriter struct {
 	http.ResponseWriter
 	status int
+	wrote  bool
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseWriter.Write(b)
 }
 
 func (w *statusWriter) WriteHeader(code int) {
-	w.status = code
+	w.status, w.wrote = code, true
 	w.ResponseWriter.WriteHeader(code)
 }
 
@@ -126,6 +155,9 @@ func (w *statusWriter) Flush() {
 		f.Flush()
 	}
 }
+
+// mcpMaxBody caps one MCP request; tool arguments are small (uploads are not possible through MCP).
+const mcpMaxBody = 1 << 20
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +171,18 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		r = r.WithContext(auth.WithHolder(r.Context(), holder))
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 
-		next.ServeHTTP(sw, r)
+		func() {
+			defer func() {
+				if p := recover(); p != nil && p != http.ErrAbortHandler {
+					slog.Error("panic in handler", "request_id", id, "method", r.Method, "path", r.URL.Path, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+					if !sw.wrote {
+						writeError(sw, http.StatusInternalServerError, "internal", "internal error")
+					}
+					sw.status = http.StatusInternalServerError
+				}
+			}()
+			next.ServeHTTP(sw, r)
+		}()
 
 		actor := "anonymous"
 		if holder.Actor != nil {
@@ -161,12 +204,41 @@ func newRequestID() string {
 	return hex.EncodeToString(b)
 }
 
-func clientKey(r *http.Request) string {
+// clientKey identifies the caller for rate limits: the connection address, or, when that is a trusted proxy,
+// the first address in X-Forwarded-For (from the right) that is not itself a trusted proxy.
+func (s *Server) clientKey(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if len(s.proxies) == 0 || !s.trusted(host) {
+		return host
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop := strings.TrimSpace(hops[i])
+		if _, err := netip.ParseAddr(hop); err != nil {
+			break // garbage from the client side of the chain: stop trusting it
+		}
+		if !s.trusted(hop) {
+			return hop
+		}
 	}
 	return host
+}
+
+func (s *Server) trusted(host string) bool {
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	ip = ip.Unmap()
+	for _, p := range s.proxies {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -184,7 +256,13 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
+	err := dec.Decode(v)
+	if err == nil {
+		if _, more := dec.Token(); more != io.EOF { // one JSON document only: no trailing values or garbage
+			err = errors.New("trailing data")
+		}
+	}
+	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
 			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "request body too large")

@@ -127,14 +127,6 @@ func (s *Server) getTimeSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sum)
 }
 
-// csvCell neutralises spreadsheet formulas in user-provided text.
-func csvCell(v string) string {
-	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
-		return "'" + v
-	}
-	return v
-}
-
 func (s *Server) exportTime(w http.ResponseWriter, r *http.Request) {
 	f, ok := timeFilter(w, r)
 	if !ok {
@@ -151,7 +143,7 @@ func (s *Server) exportTime(w http.ResponseWriter, r *http.Request) {
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"date", "item", "title", "person", "status", "minutes", "note"})
 	for _, e := range list {
-		_ = cw.Write([]string{e.SpentOn, e.Item, csvCell(e.Title), csvCell(e.User), csvCell(e.Status), strconv.Itoa(e.Minutes), csvCell(e.Note)})
+		_ = cw.Write([]string{e.SpentOn, e.Item, core.CSVCell(e.Title), core.CSVCell(e.User), core.CSVCell(e.Status), strconv.Itoa(e.Minutes), core.CSVCell(e.Note)})
 	}
 	cw.Flush()
 }

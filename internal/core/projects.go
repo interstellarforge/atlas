@@ -179,11 +179,17 @@ type Member struct {
 	Role   string `json:"role"`
 }
 
+// ListUsers lists everyone for a signed-in person (assignee pickers). A token only sees people who share a
+// project it may access, without the global admin flag.
 func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 	if !a.Can(auth.ScopeRead) {
 		return nil, ErrForbidden
 	}
-	rows, err := s.db.R.Query(`SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users ORDER BY name`)
+	q, args := `SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users ORDER BY name`, []any(nil)
+	if a.Kind == auth.KindToken {
+		q, args = s.sharedUsersQuery(a)
+	}
+	rows, err := s.db.R.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -194,29 +200,63 @@ func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Avatar); err != nil {
 			return nil, err
 		}
+		if a.Kind == auth.KindToken {
+			u.IsAdmin = false
+		}
 		out = append(out, u)
 	}
 	return out, rows.Err()
 }
 
+// sharedUsersQuery selects the users that are members of a project the token owner can reach and the token may use.
+func (s *Service) sharedUsersQuery(a auth.Actor) (string, []any) {
+	q := `SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users WHERE id IN (
+		SELECT m.user_id FROM project_members m JOIN projects p ON p.id = m.project_id WHERE 1 = 1`
+	var args []any
+	if !a.IsAdmin {
+		q += ` AND p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)`
+		args = append(args, a.UserID)
+	}
+	if a.Projects != nil {
+		q += ` AND p.key IN (` + strings.TrimSuffix(strings.Repeat("?,", len(a.Projects)), ",") + `)`
+		for _, k := range a.Projects {
+			args = append(args, k)
+		}
+	}
+	return q + `) ORDER BY name`, args
+}
+
+// CreateUser is an instance-administration action: human admins only, journaled like every mutation.
 func (s *Service) CreateUser(ctx context.Context, a auth.Actor, email, name, password string, admin bool) (User, error) {
-	if !a.IsAdmin || !a.Can(auth.ScopeWrite) {
-		return User{}, ErrForbidden
+	if err := adminOnly(a); err != nil {
+		return User{}, err
+	}
+	email = strings.TrimSpace(email)
+	if email == "" || name == "" {
+		return User{}, invalid("email and name are required")
 	}
 	if err := checkPassword(s.Policy(), password); err != nil {
 		return User{}, err
 	}
-	u, err := s.users.CreateUser(email, name, password, admin)
-	if errors.Is(err, auth.ErrInvalid) {
-		return User{}, invalid("email and name are required")
-	}
+	hash, err := auth.HashPassword(password)
 	if err != nil {
-		if isUnique(err) {
-			return User{}, rule("email already in use")
-		}
 		return User{}, err
 	}
-	return User{ID: u.ID, Email: u.Email, Name: u.Name, IsAdmin: u.IsAdmin}, nil
+	u := User{Email: email, Name: name, IsAdmin: admin}
+	err = s.tx(func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO users (email, name, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)`,
+			email, name, hash, admin, s.nowMs())
+		if err != nil {
+			if isUnique(err) {
+				return rule("email already in use")
+			}
+			return err
+		}
+		u.ID, _ = res.LastInsertId()
+		return s.journal(ctx, tx, a, change{Operation: "user.create", Target: userTarget(u.ID), Event: "admin.updated",
+			Changes: map[string]any{"is_admin": admin}})
+	})
+	return u, err
 }
 
 func (s *Service) ListMembers(ctx context.Context, a auth.Actor, key string) ([]Member, error) {
