@@ -671,6 +671,7 @@
     display: flex;
     gap: var(--space-4);
     overflow-x: auto;
+    overflow-y: hidden;
     scroll-snap-type: x proximity;
   }
   .column {
