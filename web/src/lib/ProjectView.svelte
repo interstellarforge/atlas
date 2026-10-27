@@ -190,7 +190,7 @@
   );
 </script>
 
-<section class="project">
+<section class="project" class:fit={view === "board" || view === "overview"}>
   <PageHero
     title={name || project}
     description={name ? "" : t("project.heroText")}
@@ -404,8 +404,11 @@
     margin-left: auto;
     border-color: var(--color-border);
   }
-  /* The views fill what the sub-tab row and the overview leave over. */
-  .view > :global(:not(.subtabs, .overviewfold)) {
+  /* The board is sized to the window (its columns scroll, not the page); other views keep their natural height. */
+  .project.fit {
+    flex-shrink: 1;
+  }
+  .fit .view > :global(:not(.subtabs, .overviewfold)) {
     flex: 1;
     min-height: 0;
   }

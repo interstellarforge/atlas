@@ -17,7 +17,7 @@ type StatusCount struct {
 // Progress counts a project's active (not archived) items by status, category, priority and type (ADR-0014).
 type Progress struct {
 	Total      int            `json:"total"`
-	Categories map[string]int `json:"categories"` // todo, active, completed
+	Categories map[string]int `json:"categories"` // todo, active, review, completed
 	Statuses   []StatusCount  `json:"statuses"`   // workflow order, empty statuses included
 	Priorities map[string]int `json:"priorities"`
 	Types      map[string]int `json:"types"`
@@ -33,7 +33,7 @@ func (s *Service) ProjectProgress(ctx context.Context, a auth.Actor, key string)
 	if err != nil {
 		return Progress{}, err
 	}
-	out := Progress{Categories: map[string]int{"todo": 0, "active": 0, "completed": 0},
+	out := Progress{Categories: map[string]int{"todo": 0, "active": 0, "review": 0, "completed": 0},
 		Statuses: make([]StatusCount, len(sts)), Priorities: map[string]int{}, Types: map[string]int{}}
 	index := make(map[int64]int, len(sts))
 	for i, st := range sts {

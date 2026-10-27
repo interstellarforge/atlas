@@ -133,6 +133,10 @@ func TestMergedColumns(t *testing.T) {
 	if _, err := e.svc.AddStatus(ctx, e.admin, "EXO", "Blocked", "active", nil); err != nil {
 		t.Fatal(err)
 	}
+	// The merge test wants Review to share the active column; by default it has its own category.
+	if _, err := e.svc.UpdateStatus(ctx, e.admin, "EXO", statusID(t, e, "EXO", "Review"), map[string]any{"category": "active"}); err != nil {
+		t.Fatal(err)
+	}
 	// Default: one column per status.
 	b, err := e.svc.Board(ctx, e.admin, "EXO", core.BoardFilter{})
 	if err != nil || len(b.Columns) != 6 {
@@ -243,4 +247,21 @@ func slicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestReviewIsItsOwnMergedColumn(t *testing.T) {
+	e := setup(t)
+	e.project("EXO")
+	if err := e.svc.SetMergeColumns(ctx, e.admin, "EXO", true); err != nil {
+		t.Fatal(err)
+	}
+	e.item(e.admin, core.CreateItem{Project: "EXO", Type: "task", Title: "r", Status: "Review"})
+	b, err := e.svc.Board(ctx, e.admin, "EXO", core.BoardFilter{})
+	if err != nil || len(b.Columns) != 4 { // todo, active, review, completed
+		t.Fatalf("merged board: %d columns, %v", len(b.Columns), err)
+	}
+	p, err := e.svc.ProjectProgress(ctx, e.admin, "EXO")
+	if err != nil || p.Categories["review"] != 1 {
+		t.Fatalf("progress by category: %v %v", p.Categories, err)
+	}
 }

@@ -369,6 +369,7 @@
     "cat": {
       "todo": "To do",
       "active": "In progress",
+      "review": "Review",
       "completed": "Completed"
     },
     "allowCreate": "Create",

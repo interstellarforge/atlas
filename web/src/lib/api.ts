@@ -1207,7 +1207,7 @@ export interface StatusCount {
 
 export interface Progress {
   total: number;
-  categories: Record<"todo" | "active" | "completed", number>;
+  categories: Record<"todo" | "active" | "review" | "completed", number>;
   statuses: StatusCount[];
   priorities: Record<string, number>;
   types: Record<string, number>;

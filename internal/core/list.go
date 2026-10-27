@@ -11,7 +11,7 @@ import (
 	"github.com/kees/atlas/internal/auth"
 )
 
-var statusCategoriesAll = []string{"todo", "active", "completed"}
+var statusCategoriesAll = []string{"todo", "active", "review", "completed"}
 
 // filterProjects resolves the project scope of a filter to ids: one project, a list, or everything readable.
 func (s *Service) filterProjects(a auth.Actor, f ItemFilter) ([]int64, error) {
@@ -57,7 +57,7 @@ func (s *Service) filterConds(f ItemFilter, projectIDs []int64) ([]string, []any
 	}
 	if f.Category != "" {
 		if !slices.Contains(statusCategoriesAll, f.Category) {
-			return nil, nil, invalid("category must be todo, active or completed")
+			return nil, nil, invalid("category must be todo, active, review or completed")
 		}
 		add("st.category = ?", f.Category)
 	}

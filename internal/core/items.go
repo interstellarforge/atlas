@@ -745,7 +745,7 @@ type ItemFilter struct {
 	Parent          string
 	Under           string // item key: that item and all its descendants
 	Q               string // case-insensitive title substring
-	Category        string // status category: todo, active or completed
+	Category        string // status category: todo, active, review or completed
 	Sort            string // key (default), updated, priority, due or rank
 	Assignee        *int64
 	UpdatedSince    *int64

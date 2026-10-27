@@ -24,7 +24,7 @@
   const statuses = $derived(
     [...workflow.statuses].sort((a, b) => a.position - b.position),
   );
-  const categories = ["todo", "active", "completed"] as const;
+  const categories = ["todo", "active", "review", "completed"] as const;
 
   // The order shown while dragging or right after a drop; cleared when the server's workflow arrives (or a save fails).
   let local = $state<StatusInfo[] | undefined>();

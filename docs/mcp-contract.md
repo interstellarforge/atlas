@@ -60,7 +60,7 @@ Scopes: read and write separately, optionally per project. Rate limit per token;
 
 Tool catalog size, response bytes, calls per user action, mean/p95 latency, % paginated/truncated, optional estimated tokens.
 
-Progress and time (ADR-0014): `project_progress` (counts of active items by status category, status, priority and type), `time_log` (`key`, `duration` such as `90`, `45m`, `1.5h`, `1h30m`, optional `date` and `note`; needs time tracking on and the `time.log` right; counts against the write quota) and `time_summary` (`project`, optional `from`, `to`, `user`, `item`, `period`; minutes in total and per item, person, status and period).
+Progress and time (ADR-0014): `project_progress` (counts of active items by status category (todo/active/review/completed), status, priority and type), `time_log` (`key`, `duration` such as `90`, `45m`, `1.5h`, `1h30m`, optional `date` and `note`; needs time tracking on and the `time.log` right; counts against the write quota) and `time_summary` (`project`, optional `from`, `to`, `user`, `item`, `period`; minutes in total and per item, person, status and period).
 
 Project context (ADR-0015), two tools for the whole feature:
 

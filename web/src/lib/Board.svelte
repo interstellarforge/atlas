@@ -39,7 +39,8 @@
     card: Card;
     x: number;
     y: number;
-    over: { status: number; index: number; top: number } | undefined;
+    over:
+      { status: number; index: number; top: number; sub?: string } | undefined;
   }
 
   // With a project this is its board; without one it is the read-only cross-project overview.
@@ -230,6 +231,7 @@
     card: Card,
     toStatus: number,
     index: number,
+    sub?: string,
   ): Promise<number | undefined> {
     const source = columns.find((c) => c.items.some((i) => i.key === card.key));
     const target = columns.find((c) => c.status.id === toStatus);
@@ -240,11 +242,15 @@
     const position = Math.max(0, Math.min(index, others.length));
     const after = others[position - 1]?.key;
     const before = others[position]?.key;
-    const changedStatus = source.status.id !== target.status.id;
+    // In a merged column `sub` names the member status the card was dropped on.
+    const newStatus = sub ?? target.status.name;
+    const changedStatus =
+      source.status.id !== target.status.id ||
+      newStatus !== (moving.status ?? source.status.name);
 
     source.items = source.items.filter((i) => i.key !== card.key);
     source.count -= 1;
-    if (changedStatus) moving.status = target.status.name;
+    if (changedStatus) moving.status = newStatus;
     target.items.splice(position, 0, moving);
     target.count += 1;
     recount(source);
@@ -253,13 +259,13 @@
 
     try {
       const saved = await moveItem(card.key, card.version, {
-        ...(changedStatus && { status: target.status.name }),
+        ...(changedStatus && { status: newStatus }),
         ...(after && { after }),
         ...(before && { before }),
       });
       moving.version = saved.version;
       announcement = changedStatus
-        ? t("board.moved", { key: card.key, status: target.status.name })
+        ? t("board.moved", { key: card.key, status: newStatus })
         : t("board.reordered", {
             key: card.key,
             position: position + 1,
@@ -280,6 +286,13 @@
       const scroller = scrollers[id];
       const column = columns.find((c) => c.status.id === id);
       if (!scroller || !column) return undefined;
+      const sub = el
+        .closest<HTMLElement>("[data-sub]")
+        ?.getAttribute("data-sub");
+      if (sub) {
+        // A status row of a merged column: drop at the end of the column, in that status.
+        return { status: id, index: column.items.length, top: 0, sub };
+      }
       const rect = scroller.getBoundingClientRect();
       const index = Math.min(
         column.items.length,
@@ -330,8 +343,12 @@
         current >= 0 && current < finished.over.index
           ? finished.over.index - 1
           : finished.over.index;
-      if (!(current === index))
-        void commitMove(finished.card, finished.over.status, index);
+      const sub = finished.over.sub;
+      const moved =
+        sub !== undefined &&
+        sub !== (finished.card.status ?? target?.status.name);
+      if (current !== index || moved)
+        void commitMove(finished.card, finished.over.status, index, sub);
     }
     if (dirty) {
       dirty = false;
@@ -572,7 +589,23 @@
               </div>
             {/snippet}
           </VirtualList>
-          {#if drag?.over?.status === column.status.id}
+          {#if drag && column.statuses && column.statuses.length > 1}
+            <div class="subdrops">
+              {#each column.statuses as st (st.id)}
+                <div
+                  class="subdrop"
+                  class:hot={drag.over?.sub === st.name &&
+                    drag.over.status === column.status.id}
+                  data-sub={st.name}
+                  style:--tone={toneVar(
+                    statusTone(st, workflow?.statuses ?? column.statuses),
+                  )}
+                >
+                  <span class="dot" aria-hidden="true"></span>{st.name}
+                </div>
+              {/each}
+            </div>
+          {:else if drag?.over?.status === column.status.id}
             <div class="drop" style:top="{drag.over.top}px"></div>
           {/if}
         </div>
@@ -758,6 +791,31 @@
   .slot {
     height: 100%;
     padding-bottom: 8px;
+  }
+  /* While dragging, a merged column offers one drop row per member status, like Jira's swimlanes. */
+  .subdrops {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
+  }
+  .subdrop {
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    font-weight: var(--atlas-fw-semibold);
+    background: color-mix(in srgb, var(--tone) 10%, var(--color-surface));
+    border: 1px dashed var(--tone);
+    border-radius: var(--atlas-radius-md);
+  }
+  .subdrop.hot {
+    background: color-mix(in srgb, var(--tone) 28%, var(--color-surface));
+    border-style: solid;
   }
   .drop {
     position: absolute;

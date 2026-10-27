@@ -20,7 +20,7 @@ type Options struct {
 var statusSpecs = []struct {
 	name, category string
 }{
-	{"Backlog", "todo"}, {"Todo", "todo"}, {"In Progress", "active"}, {"Review", "active"}, {"Done", "completed"},
+	{"Backlog", "todo"}, {"Todo", "todo"}, {"In Progress", "active"}, {"Review", "review"}, {"Done", "completed"},
 }
 
 // Run fills the database in one transaction. Hierarchy per project: epics > stories > tasks (about 1 : 5 : 25).

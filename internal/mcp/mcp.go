@@ -429,7 +429,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "project_progress",
-		Description: "Counts of a project's active items (archived excluded) by status category (todo/active/completed), status, priority and type.",
+		Description: "Counts of a project's active items (archived excluded) by status category (todo/active/review/completed), status, priority and type.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in progressIn) (*sdk.CallToolResult, any, error) {
 		p, err := svc.ProjectProgress(ctx, a, in.Project)

@@ -4,14 +4,14 @@ type ToneStatus = Pick<StatusInfo, "id" | "category">;
 
 export type Tone = "backlog" | "todo" | "active" | "review" | "done";
 
-// Statuses have a category (todo, active, completed), not a colour. The first todo status reads as the
-// backlog, the first active one as work in progress and any further active one as review.
+// Statuses have a category (todo, active, review, completed), not a colour. The first todo status reads as
+// the backlog and the other ones as todo; the other categories map to their own tone.
 export function statusTone(status: ToneStatus, all: ToneStatus[]): Tone {
   if (status.category === "completed") return "done";
-  const same = all.filter((s) => s.category === status.category);
-  const index = same.findIndex((s) => s.id === status.id);
-  if (status.category === "todo") return index === 0 ? "backlog" : "todo";
-  return index === 0 ? "active" : "review";
+  if (status.category === "review") return "review";
+  if (status.category === "active") return "active";
+  const first = all.find((s) => s.category === "todo");
+  return first?.id === status.id ? "backlog" : "todo";
 }
 
 export function toneVar(tone: Tone): string {

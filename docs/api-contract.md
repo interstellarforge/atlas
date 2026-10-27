@@ -58,7 +58,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET/POST | `/users` | List users; create (global admin) |
 | GET | `/projects/{key}/board` | Every status column with `count`, `over_wip` and the first `limit` cards (default 50, max 200), plus `seq` (journal position to subscribe from). Filters: `type`, `priority`, `label`, `assignee`, `q`, `archived=1`; `fields` selects card fields |
 | GET | `/projects/{key}/board/columns/{statusId}?cursor=` | Further cards of one column |
-| GET | `/board?projects=A,B` | Cross-project overview: three columns by status category (todo, active, completed), no WIP limits, read-only. Same filters |
+| GET | `/board?projects=A,B` | Cross-project overview: four columns by status category (todo, active, review, completed), no WIP limits, read-only. Same filters |
 | GET/POST | `/items` | Search/list, create. Filters also: `under` (subtree), `q` (title), `category`, `projects=A,B`, `archived=1`. `sort`: `key` (default, keyset paging), `updated`, `priority`, `due`, `rank` (offset paging). `fields` may include `root` (top-level ancestor) |
 | GET/PATCH | `/items/{key}` | Read; update (needs `version` in body or `If-Match`). Archive via `{"archived": true}`; there is no hard delete |
 | POST | `/items/{key}/move` | `{"version","status"?,"after"?,"before"?}`: status and/or position between neighbour keys (same project and target column, else 422). Omitting both neighbours appends. Conflicts return 409 |
@@ -135,7 +135,7 @@ Issues are items of type `bug`: list them with `GET /items?project=KEY&type=bug`
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/projects/{key}/progress` | `{total, categories{todo,active,completed}, statuses[{id,name,category,count}], priorities{}, types{}}`; archived items excluded. `view`. |
+| GET | `/projects/{key}/progress` | `{total, categories{todo,active,review,completed}, statuses[{id,name,category,count}], priorities{}, types{}}`; archived items excluded. `view`. |
 | GET | `/projects/{key}/timeline?from&to[&limit]` | `from`, `to` unix ms (to after from, at most five years). `{milestones, items[{key,type,title,status,category,start_at,due_at}], truncated}`; milestones and items with a due date in the range; limit default 200, max 500. `view`. |
 | GET | `/projects/{key}/activity[?before=<id>&limit]` | Newest first, `{items[{id,actor,operation,target,changes,at}]}`; item, comment, milestone, attachment and time operations only. Default 50, max 200. `view`. |
 | PUT | `/projects/{key}/time-tracking` | `{"enabled": bool}`; `workflow` action; 204. Projects and the workflow carry `time_tracking`. |

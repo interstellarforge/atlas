@@ -47,13 +47,11 @@
     const current = compact ? "status" : mode;
     let list: Segment[];
     if (current === "category") {
-      list = (["todo", "active", "completed"] as const).map((c) => ({
+      list = (["todo", "active", "review", "completed"] as const).map((c) => ({
         id: c,
         label: t(`workflow.cat.${c}`),
         count: progress.categories[c],
-        color: toneVar(
-          c === "completed" ? "done" : c === "todo" ? "todo" : "active",
-        ),
+        color: toneVar(c === "completed" ? "done" : c),
       }));
     } else if (current === "priority") {
       list = ["urgent", "high", "normal", "low"].map((p) => ({

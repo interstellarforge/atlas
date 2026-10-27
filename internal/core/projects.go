@@ -14,7 +14,7 @@ import (
 var projectKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
 
 var defaultStatuses = []struct{ Name, Category string }{
-	{"Backlog", "todo"}, {"Todo", "todo"}, {"In Progress", "active"}, {"Review", "active"}, {"Done", "completed"},
+	{"Backlog", "todo"}, {"Todo", "todo"}, {"In Progress", "active"}, {"Review", "review"}, {"Done", "completed"},
 }
 
 // CreateProject creates a project with the default workflow; the creator becomes its admin.

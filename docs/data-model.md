@@ -37,7 +37,7 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `project_templates` | Instance-wide: name, description, JSON (schema version 1); built-ins Kanban, Bug tracking, Scrum |
 | `meta` | schema version, database generation id |
 
-Status category enum: `todo`, `active`, `completed`.
+Status category enum: `todo`, `active`, `review`, `completed` (`review` since migration 0019, ADR-0018).
 
 ## work_items fields
 

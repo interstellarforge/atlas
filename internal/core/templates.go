@@ -431,7 +431,7 @@ func (d *ProjectTemplateData) validate() error {
 		}
 		names[n] = true
 		if !slices.Contains(statusCategories, st.Category) {
-			return invalid("status %q needs a category (todo, active, completed)", st.Name)
+			return invalid("status %q needs a category (todo, active, review, completed)", st.Name)
 		}
 		if st.WIPLimit != nil && *st.WIPLimit < 1 {
 			return invalid("wip_limit of %q must be at least 1", st.Name)

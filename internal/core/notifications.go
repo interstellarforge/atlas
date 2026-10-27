@@ -98,7 +98,7 @@ func (s *Service) canRead(q queryer, userID int64, projectKey string) (bool, err
 	return err == nil, err
 }
 
-// statusCategory returns the category (todo, active, completed) of a status id.
+// statusCategory returns the category (todo, active, review, completed) of a status id.
 func statusCategory(q queryer, id int64) (string, error) {
 	var c string
 	err := q.QueryRow(`SELECT category FROM project_statuses WHERE id = ?`, id).Scan(&c)

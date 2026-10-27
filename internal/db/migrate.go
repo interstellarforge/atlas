@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -70,14 +71,42 @@ func (d *DB) Migrate(migrations fs.FS, backupDir string) error {
 	return nil
 }
 
+// foreignKeysOff marks a migration that rebuilds a table other tables point to: foreign keys are off while it
+// runs (SQLite cannot switch them inside a transaction) and checked before it commits.
+const foreignKeysOff = "-- atlas:foreign-keys-off"
+
 func (d *DB) apply(version, body string) error {
-	tx, err := d.W.Begin()
+	ctx := context.Background()
+	conn, err := d.W.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	rebuild := strings.HasPrefix(body, foreignKeysOff)
+	if rebuild {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return err
+		}
+		defer conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(body); err != nil {
 		return err
+	}
+	if rebuild {
+		rows, err := tx.Query(`PRAGMA foreign_key_check`)
+		if err != nil {
+			return err
+		}
+		violated := rows.Next()
+		rows.Close()
+		if violated {
+			return fmt.Errorf("foreign key check failed after rebuild")
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
 		version, time.Now().UnixMilli()); err != nil {

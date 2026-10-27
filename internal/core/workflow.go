@@ -164,12 +164,12 @@ func statuses(q queryer, projectID int64) ([]Status, error) {
 	return out, rreq.Err()
 }
 
-var statusCategories = []string{"todo", "active", "completed"}
+var statusCategories = []string{"todo", "active", "review", "completed"}
 
 func (s *Service) AddStatus(ctx context.Context, a auth.Actor, key, name, category string, wip *int) (Status, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || !slices.Contains(statusCategories, category) {
-		return Status{}, invalid("name and a category (todo, active, completed) are required")
+		return Status{}, invalid("name and a category (todo, active, review, completed) are required")
 	}
 	if wip != nil && *wip < 1 {
 		return Status{}, invalid("wip_limit must be at least 1")
@@ -226,7 +226,7 @@ func (s *Service) UpdateStatus(ctx context.Context, a auth.Actor, key string, id
 			case "category":
 				c, ok := v.(string)
 				if !ok || !slices.Contains(statusCategories, c) {
-					return invalid("category must be todo, active or completed")
+					return invalid("category must be todo, active, review or completed")
 				}
 				col, val = "category", c
 			case "position":
