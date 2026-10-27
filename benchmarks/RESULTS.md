@@ -53,6 +53,10 @@ Memory: 50 concurrent SSE streams did not raise RSS measurably (25 MB after the 
 
 Browser (built-in browser, same data): the board with ~2.000 cards per column renders 55 cards in the DOM; the list view 19 rows; the hierarchy view 9.970 rows with 24 in the DOM. No render timings were taken.
 
+## MCP catalog (2026-10-27)
+
+`tools/list` for the 8 current tools: 5.978 bytes of JSON (about 1.5k tokens, estimate at 4 bytes/token). Every tool call logs one line (`mcp call tool= ms= bytes= error=`); no aggregation or p95 yet.
+
 ## Not measured yet
 
 Low-end hardware, concurrent writers under load, uploads, reparenting large subtrees, large-subtree comparison, MCP metrics.

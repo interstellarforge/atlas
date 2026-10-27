@@ -1,5 +1,8 @@
 {
-  "app": { "name": "Atlas", "loading": "Loading…" },
+  "app": {
+    "name": "Atlas",
+    "loading": "Loading…"
+  },
   "nav": {
     "projects": "Projects",
     "overview": "All projects",
@@ -120,7 +123,68 @@
     "high": "high",
     "urgent": "urgent"
   },
-  "types": { "epic": "epic", "story": "story", "task": "task", "bug": "bug" },
-  "tokens": { "title": "API tokens", "empty": "No API tokens yet." },
-  "notFound": { "title": "Page not found", "back": "Back to start" }
+  "types": {
+    "epic": "epic",
+    "story": "story",
+    "task": "task",
+    "bug": "bug"
+  },
+  "tokens": {
+    "title": "API tokens",
+    "empty": "No API tokens yet."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "back": "Back to start"
+  },
+  "item": {
+    "close": "Close",
+    "loading": "Loading…",
+    "loadFailed": "Could not load this item.",
+    "type": "Type",
+    "title": "Title",
+    "description": "Description",
+    "status": "Status",
+    "priority": "Priority",
+    "assignee": "Assignee",
+    "unassigned": "Unassigned",
+    "due": "Due date",
+    "labels": "Labels",
+    "labelsHint": "Comma separated",
+    "parent": "Parent",
+    "parentHint": "Item key, e.g. EXO-12",
+    "unset": "Not set",
+    "yes": "Yes",
+    "no": "No",
+    "customFields": "Custom fields",
+    "save": "Save changes",
+    "saving": "Saving…",
+    "saved": "Saved.",
+    "discard": "Discard changes",
+    "archive": "Archive",
+    "restore": "Restore",
+    "archivedNote": "This item is archived.",
+    "saveFailed": "Could not save: {message}",
+    "conflict": "Someone else changed this item. Your edits were not saved.",
+    "changed": "This item was changed elsewhere.",
+    "reload": "Load latest (discards your edits)",
+    "updated": "Updated {date}",
+    "links": "Links",
+    "noLinks": "No links.",
+    "linkType": "Link type",
+    "linkTarget": "Item key",
+    "addLink": "Add link",
+    "removeLink": "Remove link {key}",
+    "linkFailed": "Could not change the link: {message}",
+    "out": {
+      "blocks": "blocks",
+      "relates": "relates to",
+      "duplicates": "duplicates"
+    },
+    "in": {
+      "blocks": "blocked by",
+      "relates": "relates to",
+      "duplicates": "duplicated by"
+    }
+  }
 }

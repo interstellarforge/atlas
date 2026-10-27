@@ -88,8 +88,16 @@ export interface StatusInfo {
   wip_limit: number | null;
 }
 
+export interface CustomField {
+  name: string;
+  type: "text" | "number" | "bool" | "date" | "select";
+  required: boolean;
+  options?: string[];
+}
+
 export interface Workflow {
   types: string[];
+  custom_fields: CustomField[];
   hierarchy: Record<string, string[]>;
   statuses: StatusInfo[];
   labels: string[];
@@ -257,4 +265,66 @@ export function archiveItem(
   archived: boolean,
 ): Promise<Card> {
   return request<Card>("PATCH", `/items/${key}`, { version, archived });
+}
+
+export interface ItemDetail {
+  key: string;
+  type: string;
+  title: string;
+  description: string;
+  parent: string | null;
+  status: string;
+  priority: string;
+  assignee: number | null;
+  due_at: number | null;
+  labels: string[];
+  custom_data: Record<string, unknown>;
+  blocked: boolean;
+  version: number;
+  archived_at: number | null;
+  updated_at: number;
+}
+
+export interface Link {
+  type: string;
+  key: string;
+  title: string;
+  status: string;
+}
+
+export interface Links {
+  outgoing: Link[];
+  incoming: Link[];
+}
+
+export function getItem(key: string): Promise<ItemDetail> {
+  return request<ItemDetail>("GET", `/items/${key}`);
+}
+
+export function updateItem(
+  key: string,
+  version: number,
+  patch: Record<string, unknown>,
+): Promise<ItemDetail> {
+  return request<ItemDetail>("PATCH", `/items/${key}`, { ...patch, version });
+}
+
+export function getLinks(key: string): Promise<Links> {
+  return request<Links>("GET", `/items/${key}/links`);
+}
+
+export function addLink(
+  key: string,
+  type: string,
+  target: string,
+): Promise<undefined> {
+  return request<undefined>("POST", `/items/${key}/links`, { type, target });
+}
+
+export function removeLink(
+  key: string,
+  type: string,
+  target: string,
+): Promise<undefined> {
+  return request<undefined>("DELETE", `/items/${key}/links/${type}/${target}`);
 }

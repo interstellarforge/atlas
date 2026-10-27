@@ -11,6 +11,7 @@
   import FiltersBar from "./Filters.svelte";
   import { t } from "./i18n";
   import { personName } from "./people.svelte";
+  import { itemHref } from "./routes";
   import VirtualList from "./VirtualList.svelte";
 
   const ROW = 40;
@@ -153,7 +154,7 @@
             class:archived={Boolean(item.archived_at)}
             role="row"
           >
-            <span class="mono">{item.key}</span>
+            <a class="mono" href={itemHref(item.key)}>{item.key}</a>
             <span class="title"
               >{item.title}{#if item.blocked}<em class="blocked">
                   · {t("board.blocked")}</em

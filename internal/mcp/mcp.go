@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -42,6 +43,8 @@ func Handler(svc *core.Service, feed *events.Feed) http.Handler {
 
 func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Actor) *sdk.Server {
 	s := sdk.NewServer(&sdk.Implementation{Name: serverName, Version: serverVersion}, nil)
+	s.AddReceivingMiddleware(logCalls(a))
+	addResources(s, svc, a)
 	readOnly := &sdk.ToolAnnotations{ReadOnlyHint: true}
 
 	sdk.AddTool(s, &sdk.Tool{
@@ -72,18 +75,7 @@ func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Act
 		if err != nil {
 			return nil, nil, err
 		}
-		statuses := make([]map[string]any, 0, len(w.Statuses))
-		for _, st := range w.Statuses {
-			m := map[string]any{"name": st.Name, "category": st.Category}
-			if st.WIPLimit != nil {
-				m["wip_limit"] = *st.WIPLimit
-			}
-			statuses = append(statuses, m)
-		}
-		return result(map[string]any{
-			"project": w.Project, "types": w.Types, "parents": w.Hierarchy, "statuses": statuses,
-			"transitions": w.Transitions, "labels": w.Labels, "custom_fields": w.CustomFields,
-		})
+		return result(workflowView(w))
 	})
 
 	type searchIn struct {
@@ -360,4 +352,47 @@ func (o opIn) toCore() core.BatchOp {
 		op.Patch = p
 	}
 	return op
+}
+
+// workflowView is the compact workflow shape shared by workflow_get and the workflow resource.
+func workflowView(w core.Workflow) map[string]any {
+	statuses := make([]map[string]any, 0, len(w.Statuses))
+	for _, st := range w.Statuses {
+		m := map[string]any{"name": st.Name, "category": st.Category}
+		if st.WIPLimit != nil {
+			m["wip_limit"] = *st.WIPLimit
+		}
+		statuses = append(statuses, m)
+	}
+	return map[string]any{
+		"project": w.Project, "types": w.Types, "parents": w.Hierarchy, "statuses": statuses,
+		"transitions": w.Transitions, "labels": w.Labels, "custom_fields": w.CustomFields,
+	}
+}
+
+var errTooLarge = errors.New("resource is larger than " + strconv.Itoa(maxResponse) + " bytes")
+
+// logCalls writes one compact line per tool call: what agents use, how big the answers are and how long they take.
+func logCalls(a auth.Actor) sdk.Middleware {
+	return func(next sdk.MethodHandler) sdk.MethodHandler {
+		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+			start := time.Now()
+			res, err := next(ctx, method, req)
+			call, ok := req.(*sdk.CallToolRequest)
+			if !ok || method != "tools/call" {
+				return res, err
+			}
+			size, isErr := 0, err != nil
+			if r, ok := res.(*sdk.CallToolResult); ok && r != nil {
+				isErr = isErr || r.IsError
+				for _, c := range r.Content {
+					if t, ok := c.(*sdk.TextContent); ok {
+						size += len(t.Text)
+					}
+				}
+			}
+			slog.Info("mcp call", "tool", call.Params.Name, "actor", a.String(), "ms", time.Since(start).Milliseconds(), "bytes", size, "error", isErr)
+			return res, err
+		}
+	}
 }

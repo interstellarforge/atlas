@@ -3,6 +3,7 @@
   import { t } from "./i18n";
   import { initials, personName } from "./people.svelte";
   import { cardFields } from "./prefs.svelte";
+  import { itemHref } from "./routes";
 
   let {
     card,
@@ -64,7 +65,7 @@
       >
     {/if}
   </header>
-  <p class="title">{card.title}</p>
+  <p class="title"><a href={itemHref(card.key)}>{card.title}</a></p>
   <footer>
     {#if cardFields.priority && card.priority !== "normal"}
       <span class="chip" class:warn={card.priority === "urgent"}
@@ -137,6 +138,13 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+  .title a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .title a:hover {
+    text-decoration: underline;
   }
   .chip {
     padding: 0 var(--space-2);

@@ -2,6 +2,7 @@
   import { type Card, getItems } from "./api";
   import { onChange, onResync } from "./events.svelte";
   import { t } from "./i18n";
+  import { itemHref } from "./routes";
   import VirtualList from "./VirtualList.svelte";
 
   const ROW = 36;
@@ -103,7 +104,7 @@
           {:else}
             <span class="toggle"></span>
           {/if}
-          <span class="mono">{r.item.key}</span>
+          <a class="mono" href={itemHref(r.item.key)}>{r.item.key}</a>
           <span class="chip">{t(`types.${r.item.type}` as "types.epic")}</span>
           <span class="title">{r.item.title}</span>
           {#if r.item.blocked}<span class="chip warn">{t("board.blocked")}</span

@@ -129,7 +129,11 @@
         {#if route.path === "/"}
           <Projects />
         {:else if current}
-          <ProjectView project={current.key} view={current.view} />
+          <ProjectView
+            project={current.key}
+            view={current.view}
+            item={current.item}
+          />
         {:else if route.path === "/board"}
           <h1>{t("cross.title")}</h1>
           <Board projects={allProjects} />

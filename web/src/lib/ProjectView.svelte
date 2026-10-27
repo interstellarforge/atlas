@@ -4,11 +4,18 @@
   import Board from "./Board.svelte";
   import { onChange } from "./events.svelte";
   import { t } from "./i18n";
+  import ItemPanel from "./ItemPanel.svelte";
   import ListView from "./ListView.svelte";
-  import { type ProjectViewName } from "./routes";
+  import { navigate } from "./router.svelte";
+  import { type ProjectViewName, viewPath } from "./routes";
   import TreeView from "./TreeView.svelte";
 
-  let { project, view }: { project: string; view: ProjectViewName } = $props();
+  let {
+    project,
+    view,
+    item,
+  }: { project: string; view: ProjectViewName; item: string | undefined } =
+    $props();
 
   let workflow = $state<Workflow | undefined>();
   let error = $state("");
@@ -76,6 +83,17 @@
         <TreeView {project} />
       {/if}
     </div>
+    {#if item}
+      {#key item}
+        <ItemPanel
+          itemKey={item}
+          {workflow}
+          onclose={() => {
+            navigate(viewPath(project, view));
+          }}
+        />
+      {/key}
+    {/if}
   {/if}
 </section>
 

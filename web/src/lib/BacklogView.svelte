@@ -10,6 +10,7 @@
   import { onChange, onResync } from "./events.svelte";
   import FiltersBar from "./Filters.svelte";
   import { t } from "./i18n";
+  import { itemHref } from "./routes";
 
   const FIELDS = "key,type,title,priority,parent,root,blocked,version,status";
 
@@ -117,7 +118,7 @@
       <ul>
         {#each g.items as item (item.key)}
           <li>
-            <span class="mono">{item.key}</span>
+            <a class="mono" href={itemHref(item.key)}>{item.key}</a>
             <span class="chip">{t(`types.${item.type}` as "types.epic")}</span>
             <span class="title">{item.title}</span>
             {#if item.blocked}<span class="chip warn">{t("board.blocked")}</span
