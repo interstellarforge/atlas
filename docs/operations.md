@@ -34,3 +34,17 @@ Always dry-run first. The report lists duplicates, row errors and the source-to-
 ## Other commands
 
 `atlas check paths [--fix]` verifies the materialized item paths.
+
+## Email (optional)
+
+Atlas sends no email until SMTP is set up, either with environment variables or in the admin screen (Administration > Email). Saved settings override the environment as a whole.
+
+| Variable | Meaning |
+|---|---|
+| `ATLAS_SMTP_HOST`, `ATLAS_SMTP_PORT` (587) | Server |
+| `ATLAS_SMTP_SECURITY` | `starttls` (default), `tls` or `none` |
+| `ATLAS_SMTP_USER`, `ATLAS_SMTP_PASSWORD` | Login, optional |
+| `ATLAS_SMTP_FROM`, `ATLAS_SMTP_FROM_NAME` | Sender address and name |
+| `ATLAS_PUBLIC_URL` | Address users open Atlas at, for links in mails (for example `https://atlas.example.com`) |
+
+A password saved in the admin screen is encrypted with `<data dir>/mail.key`. Backups do not include this file; after restoring on another machine the password must be entered again (the settings otherwise survive). Mails that cannot be delivered are retried five times (1, 5, 15, 60 minutes) and then dropped; `mail_outbox.last_error` has the reason.

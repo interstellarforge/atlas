@@ -80,6 +80,9 @@ func (s *Service) fanOut(tx *sql.Tx, a auth.Actor, c change) error {
 			pk, key, a.String(), now, n.User); err != nil {
 			return err
 		}
+		if err := s.mailNotification(tx, a, n, pk, key); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -1,0 +1,3 @@
+Subject: Atlas test email
+
+This is a test email from Atlas. Your email settings work.

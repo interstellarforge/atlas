@@ -11,6 +11,15 @@ services:
       ATLAS_ADMIN_PASSWORD: ${ATLAS_ADMIN_PASSWORD:-}
       # Set to "false" when serving over plain HTTP (local use without a TLS proxy).
       ATLAS_COOKIE_SECURE: ${ATLAS_COOKIE_SECURE:-true}
+      # Optional outgoing email and the address used in its links; see docs/operations.md.
+      ATLAS_PUBLIC_URL: ${ATLAS_PUBLIC_URL:-}
+      ATLAS_SMTP_HOST: ${ATLAS_SMTP_HOST:-}
+      ATLAS_SMTP_PORT: ${ATLAS_SMTP_PORT:-587}
+      ATLAS_SMTP_SECURITY: ${ATLAS_SMTP_SECURITY:-starttls}
+      ATLAS_SMTP_USER: ${ATLAS_SMTP_USER:-}
+      ATLAS_SMTP_PASSWORD: ${ATLAS_SMTP_PASSWORD:-}
+      ATLAS_SMTP_FROM: ${ATLAS_SMTP_FROM:-}
+      ATLAS_SMTP_FROM_NAME: ${ATLAS_SMTP_FROM_NAME:-Atlas}
     mem_limit: 384m
     restart: unless-stopped
 

@@ -50,8 +50,8 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET | `/mcp/stats` | Aggregate MCP call metrics per tool (calls, errors, bytes, p95 ms, paginated, too_large); in memory, reset on restart |
 | GET/POST/PATCH | `/projects`, `/projects/{key}` | Projects |
 | GET/POST, PATCH/DELETE `/projects/{key}/milestones[/{id}]` | Milestones with progress (`total`, `done` = active items in a completed status). Changes need a project admin; PATCH `{"name"?,"due_at"?,"released"?}`; delete refused while items use it. Items get one via `milestone` (name or null) on create/update; filter with `?milestone=` |
-| GET/PUT | `/projects/{key}/workflow` | GET: types, hierarchy, statuses, transitions, labels, milestones, custom fields. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change |
-| POST/PATCH/DELETE | `/projects/{key}/statuses[/{id}]` | Manage statuses (project admin); delete refused while items use it. PATCH accepts `allow_create` (false: items cannot be created directly in this status, moving in stays allowed; at least one status must stay creatable). Create in a blocked status (also the default one) fails with 422 `rule_violation`, over REST, MCP and import |
+| GET/PUT/PATCH | `/projects/{key}/workflow` | GET: types, hierarchy, statuses (each with `requires`), transitions, labels, milestones, custom fields, `merge_columns`. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change. PATCH `{"merge_columns":bool}` shows statuses of one category in one board column (needs the `workflow` action; ADR-0011) |
+| POST/PATCH/DELETE | `/projects/{key}/statuses[/{id}]` | Manage statuses (project admin); delete refused while items use it. PATCH accepts `allow_create` (false: items cannot be created directly in this status, moving in stays allowed; at least one status must stay creatable). Create in a blocked status (also the default one) fails with 422 `rule_violation`, over REST, MCP and import. PATCH also accepts `requires` (array of status names, `[]` clears): an item may only enter this status after it has been in each of them; skipping fails with 422 `rule_violation` naming the missing step, for create, move, update and import rows (ADR-0011) |
 | POST/DELETE | `/projects/{key}/custom-fields[/{name}]` | Custom field definitions (project admin) |
 | GET | `/projects/{key}/members`, PUT/DELETE `/projects/{key}/members/{user}` | Role: any name from `GET /roles` (built-in admin, member, viewer) |
 | GET/POST | `/users` | List users; create (global admin) |
@@ -104,3 +104,18 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 ## Limits (configurable)
 
 Body 1 MiB (uploads separate); upload 10 MB; batch 25; page size 200.
+
+## Board with merged columns
+
+With `merge_columns` on, `GET /projects/{key}/board` returns one column per status category. `column.status` is the first status of the category (use its id for `GET .../board/columns/{id}` and its name as the move target), `column.statuses` lists every member and `over_wip` is true when any member exceeds its own limit. Cards in a merged column always carry `status`. Moves inside the column send only `after`/`before`; neighbours may have other statuses of the same column.
+
+## Email settings (admin, human session only)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/admin/mail` | `{configured, source: database\|environment\|none, host, port, security: tls\|starttls\|none, username, password_set, from_addr, from_name}`; never the password |
+| PUT | `/admin/mail` | Saves the settings (overrides the environment). `password` omitted keeps the stored one, `""` removes it |
+| DELETE | `/admin/mail` | Drops the saved settings; the environment defaults apply again |
+| POST | `/admin/mail/test` | Sends a test mail to the caller's address; 422 with the (redacted) SMTP error on failure |
+
+`/me/preferences` has `email_notifications` (bool, default false): also mail the notifications that are not muted. Invites with an email address are mailed when email is configured (ADR-0012).

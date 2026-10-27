@@ -21,6 +21,7 @@ import (
 	"github.com/kees/atlas/internal/events"
 	"github.com/kees/atlas/internal/mcp"
 	"github.com/kees/atlas/internal/media"
+	"github.com/kees/atlas/internal/notifications"
 	"github.com/kees/atlas/migrations"
 	"github.com/kees/atlas/web"
 )
@@ -96,6 +97,7 @@ func run() error {
 	svc := core.New(database, authSvc)
 	uploads := media.NewStore(filepath.Join(cfg.DataDir, "uploads"), media.Limits{MaxBytes: cfg.UploadMaxBytes, MaxPixels: cfg.UploadMaxMegapixels})
 	svc.SetMedia(uploads)
+	svc.SetMail(core.MailConfig{Env: cfg.SMTP, KeyPath: filepath.Join(cfg.DataDir, "mail.key"), PublicURL: cfg.PublicURL, Sender: notifications.SMTP{}})
 	svc.ApplyPolicy()
 	if len(os.Args) > 1 {
 		return runCommand(svc, database, cfg.DataDir, os.Args[1:])
@@ -106,6 +108,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go pruneJournal(ctx, feed, cfg.EventRetention)
+	go (&notifications.Worker{DB: database, Sender: notifications.SMTP{}, Load: svc.MailWorkerSettings}).Run(ctx)
 
 	mcpMetrics := mcp.NewMetrics()
 	srv := &http.Server{

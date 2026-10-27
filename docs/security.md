@@ -55,7 +55,14 @@
 
 - TOTP (RFC 6238, SHA-1, 6 digits, 30 s, one step of drift). The secret must be readable to verify codes, so it is stored as is in `users.totp_secret`: anyone with the database file can read it. A used code cannot be replayed (`totp_last_step`), two logins racing with one code let only one win. Recovery codes (10, single use) are stored hashed. An admin can reset 2FA of a user who lost the device.
 - Wrong second factors count against the login failure limiter; "code required" does not.
-- Invite codes are random, stored hashed, single use, expiring, optionally bound to an email, and never logged. Atlas sends no email: the admin hands over the link. Registration refusals count against the same limiter.
+- Invite codes are random, stored hashed, single use, expiring, optionally bound to an email, and never logged. Unless email is set up (below) Atlas sends no email and the admin hands over the link; with email, an invite for a given address is also mailed and the code sits in the outbox body until the mail is sent or abandoned, then it is blanked. Registration refusals count against the same limiter.
 - Profile pictures run through the attachment pipeline; only a re-encoded thumbnail is served (EXIF dropped), the original stays on disk.
 - Account deletion anonymises instead of erasing rows: audit entries and authored items keep their references. It refuses to leave the instance without an admin or a project without an admin.
 - Audit export is admin-only and streams at most 50.000 entries per request.
+
+### Outgoing email (ADR-0012)
+
+- Optional. Only a global admin in a human session can read or change the settings; tokens cannot.
+- The SMTP password is encrypted at rest (AES-256-GCM) with `<data dir>/mail.key` (mode 0600). It is not part of API answers, audit entries or logs, and send errors are redacted before they are stored or shown. Environment settings (`ATLAS_SMTP_PASSWORD`) stay in the process environment. A backup does not contain the key: after a restore elsewhere, enter the password again.
+- Mail is sent by a worker outside any database transaction, with limited retries. Recipient and subject with line breaks are refused (header injection). Plain SMTP login over an unencrypted connection to a remote host is refused by `net/smtp`.
+- Notification mails go only to users who switched them on; they contain a summary and a link, never item contents.

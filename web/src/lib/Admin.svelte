@@ -3,6 +3,7 @@
     type AdminUser,
     ApiError,
     type AuditEntry,
+    clearMailSettings,
     createInvite,
     createUser,
     deleteInstanceItemTemplate,
@@ -10,6 +11,7 @@
     deleteRole,
     getAudit,
     getInstance,
+    getMailSettings,
     getPolicy,
     type Invite,
     type ItemTemplate,
@@ -18,14 +20,17 @@
     listInvites,
     listProjectTemplates,
     listRoles,
+    type MailSettings,
     patchAdminUser,
     type Policy,
     type ProjectTemplate,
     revokeInvite,
     type Role,
     saveInstanceItemTemplate,
+    saveMailSettings,
     saveProjectTemplate,
     saveRole,
+    sendTestMail,
     setPolicy,
     type User,
   } from "./api";
@@ -41,6 +46,7 @@
     "templates",
     "rights",
     "audit",
+    "mail",
     "instance",
   ] as const;
   const active = $derived(
@@ -51,6 +57,9 @@
     timeStyle: "short",
   });
 
+  let mail = $state<MailSettings | undefined>();
+  let mailPassword = $state("");
+  let mailClearPassword = $state(false);
   let policy = $state<Policy | undefined>();
   let invites = $state<Invite[]>([]);
   let inviteEmail = $state("");
@@ -152,7 +161,31 @@
     audit = more ? [...audit, ...page] : page;
   }
 
+  async function saveMail(): Promise<void> {
+    if (!mail) return;
+    const { host, port, security, username, from_addr, from_name } = mail;
+    mail = await saveMailSettings({
+      host,
+      port,
+      security,
+      username,
+      from_addr,
+      from_name,
+      ...(mailClearPassword
+        ? { password: "" }
+        : mailPassword !== ""
+          ? { password: mailPassword }
+          : {}),
+    });
+    mailPassword = "";
+    mailClearPassword = false;
+  }
+
   $effect(() => {
+    if (active === "mail")
+      void getMailSettings()
+        .then((m) => (mail = m))
+        .catch(() => (error = t("admin.loadFailed")));
     if (active === "users")
       void loadUsers().catch(() => (error = t("admin.loadFailed")));
     if (active === "access") {
@@ -721,6 +754,95 @@
       </div>
     {/if}
   </section>
+{:else if active === "mail"}
+  {#if mail}
+    <form
+      class="panel"
+      aria-labelledby="mail-title"
+      onsubmit={(e) => {
+        e.preventDefault();
+        void run(t("settings.saved"), saveMail);
+      }}
+    >
+      <h2 id="mail-title">{t("admin.mail")}</h2>
+      <p class="muted hint">{t("admin.mailIntro")}</p>
+      <p class="muted hint">
+        {t(`admin.mailSource.${mail.source}` as "admin.mailSource.none")}
+      </p>
+      <label>
+        {t("admin.mailHost")}
+        <input bind:value={mail.host} required placeholder="smtp.example.com" />
+      </label>
+      <label>
+        {t("admin.mailPort")}
+        <input
+          type="number"
+          min="1"
+          max="65535"
+          bind:value={mail.port}
+          required
+        />
+      </label>
+      <label>
+        {t("admin.mailSecurity")}
+        <select bind:value={mail.security}>
+          {#each ["starttls", "tls", "none"] as o (o)}
+            <option value={o}
+              >{t(
+                `admin.mailSecurityOptions.${o}` as "admin.mailSecurityOptions.tls",
+              )}</option
+            >
+          {/each}
+        </select>
+      </label>
+      <label>
+        {t("admin.mailUsername")}
+        <input bind:value={mail.username} autocomplete="off" />
+      </label>
+      <label>
+        {t("admin.mailPassword")}
+        <input
+          type="password"
+          bind:value={mailPassword}
+          autocomplete="new-password"
+          disabled={mailClearPassword}
+        />
+      </label>
+      {#if mail.password_set}
+        <p class="muted hint">{t("admin.mailPasswordSet")}</p>
+        <label class="check">
+          <input type="checkbox" bind:checked={mailClearPassword} />
+          {t("admin.mailPasswordClear")}
+        </label>
+      {/if}
+      <label>
+        {t("admin.mailFromAddr")}
+        <input type="email" bind:value={mail.from_addr} required />
+      </label>
+      <label>
+        {t("admin.mailFromName")}
+        <input bind:value={mail.from_name} />
+      </label>
+      <div class="row">
+        <button class="primary" type="submit">{t("admin.mailSave")}</button>
+        <button
+          type="button"
+          disabled={!mail.configured}
+          onclick={() => void run(t("admin.mailTestSent"), sendTestMail)}
+          >{t("admin.mailTest")}</button
+        >
+        {#if mail.source === "database"}
+          <button
+            type="button"
+            onclick={() =>
+              void run(t("admin.mailCleared"), async () => {
+                mail = await clearMailSettings();
+              })}>{t("admin.mailUseEnv")}</button
+          >
+        {/if}
+      </div>
+    </form>
+  {/if}
 {:else}
   <section class="panel" aria-labelledby="instance-title">
     <h2 id="instance-title">{t("admin.nav.instance")}</h2>

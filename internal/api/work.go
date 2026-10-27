@@ -50,6 +50,7 @@ func (s *Server) registerWork(mux *http.ServeMux, protect func(http.HandlerFunc)
 
 	mux.Handle("GET /api/v1/projects/{key}/workflow", protect(s.getWorkflow))
 	mux.Handle("PUT /api/v1/projects/{key}/workflow", protect(s.putTransitions))
+	mux.Handle("PATCH /api/v1/projects/{key}/workflow", protect(s.patchWorkflow))
 	mux.Handle("POST /api/v1/projects/{key}/statuses", protect(s.addStatus))
 	mux.Handle("PATCH /api/v1/projects/{key}/statuses/{id}", protect(s.patchStatus))
 	mux.Handle("DELETE /api/v1/projects/{key}/statuses/{id}", protect(s.deleteStatus))
@@ -219,6 +220,24 @@ func (s *Server) putTransitions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.core.SetTransitions(r.Context(), actor(r), r.PathValue("key"), in.Transitions); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.getWorkflow(w, r)
+}
+
+func (s *Server) patchWorkflow(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		MergeColumns *bool `json:"merge_columns"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.MergeColumns == nil {
+		writeError(w, http.StatusBadRequest, "invalid", "merge_columns is required")
+		return
+	}
+	if err := s.core.SetMergeColumns(r.Context(), actor(r), r.PathValue("key"), *in.MergeColumns); err != nil {
 		s.fail(w, r, err)
 		return
 	}

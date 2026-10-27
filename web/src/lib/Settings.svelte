@@ -488,6 +488,15 @@
         {t(`settings.notify.${type}` as "settings.notify.assigned")}
       </label>
     {/each}
+    <label class="check">
+      <input
+        type="checkbox"
+        bind:checked={prefs.email_notifications}
+        onchange={savePrefs}
+      />
+      {t("settings.emailNotifications")}
+    </label>
+    <p class="muted hint">{t("settings.emailNotificationsHint")}</p>
   </section>
 {/if}
 

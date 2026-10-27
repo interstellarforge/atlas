@@ -62,7 +62,7 @@ func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, er
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, key, name, archived_at, created_at FROM projects ORDER BY key`)
+	rows, err := s.db.R.Query(`SELECT id, key, name, archived_at, created_at, merge_columns FROM projects ORDER BY key`)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, er
 	for rows.Next() {
 		var p Project
 		var archived sql.NullInt64
-		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns); err != nil {
 			return nil, err
 		}
 		if _, ok := readable[p.ID]; !ok {

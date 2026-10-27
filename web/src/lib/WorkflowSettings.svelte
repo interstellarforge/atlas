@@ -3,6 +3,7 @@
     addStatus,
     ApiError,
     deleteStatus,
+    setMergeColumns,
     type StatusInfo,
     updateStatus,
     type Workflow,
@@ -54,6 +55,17 @@
     const limit = raw === "" ? null : Number(raw);
     if (limit === status.wip_limit) return Promise.resolve();
     return run(() => updateStatus(project, status.id, { wip_limit: limit }));
+  }
+
+  function toggleRequirement(
+    status: StatusInfo,
+    name: string,
+    on: boolean,
+  ): Promise<void> {
+    const requires = on
+      ? [...status.requires, name]
+      : status.requires.filter((n) => n !== name);
+    return run(() => updateStatus(project, status.id, { requires }));
   }
 
   // Positions are plain numbers: the new order takes over the existing set of positions, and only the rows that end up elsewhere are written.
@@ -159,6 +171,19 @@
     {#if error}<p class="banner error" role="alert">{error}</p>{/if}
     <p class="sr-only" aria-live="polite">{announcement}</p>
 
+    <label class="merge">
+      <input
+        type="checkbox"
+        checked={workflow.merge_columns}
+        onchange={(e) =>
+          void run(() => setMergeColumns(project, e.currentTarget.checked))}
+      />
+      <span
+        ><strong>{t("workflow.merge")}</strong>
+        <small class="muted">{t("workflow.mergeHint")}</small></span
+      >
+    </label>
+
     <div
       class="table"
       class:sorting={dragging !== undefined}
@@ -171,6 +196,7 @@
         <span role="columnheader">{t("workflow.status")}</span>
         <span role="columnheader">{t("workflow.category")}</span>
         <span role="columnheader">{t("workflow.wip")}</span>
+        <span role="columnheader">{t("workflow.requires")}</span>
         <span role="columnheader">{t("workflow.allowCreate")}</span>
         <span role="columnheader" class="sr-only">{t("workflow.actions")}</span>
       </div>
@@ -237,6 +263,29 @@
             value={status.wip_limit ?? ""}
             onchange={(e) => void setWip(status, e)}
           />
+          <details class="requires">
+            <summary
+              aria-label={t("workflow.requiresOf", { name: status.name })}
+              >{status.requires.length
+                ? status.requires.join(", ")
+                : t("workflow.requiresNone")}</summary
+            >
+            <p class="muted">{t("workflow.requiresHint")}</p>
+            {#each list.filter((o) => o.id !== status.id) as other (other.id)}
+              <label class="check">
+                <input
+                  type="checkbox"
+                  checked={status.requires.includes(other.name)}
+                  onchange={(e) =>
+                    void toggleRequirement(
+                      status,
+                      other.name,
+                      e.currentTarget.checked,
+                    )}
+                />{other.name}
+              </label>
+            {/each}
+          </details>
           <label class="toggle">
             <input
               type="checkbox"
@@ -336,7 +385,7 @@
   }
   .row {
     display: grid;
-    grid-template-columns: 44px minmax(0, 1.6fr) 150px 130px 70px 44px;
+    grid-template-columns: 44px minmax(0, 1.6fr) 150px 130px 170px 70px 44px;
     align-items: center;
     gap: var(--space-3);
     min-height: 56px;
@@ -413,6 +462,30 @@
   .toggle {
     display: flex;
     justify-content: center;
+  }
+  .merge {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .merge span {
+    display: grid;
+    gap: 2px;
+  }
+  .requires summary {
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .requires p {
+    margin: 4px 0;
+    font-size: var(--atlas-fs-xs);
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
   }
   .add {
     display: grid;

@@ -1,0 +1,13 @@
+Subject: You are invited to Atlas
+
+Hello,
+
+{{.Inviter}} invited you to Atlas.
+{{if .Link}}
+Create your account here:
+{{.Link}}
+{{else}}
+Open Atlas and register with this invite code:
+{{.Code}}
+{{end}}
+The invitation expires in {{.Days}} days.

@@ -33,6 +33,8 @@ type Status struct {
 	WIPLimit *int   `json:"wip_limit"`
 	// AllowCreate false blocks creating items directly in this status; moving into it stays allowed.
 	AllowCreate bool `json:"allow_create"`
+	// Requires names statuses an item must have been in (or be in now) before it may enter this one (ADR-0011).
+	Requires []string `json:"requires"`
 }
 
 type Transition struct {
@@ -59,6 +61,8 @@ type Workflow struct {
 	CustomFields []CustomField       `json:"custom_fields"`
 	// ItemTemplates are the names of the project's item templates (see /item-templates for their content).
 	ItemTemplates []string `json:"item_templates"`
+	// MergeColumns shows statuses of one category in one board column.
+	MergeColumns bool `json:"merge_columns"`
 }
 
 func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Workflow, error) {
@@ -66,7 +70,8 @@ func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Wo
 	if err != nil {
 		return Workflow{}, err
 	}
-	w := Workflow{Project: p.Key, Types: itemTypes, Hierarchy: allowedParents, Transitions: []Transition{}, Labels: []string{}, Milestones: []Milestone{}}
+	w := Workflow{Project: p.Key, Types: itemTypes, Hierarchy: allowedParents, Transitions: []Transition{}, Labels: []string{}, Milestones: []Milestone{},
+		MergeColumns: p.MergeColumns}
 
 	if w.Statuses, err = statuses(s.db.R, p.ID); err != nil {
 		return w, err
@@ -116,12 +121,12 @@ func statuses(q queryer, projectID int64) ([]Status, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []Status{}
 	for rows.Next() {
-		var st Status
+		st := Status{Requires: []string{}}
 		var wip sql.NullInt64
 		if err := rows.Scan(&st.ID, &st.Name, &st.Position, &st.Category, &wip, &st.AllowCreate); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		if wip.Valid {
@@ -130,7 +135,31 @@ func statuses(q queryer, projectID int64) ([]Status, error) {
 		}
 		out = append(out, st)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rreq, err := q.Query(`SELECT r.status_id, s.name FROM status_requirements r
+		JOIN project_statuses s ON s.id = r.required_status_id
+		JOIN project_statuses t ON t.id = r.status_id
+		WHERE t.project_id = ? ORDER BY s.position, s.id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rreq.Close()
+	for rreq.Next() {
+		var id int64
+		var name string
+		if err := rreq.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		for i := range out {
+			if out[i].ID == id {
+				out[i].Requires = append(out[i].Requires, name)
+			}
+		}
+	}
+	return out, rreq.Err()
 }
 
 var statusCategories = []string{"todo", "active", "completed"}
@@ -166,7 +195,8 @@ func (s *Service) AddStatus(ctx context.Context, a auth.Actor, key, name, catego
 	return st, err
 }
 
-// UpdateStatus accepts name, category, position and wip_limit (null clears it).
+// UpdateStatus accepts name, category, position, allow_create, wip_limit (null clears it) and requires
+// (status names an item must have been in before it may enter this status; [] clears it).
 func (s *Service) UpdateStatus(ctx context.Context, a auth.Actor, key string, id int64, patch map[string]any) (Status, error) {
 	var out Status
 	err := s.tx(func(tx *sql.Tx) error {
@@ -218,6 +248,11 @@ func (s *Service) UpdateStatus(ctx context.Context, a auth.Actor, key string, id
 					}
 				}
 				col, val = "allow_create", b
+			case "requires":
+				if err := setRequirements(tx, p.ID, id, v); err != nil {
+					return err
+				}
+				continue
 			case "wip_limit":
 				if v == nil {
 					col, val = "wip_limit", nil

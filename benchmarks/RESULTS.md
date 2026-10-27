@@ -98,3 +98,7 @@ Not measured: low-end hardware, more than 5 clients, container memory with the 1
 ## Not measured yet
 
 Low-end hardware, concurrent writers under load, uploads, reparenting large subtrees, large-subtree comparison, MCP calls per user action beyond the two scenarios above.
+
+## Merged board columns (SET, 2026-10-27)
+
+Core level (`svc.Board`, no HTTP), Apple Silicon Mac, 10.000 items in one project, 50 cards per column, 200 runs: per-status columns (5) p50 6,0 ms / p95 6,7 ms; merged columns (3) p50 15,1 ms / p95 15,7 ms. The merged read orders the union of a category's statuses by rank. Board over HTTP with 5 clients (default mode) after the change: p50 15 ms, p95 27 ms, update p95 8 ms, unchanged from the REL validation. Reproduce: `ATLAS_BENCH=1 go test ./benchmarks -run 'MergedBoard|Concurrent' -v`.

@@ -48,6 +48,7 @@ type Service struct {
 	// outer is set on the per-batch copy of the service: tx() then joins the batch transaction.
 	outer *sql.Tx
 	media *media.Store
+	mail  MailConfig
 }
 
 // SetNotifier registers a callback that runs after every committed mutation, so realtime
@@ -124,6 +125,8 @@ type Project struct {
 	ArchivedAt *int64 `json:"archived_at"`
 	CreatedAt  int64  `json:"created_at"`
 	Role       string `json:"role,omitempty"`
+	// MergeColumns shows statuses of one category in a single board column (ADR-0011).
+	MergeColumns bool `json:"merge_columns"`
 }
 
 // access resolves the project and checks the actor's role grants act on it.
@@ -139,8 +142,8 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	}
 	var p Project
 	var archived sql.NullInt64
-	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at FROM projects WHERE key = ?`, key).
-		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt)
+	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_columns FROM projects WHERE key = ?`, key).
+		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !a.CanProject(p.Key)) {
 		return Project{}, "", ErrNotFound
 	}

@@ -27,7 +27,7 @@
   import ItemPanel from "./ItemPanel.svelte";
   import { route } from "./router.svelte";
   import { matchProject } from "./routes";
-  import { statusTone, toneVar } from "./statusTone";
+  import { statusTone, type Tone, toneVar } from "./statusTone";
   import VirtualList from "./VirtualList.svelte";
 
   // One card slot: the 140px card (--atlas-card-h) plus an 8px gap. Fixed heights keep windowing and drag maths simple.
@@ -144,7 +144,9 @@
     try {
       const fresh = await getCard(key, CARD_FIELDS);
       if (
-        fresh.status !== column.status.name ||
+        !(column.statuses ?? [column.status]).some(
+          (st) => st.name === fresh.status,
+        ) ||
         (fresh.archived_at && !filters.archived)
       ) {
         refresh();
@@ -187,9 +189,29 @@
   // ---- moving cards ----
 
   function recount(column: Column): void {
+    if (column.statuses) return; // WIP is per status there; the refresh after the move corrects the flag
     column.over_wip =
       column.status.wip_limit !== null &&
       column.count > column.status.wip_limit;
+  }
+
+  // The status "Add item" creates in: the first one of the column that allows creating.
+  function creatable(column: Column): string | undefined {
+    return (column.statuses ?? [column.status]).find((st) => st.allow_create)
+      ?.name;
+  }
+
+  function cardStatus(
+    column: Column,
+    name: string,
+  ): { name: string; tone: Tone } | undefined {
+    const st = column.statuses?.find((s) => s.name === name);
+    return st
+      ? {
+          name,
+          tone: statusTone(st, workflow?.statuses ?? column.statuses ?? []),
+        }
+      : undefined;
   }
 
   function fail(e: unknown): void {
@@ -222,6 +244,7 @@
 
     source.items = source.items.filter((i) => i.key !== card.key);
     source.count -= 1;
+    if (changedStatus) moving.status = target.status.name;
     target.items.splice(position, 0, moving);
     target.count += 1;
     recount(source);
@@ -470,8 +493,14 @@
       >
         <header>
           <span class="dot" aria-hidden="true"></span>
-          <h2>{column.status.name}</h2>
-          {#if !cross && !column.status.allow_create}
+          <h2>
+            {column.statuses
+              ? t(
+                  `workflow.cat.${column.status.category}` as "workflow.cat.todo",
+                )
+              : column.status.name}
+          </h2>
+          {#if !cross && creatable(column) === undefined}
             <span
               class="lock"
               role="img"
@@ -481,7 +510,7 @@
             >
           {/if}
           <span class="count" class:warn={column.over_wip}>
-            {column.status.wip_limit
+            {column.status.wip_limit && !column.statuses
               ? t("board.wip", {
                   count: column.count,
                   limit: column.status.wip_limit,
@@ -495,12 +524,12 @@
         <div class="body">
           {#if ready && column.items.length === 0}
             <EmptyState compact icon="board" title={t("board.empty")}>
-              {#if !cross && column.status.allow_create}
+              {#if !cross && creatable(column) !== undefined}
                 <button
                   type="button"
                   class="addhere"
                   onclick={() => {
-                    openNew(column.status.name);
+                    openNew(creatable(column));
                   }}><Icon name="plus" size={14} />{t("board.addItem")}</button
                 >
               {/if}
@@ -522,6 +551,9 @@
                   readonly={cross}
                   dragging={drag?.card.key === card.key}
                   selected={openKey === card.key}
+                  status={column.statuses && card.status
+                    ? cardStatus(column, card.status)
+                    : undefined}
                   onhandle={(e: PointerEvent) => {
                     startDrag(e, card);
                   }}
@@ -537,12 +569,12 @@
             <div class="drop" style:top="{drag.over.top}px"></div>
           {/if}
         </div>
-        {#if !cross && column.items.length > 0 && column.status.allow_create}
+        {#if !cross && column.items.length > 0 && creatable(column) !== undefined}
           <button
             type="button"
             class="addbtn"
             onclick={() => {
-              openNew(column.status.name);
+              openNew(creatable(column));
             }}><Icon name="plus" size={14} />{t("board.addItem")}</button
           >
         {/if}

@@ -146,7 +146,9 @@
     "createBlocked": "New items cannot be created in this status. Move them here instead.",
     "template": "Template",
     "noTemplate": "No template",
-    "templateWarning": "Part of the template no longer fits: {message}"
+    "templateWarning": "Part of the template no longer fits: {message}",
+    "mergedSummary": "{count} statuses",
+    "cardStatus": "status {status}"
   },
   "list": {
     "key": "Key",
@@ -361,7 +363,13 @@
     },
     "allowCreate": "Create",
     "allowCreateOf": "Allow creating items in {name}",
-    "blocked": "Blocked"
+    "blocked": "Blocked",
+    "requires": "Requires first",
+    "requiresOf": "Statuses an item must have been in before {name}",
+    "requiresNone": "None",
+    "requiresHint": "An item can only enter this status after it has been in the selected statuses.",
+    "merge": "Merge statuses of one category into one board column",
+    "mergeHint": "Off shows one column per status. On shows To do, In progress and Completed as three columns; each card shows its own status."
   },
   "settings": {
     "title": "Settings",
@@ -435,7 +443,9 @@
     "disableHint": "Needs your password and a current code, or a recovery code.",
     "deleteAccount": "Delete my account",
     "deleteHint": "Closes your account for good: sessions, tokens and memberships go, your name shows as Deleted user on what you created. This cannot be undone. You cannot do this while you are the only admin of the instance or of a project.",
-    "typeEmail": "Type {email} to confirm"
+    "typeEmail": "Type {email} to confirm",
+    "emailNotifications": "Also email me these notifications",
+    "emailNotificationsHint": "Works once an administrator has set up email."
   },
   "psettings": {
     "sections": "Project settings",
@@ -514,7 +524,8 @@
       "audit": "Audit log",
       "instance": "Instance",
       "templates": "Project templates",
-      "access": "Access"
+      "access": "Access",
+      "mail": "Email"
     },
     "loadFailed": "Could not load this page.",
     "deactivated": "Deactivated",
@@ -599,6 +610,32 @@
     "exportCsv": "Export CSV",
     "exportJson": "Export JSON",
     "instanceItemTemplates": "Item templates for all projects",
-    "instanceItemTemplatesIntro": "Available in every project; a project template with the same name wins there."
+    "instanceItemTemplatesIntro": "Available in every project; a project template with the same name wins there.",
+    "mail": "Email",
+    "mailIntro": "Let Atlas send email: invitations and, per user, notifications. Without these settings Atlas sends no email.",
+    "mailSource": {
+      "database": "Using the settings saved here.",
+      "environment": "Using the ATLAS_SMTP_* environment settings. Saving here overrides them.",
+      "none": "Email is not set up."
+    },
+    "mailHost": "SMTP server",
+    "mailPort": "Port",
+    "mailSecurity": "Security",
+    "mailSecurityOptions": {
+      "starttls": "STARTTLS (port 587)",
+      "tls": "TLS (port 465)",
+      "none": "None (only for a trusted network)"
+    },
+    "mailUsername": "Username",
+    "mailPassword": "Password",
+    "mailPasswordSet": "A password is saved. Leave empty to keep it.",
+    "mailPasswordClear": "Remove the saved password",
+    "mailFromAddr": "From address",
+    "mailFromName": "From name",
+    "mailSave": "Save email settings",
+    "mailTest": "Send test email",
+    "mailTestSent": "Test email sent to your address.",
+    "mailUseEnv": "Use the environment settings",
+    "mailCleared": "Saved settings removed."
   }
 }

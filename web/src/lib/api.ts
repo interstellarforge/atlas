@@ -100,6 +100,8 @@ export interface StatusInfo {
   category: string;
   wip_limit: number | null;
   allow_create: boolean;
+  /** Names of statuses an item must have been in before it may enter this one. */
+  requires: string[];
 }
 
 export interface CustomField {
@@ -126,6 +128,8 @@ export interface Workflow {
   statuses: StatusInfo[];
   labels: string[];
   item_templates: string[];
+  /** Statuses of one category share a board column. */
+  merge_columns: boolean;
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -174,6 +178,8 @@ export interface Card {
 
 export interface Column {
   status: StatusInfo;
+  /** Every status of a merged column, in order; `status` is the first. */
+  statuses?: StatusInfo[];
   count: number;
   over_wip: boolean;
   items: Card[];
@@ -593,6 +599,15 @@ export function updateStatus(
   return request("PATCH", `/projects/${project}/statuses/${String(id)}`, patch);
 }
 
+export function setMergeColumns(
+  project: string,
+  mergeColumns: boolean,
+): Promise<Workflow> {
+  return request("PATCH", `/projects/${project}/workflow`, {
+    merge_columns: mergeColumns,
+  });
+}
+
 export function deleteStatus(project: string, id: number): Promise<undefined> {
   return request("DELETE", `/projects/${project}/statuses/${String(id)}`);
 }
@@ -601,6 +616,7 @@ export interface Preferences {
   theme: "system" | "light" | "dark";
   default_view: "board" | "list" | "backlog" | "tree";
   muted_notifications: string[];
+  email_notifications: boolean;
 }
 
 export interface SessionInfo {
@@ -997,6 +1013,42 @@ export function getPolicy(): Promise<Policy> {
 
 export function setPolicy(p: Policy): Promise<Policy> {
   return request("PUT", "/admin/policy", p);
+}
+
+export interface MailSettings {
+  configured: boolean;
+  source: "database" | "environment" | "none";
+  host: string;
+  port: number;
+  security: "tls" | "starttls" | "none";
+  username: string;
+  password_set: boolean;
+  from_addr: string;
+  from_name: string;
+}
+
+/** `password` omitted keeps the stored one; an empty string removes it. */
+export type MailInput = Omit<
+  MailSettings,
+  "configured" | "source" | "password_set"
+> & {
+  password?: string;
+};
+
+export function getMailSettings(): Promise<MailSettings> {
+  return request("GET", "/admin/mail");
+}
+
+export function saveMailSettings(input: MailInput): Promise<MailSettings> {
+  return request("PUT", "/admin/mail", input);
+}
+
+export function clearMailSettings(): Promise<MailSettings> {
+  return request("DELETE", "/admin/mail");
+}
+
+export function sendTestMail(): Promise<undefined> {
+  return request("POST", "/admin/mail/test");
 }
 
 export interface Invite {

@@ -8,6 +8,8 @@
   import PriorityIndicator from "./PriorityIndicator.svelte";
   import { navigate } from "./router.svelte";
   import { itemHref } from "./routes";
+  import StatusChip from "./StatusChip.svelte";
+  import type { Tone } from "./statusTone";
   import TypeIcon from "./TypeIcon.svelte";
 
   let {
@@ -17,6 +19,7 @@
     readonly = false,
     dragging = false,
     selected = false,
+    status,
     onhandle,
     onkeydown,
     onarchive,
@@ -27,6 +30,8 @@
     readonly?: boolean;
     dragging?: boolean;
     selected?: boolean;
+    /** Set in a merged column, where the column alone does not tell the status. */
+    status?: { name: string; tone: Tone } | undefined;
     onhandle?: (event: PointerEvent) => void;
     onkeydown?: (event: KeyboardEvent) => void;
     onarchive?: () => void;
@@ -92,7 +97,9 @@
   class:selected
   data-key={card.key}
   tabindex="0"
-  aria-label="{card.key}: {card.title}"
+  aria-label={status
+    ? `${card.key}: ${card.title}, ${t("board.cardStatus", { status: status.name })}`
+    : `${card.key}: ${card.title}`}
   aria-current={selected ? "true" : undefined}
   onkeydown={keyCard}
   onpointerdown={startFromCard}
@@ -108,6 +115,7 @@
         ><Icon name="alert" size={12} />{t("board.blocked")}</span
       >{/if}
     {#if archived}<span class="chip">{t("board.archived")}</span>{/if}
+    {#if status}<StatusChip name={status.name} tone={status.tone} />{/if}
     <span class="spacer"></span>
     {#if !readonly && onhandle}
       <button

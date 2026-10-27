@@ -344,6 +344,9 @@ func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, c
 		if err := checkCreatable(tx, statusID); err != nil {
 			return err
 		}
+		if err := checkRequiredSteps(tx, 0, 0, statusID); err != nil {
+			return err
+		}
 		milestoneID, err := resolveMilestone(tx, p.ID, in.Milestone)
 		if err != nil {
 			return err
@@ -370,7 +373,7 @@ func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, c
 		}
 		key := fmt.Sprintf("%s-%d", p.Key, number)
 		now := s.nowMs()
-		rank, err := appendRank(tx, p.ID, statusID, 0)
+		rank, err := appendRank(tx, p.ID, columnOf(tx, p, statusID), 0)
 		if err != nil {
 			return err
 		}
@@ -383,6 +386,9 @@ func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, c
 			return err
 		}
 		id, _ := res.LastInsertId()
+		if err := recordVisit(tx, id, statusID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`UPDATE work_items SET path = ? WHERE id = ?`, fmt.Sprintf("%s%d/", parentPath, id), id); err != nil {
 			return err
 		}
@@ -395,7 +401,7 @@ func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, c
 			}
 		}
 		if len(rank) > maxRankLen {
-			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, statusID); err != nil {
+			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, columnOf(tx, p, statusID)); err != nil {
 				return err
 			}
 		}
@@ -554,17 +560,28 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 				if !allowed {
 					return rule("workflow does not allow %s -> %s", cur.Status, name)
 				}
+				if err := checkRequiredSteps(tx, cur.id, cur.statusID, id); err != nil {
+					return err
+				}
 				set("status_id", k, cur.Status, name)
 				args[len(args)-1] = id
 				newStatus = id
 				if id != cur.statusID { // a changed status puts the item at the end of its new column
-					rk, err := appendRank(tx, p.ID, id, cur.id)
-					if err != nil {
-						return err
+					col := columnOf(tx, p, id)
+					rk := ""
+					if !slices.Contains(columnOf(tx, p, cur.statusID), id) { // inside a merged column the item keeps its place
+						if rk, err = appendRank(tx, p.ID, col, cur.id); err != nil {
+							return err
+						}
 					}
-					sets, args = append(sets, "rank = ?"), append(args, rk)
-					if len(rk) > maxRankLen {
-						rebalanceTo = id
+					if rk != "" {
+						sets, args = append(sets, "rank = ?"), append(args, rk)
+						if len(rk) > maxRankLen {
+							rebalanceTo = id
+						}
+					}
+					if err := recordVisit(tx, cur.id, id); err != nil {
+						return err
 					}
 				}
 			case "priority":
@@ -687,7 +704,7 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 			}
 		}
 		if rebalanceTo != 0 {
-			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, rebalanceTo); err != nil {
+			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, columnOf(tx, p, rebalanceTo)); err != nil {
 				return err
 			}
 		}

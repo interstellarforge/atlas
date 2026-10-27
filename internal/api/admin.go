@@ -12,6 +12,10 @@ func (s *Server) registerAdmin(mux *http.ServeMux, protect func(http.HandlerFunc
 	mux.Handle("PATCH /api/v1/admin/users/{id}", protect(s.adminPatchUser))
 	mux.Handle("GET /api/v1/admin/audit", protect(s.adminAudit))
 	mux.Handle("GET /api/v1/admin/instance", protect(s.adminInstance))
+	mux.Handle("GET /api/v1/admin/mail", protect(s.adminMail))
+	mux.Handle("PUT /api/v1/admin/mail", protect(s.adminSaveMail))
+	mux.Handle("DELETE /api/v1/admin/mail", protect(s.adminClearMail))
+	mux.Handle("POST /api/v1/admin/mail/test", protect(s.adminTestMail))
 	mux.Handle("GET /api/v1/roles", protect(s.roles))
 	mux.Handle("PUT /api/v1/admin/roles/{name}", protect(s.adminSaveRole))
 	mux.Handle("DELETE /api/v1/admin/roles/{name}", protect(s.adminDeleteRole))
@@ -125,6 +129,46 @@ func (s *Server) adminSaveRole(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminDeleteRole(w http.ResponseWriter, r *http.Request) {
 	if err := s.core.DeleteRole(r.Context(), actor(r), r.PathValue("name")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) adminMail(w http.ResponseWriter, r *http.Request) {
+	m, err := s.core.GetMailSettings(r.Context(), actor(r))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+// adminSaveMail stores the SMTP settings. "password" omitted keeps the stored one, "" removes it; it is never returned.
+func (s *Server) adminSaveMail(w http.ResponseWriter, r *http.Request) {
+	var in core.MailInput
+	if !decode(w, r, &in) {
+		return
+	}
+	m, err := s.core.SetMailSettings(r.Context(), actor(r), in)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) adminClearMail(w http.ResponseWriter, r *http.Request) {
+	m, err := s.core.ClearMailSettings(r.Context(), actor(r))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) adminTestMail(w http.ResponseWriter, r *http.Request) {
+	if err := s.core.SendTestMail(r.Context(), actor(r)); err != nil {
 		s.fail(w, r, err)
 		return
 	}

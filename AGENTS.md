@@ -9,7 +9,7 @@ Lightweight, MCP-native project management. Go + SQLite + Svelte 5, one containe
 - Run: `ATLAS_ADMIN_EMAIL=… ATLAS_ADMIN_PASSWORD=… ATLAS_COOKIE_SECURE=false docker compose up --build`
 - Seed 10.000 items: `go run ./cmd/atlas-seed -data-dir ./data`
 - Benchmarks: `ATLAS_BENCH=1 go test ./benchmarks -run Baseline -v`, `benchmarks/rss.sh`
-- Config env: `ATLAS_ADDR`, `ATLAS_DATA_DIR`, `ATLAS_LOG_LEVEL`, `ATLAS_SYNCHRONOUS` (FULL|NORMAL), `ATLAS_COOKIE_SECURE`, `ATLAS_EVENT_RETENTION_DAYS`, `ATLAS_UPLOAD_MAX_MB` (10), `ATLAS_UPLOAD_MAX_MEGAPIXELS` (20), `ATLAS_MCP_WRITES_PER_HOUR` (500)
+- Config env: `ATLAS_ADDR`, `ATLAS_DATA_DIR`, `ATLAS_LOG_LEVEL`, `ATLAS_SYNCHRONOUS` (FULL|NORMAL), `ATLAS_COOKIE_SECURE`, `ATLAS_EVENT_RETENTION_DAYS`, `ATLAS_UPLOAD_MAX_MB` (10), `ATLAS_UPLOAD_MAX_MEGAPIXELS` (20), `ATLAS_MCP_WRITES_PER_HOUR` (500), `ATLAS_PUBLIC_URL`, `ATLAS_SMTP_HOST|PORT|SECURITY|USER|PASSWORD|FROM|FROM_NAME` (optional email)
 
 ## Rules
 

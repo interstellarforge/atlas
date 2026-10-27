@@ -495,11 +495,15 @@ func workflowView(w core.Workflow) map[string]any {
 		if !st.AllowCreate {
 			m["allow_create"] = false // items cannot be created here, only moved in
 		}
+		if len(st.Requires) > 0 {
+			m["requires"] = st.Requires // an item must have been in these statuses before it can enter this one
+		}
 		statuses = append(statuses, m)
 	}
 	return map[string]any{
 		"project": w.Project, "types": w.Types, "parents": w.Hierarchy, "statuses": statuses,
 		"transitions": w.Transitions, "labels": w.Labels, "item_templates": w.ItemTemplates, "milestones": w.Milestones, "custom_fields": w.CustomFields,
+		"merge_columns": w.MergeColumns,
 	}
 }
 

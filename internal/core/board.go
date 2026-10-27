@@ -27,9 +27,11 @@ type BoardFilter struct {
 }
 
 type Column struct {
-	Status     Status           `json:"status"`
+	Status Status `json:"status"`
+	// Statuses lists every status of a merged column (ADR-0011), in order; Status is the first. Empty otherwise.
+	Statuses   []Status         `json:"statuses,omitempty"`
 	Count      int              `json:"count"`
-	OverWIP    bool             `json:"over_wip"` // WIP limits are warnings, not blocks
+	OverWIP    bool             `json:"over_wip"` // WIP limits are warnings, not blocks; in a merged column: any member over its own limit
 	Items      []map[string]any `json:"items"`
 	NextCursor *string          `json:"next_cursor"`
 }
@@ -85,9 +87,10 @@ func (s *Service) Board(ctx context.Context, a auth.Actor, key string, f BoardFi
 	if err != nil {
 		return Board{}, err
 	}
-	b := Board{Project: p.Key, Seq: seq, Columns: make([]Column, 0, len(sts))}
-	for _, st := range sts {
-		col, err := s.column(p.ID, st, f, "")
+	groups := groupStatuses(sts, p.MergeColumns)
+	b := Board{Project: p.Key, Seq: seq, Columns: make([]Column, 0, len(groups))}
+	for _, g := range groups {
+		col, err := s.column(p.ID, g, f, "")
 		if err != nil {
 			return Board{}, err
 		}
@@ -106,28 +109,71 @@ func (s *Service) BoardColumn(ctx context.Context, a auth.Actor, key string, sta
 	if err != nil {
 		return Column{}, err
 	}
-	for _, st := range sts {
-		if st.ID == statusID {
-			return s.column(p.ID, st, f, cursor)
+	for _, g := range groupStatuses(sts, p.MergeColumns) {
+		if g[0].ID == statusID {
+			return s.column(p.ID, g, f, cursor)
 		}
 	}
 	return Column{}, ErrNotFound
 }
 
-func (s *Service) column(projectID int64, st Status, f BoardFilter, cursor string) (Column, error) {
-	col := Column{Status: st, Items: []map[string]any{}}
+// groupStatuses returns the board columns as groups of statuses: one status each, or with merged columns
+// every status of a category together, ordered by the first status of each category.
+func groupStatuses(sts []Status, merge bool) [][]Status {
+	groups := make([][]Status, 0, len(sts))
+	byCategory := map[string]int{}
+	for _, st := range sts {
+		i, seen := byCategory[st.Category]
+		if !merge || !seen {
+			byCategory[st.Category] = len(groups)
+			groups = append(groups, []Status{st})
+			continue
+		}
+		groups[i] = append(groups[i], st)
+	}
+	return groups
+}
+
+func (s *Service) column(projectID int64, group []Status, f BoardFilter, cursor string) (Column, error) {
+	col := Column{Status: group[0], Items: []map[string]any{}}
+	if len(group) > 1 {
+		col.Statuses = group
+		if !slices.Contains(f.fields(), "status") { // cards in a merged column show which status they are in
+			f.Fields = append(slices.Clone(f.fields()), "status")
+		}
+	}
 	itemFilter := f.item()
 	conds, args, err := s.filterConds(itemFilter, []int64{projectID})
 	if err != nil {
 		return col, err
 	}
-	conds, args = append(conds, "i.status_id = ?"), append(args, st.ID)
+	ids := make([]int64, len(group))
+	for i, st := range group {
+		ids[i] = st.ID
+	}
+	in, inArgs := inList(ids)
+	conds, args = append(conds, "i.status_id IN ("+in+")"), append(args, inArgs...)
 
-	if err := s.db.R.QueryRow(`SELECT COUNT(*) FROM work_items i JOIN project_statuses st ON st.id = i.status_id WHERE `+
-		strings.Join(conds, " AND "), args...).Scan(&col.Count); err != nil {
+	crows, err := s.db.R.Query(`SELECT i.status_id, COUNT(*) FROM work_items i JOIN project_statuses st ON st.id = i.status_id WHERE `+
+		strings.Join(conds, " AND ")+` GROUP BY i.status_id`, args...)
+	if err != nil {
 		return col, err
 	}
-	col.OverWIP = st.WIPLimit != nil && col.Count > *st.WIPLimit
+	counts := map[int64]int{}
+	for crows.Next() {
+		var id int64
+		var n int
+		if err := crows.Scan(&id, &n); err != nil {
+			crows.Close()
+			return col, err
+		}
+		counts[id] = n
+		col.Count += n
+	}
+	crows.Close()
+	for _, st := range group {
+		col.OverWIP = col.OverWIP || (st.WIPLimit != nil && counts[st.ID] > *st.WIPLimit)
+	}
 
 	if cursor != "" {
 		rank, id, err := decodeRankCursor(cursor)
@@ -249,17 +295,21 @@ func (s *Service) MoveItem(ctx context.Context, a auth.Actor, key string, versio
 			if !allowed {
 				return rule("workflow does not allow %s -> %s", cur.Status, m.Status)
 			}
+			if err := checkRequiredSteps(tx, cur.id, cur.statusID, target); err != nil {
+				return err
+			}
 		}
 
-		lo, hi, err := columnBounds(tx, p.ID, target, cur.id, m)
+		col := columnOf(tx, p, target)
+		lo, hi, err := columnBounds(tx, p.ID, col, cur.id, m)
 		if err != nil {
 			return err
 		}
 		if hi != "" && lo >= hi { // equal or inverted keys: space the column out, then look again
-			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, target); err != nil {
+			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, col); err != nil {
 				return err
 			}
-			if lo, hi, err = columnBounds(tx, p.ID, target, cur.id, m); err != nil {
+			if lo, hi, err = columnBounds(tx, p.ID, col, cur.id, m); err != nil {
 				return err
 			}
 		}
@@ -277,13 +327,16 @@ func (s *Service) MoveItem(ctx context.Context, a auth.Actor, key string, versio
 			return &ConflictError{Msg: "version mismatch"}
 		}
 		if len(rank) > maxRankLen {
-			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, target); err != nil {
+			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, col); err != nil {
 				return err
 			}
 		}
 		diff := map[string]any{}
 		if target != cur.statusID {
 			diff["status"] = map[string]any{"from": cur.Status, "to": m.Status}
+			if err := recordVisit(tx, cur.id, target); err != nil {
+				return err
+			}
 		}
 		var notices []Notice
 		if target != cur.statusID && cur.StatusCategory != "completed" {
@@ -309,10 +362,14 @@ func (s *Service) MoveItem(ctx context.Context, a auth.Actor, key string, versio
 }
 
 // columnBounds finds the keys of the items the moved item must end up between.
-func columnBounds(tx *sql.Tx, projectID, statusID, selfID int64, m MoveSpec) (lo, hi string, err error) {
-	const col = ` FROM work_items WHERE project_id = ? AND status_id = ? AND archived_at IS NULL AND id <> ?`
+func columnBounds(tx *sql.Tx, projectID int64, column []int64, selfID int64, m MoveSpec) (lo, hi string, err error) {
+	in, inArgs := inList(column)
+	col := ` FROM work_items WHERE project_id = ? AND status_id IN (` + in + `) AND archived_at IS NULL AND id <> ?`
+	args := func(extra ...any) []any {
+		return append(append([]any{projectID}, inArgs...), append([]any{selfID}, extra...)...)
+	}
 	neighbour := func(k string) (rank string, id int64, err error) {
-		err = tx.QueryRow(`SELECT rank, id`+col+` AND key = ?`, projectID, statusID, selfID, k).Scan(&rank, &id)
+		err = tx.QueryRow(`SELECT rank, id`+col+` AND key = ?`, args(k)...).Scan(&rank, &id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", 0, rule("neighbour %s is not in the target column", k)
 		}
@@ -340,7 +397,7 @@ func columnBounds(tx *sql.Tx, projectID, statusID, selfID int64, m MoveSpec) (lo
 			}
 			return lo, hi, nil
 		}
-		hi, err = edge(`SELECT rank`+col+` AND (rank, id) > (?, ?) ORDER BY rank, id LIMIT 1`, projectID, statusID, selfID, rank, id)
+		hi, err = edge(`SELECT rank`+col+` AND (rank, id) > (?, ?) ORDER BY rank, id LIMIT 1`, args(rank, id)...)
 		return lo, hi, err
 	case m.Before != "":
 		rank, id, err := neighbour(m.Before)
@@ -348,18 +405,54 @@ func columnBounds(tx *sql.Tx, projectID, statusID, selfID int64, m MoveSpec) (lo
 			return "", "", err
 		}
 		hi = rank
-		lo, err = edge(`SELECT rank`+col+` AND (rank, id) < (?, ?) ORDER BY rank DESC, id DESC LIMIT 1`, projectID, statusID, selfID, rank, id)
+		lo, err = edge(`SELECT rank`+col+` AND (rank, id) < (?, ?) ORDER BY rank DESC, id DESC LIMIT 1`, args(rank, id)...)
 		return lo, hi, err
 	}
-	lo, err = edge(`SELECT rank`+col+` ORDER BY rank DESC, id DESC LIMIT 1`, projectID, statusID, selfID)
+	lo, err = edge(`SELECT rank`+col+` ORDER BY rank DESC, id DESC LIMIT 1`, args()...)
 	return lo, "", err
 }
 
+// inList renders status ids as SQL placeholders and arguments.
+func inList(ids []int64) (string, []any) {
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", len(ids)), ","), args
+}
+
+// columnOf returns the status ids that share a board column with statusID: just itself, or with merged
+// columns on, every status of the same category (ADR-0011). Ranks are kept per column, so all rank
+// queries use this set.
+func columnOf(q queryer, p Project, statusID int64) []int64 {
+	if !p.MergeColumns {
+		return []int64{statusID}
+	}
+	rows, err := q.Query(`SELECT id FROM project_statuses WHERE project_id = ?
+		AND category = (SELECT category FROM project_statuses WHERE id = ?) ORDER BY position, id`, p.ID, statusID)
+	if err != nil {
+		return []int64{statusID}
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return []int64{statusID}
+	}
+	return ids
+}
+
 // appendRank returns a key after the last item of a column (excluding one item id).
-func appendRank(q queryer, projectID, statusID, excludeID int64) (string, error) {
+func appendRank(q queryer, projectID int64, column []int64, excludeID int64) (string, error) {
 	var last sql.NullString
-	err := q.QueryRow(`SELECT rank FROM work_items WHERE project_id = ? AND status_id = ? AND archived_at IS NULL AND id <> ?
-		ORDER BY rank DESC, id DESC LIMIT 1`, projectID, statusID, excludeID).Scan(&last)
+	in, inArgs := inList(column)
+	err := q.QueryRow(`SELECT rank FROM work_items WHERE project_id = ? AND status_id IN (`+in+`) AND archived_at IS NULL AND id <> ?
+		ORDER BY rank DESC, id DESC LIMIT 1`, append(append([]any{projectID}, inArgs...), excludeID)...).Scan(&last)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
@@ -367,9 +460,10 @@ func appendRank(q queryer, projectID, statusID, excludeID int64) (string, error)
 }
 
 // rebalance rewrites the keys of one column as short, evenly spaced keys, keeping the order.
-func (s *Service) rebalance(ctx context.Context, tx *sql.Tx, a auth.Actor, projectKey string, projectID, statusID int64) error {
-	rows, err := tx.Query(`SELECT id FROM work_items WHERE project_id = ? AND status_id = ? AND archived_at IS NULL ORDER BY rank, id`,
-		projectID, statusID)
+func (s *Service) rebalance(ctx context.Context, tx *sql.Tx, a auth.Actor, projectKey string, projectID int64, column []int64) error {
+	in, inArgs := inList(column)
+	rows, err := tx.Query(`SELECT id FROM work_items WHERE project_id = ? AND status_id IN (`+in+`) AND archived_at IS NULL ORDER BY rank, id`,
+		append([]any{projectID}, inArgs...)...)
 	if err != nil {
 		return err
 	}
@@ -390,7 +484,7 @@ func (s *Service) rebalance(ctx context.Context, tx *sql.Tx, a auth.Actor, proje
 	}
 	// Other clients only know the old keys; they refetch the board on this event.
 	return s.journal(ctx, tx, a, change{Operation: "board.rebalance", Target: projectKey, Event: "board.rebalanced",
-		Project: projectKey, Changes: map[string]any{"status_id": statusID, "items": len(ids)}})
+		Project: projectKey, Changes: map[string]any{"status_id": column[0], "items": len(ids)}})
 }
 
 func encodeRankCursor(rank string, id int64) string {

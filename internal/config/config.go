@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kees/atlas/internal/notifications"
 )
 
 type Config struct {
@@ -24,6 +26,10 @@ type Config struct {
 	UploadMaxMegapixels int64
 	// MCPWritesPerHour is the mutation quota per MCP token.
 	MCPWritesPerHour int
+	// SMTP are the defaults for outgoing email; settings saved in the admin screen override them (ADR-0012).
+	SMTP notifications.Settings
+	// PublicURL is the address users reach Atlas at, for links in emails. Optional.
+	PublicURL string
 }
 
 func Load() (Config, error) {
@@ -57,6 +63,19 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("ATLAS_MCP_WRITES_PER_HOUR must be a positive number")
 	}
 	c.MCPWritesPerHour = q
+	c.PublicURL = strings.TrimRight(os.Getenv("ATLAS_PUBLIC_URL"), "/")
+	port, err := strconv.Atoi(env("ATLAS_SMTP_PORT", "587"))
+	if err != nil || port < 1 || port > 65535 {
+		return c, fmt.Errorf("ATLAS_SMTP_PORT must be a port number")
+	}
+	c.SMTP = notifications.Settings{Host: os.Getenv("ATLAS_SMTP_HOST"), Port: port, Security: env("ATLAS_SMTP_SECURITY", "starttls"),
+		Username: os.Getenv("ATLAS_SMTP_USER"), Password: os.Getenv("ATLAS_SMTP_PASSWORD"),
+		FromAddr: os.Getenv("ATLAS_SMTP_FROM"), FromName: env("ATLAS_SMTP_FROM_NAME", "Atlas")}
+	if c.SMTP.Host != "" {
+		if err := c.SMTP.Validate(); err != nil {
+			return c, fmt.Errorf("ATLAS_SMTP_*: %w", err)
+		}
+	}
 	if err := c.LogLevel.UnmarshalText([]byte(env("ATLAS_LOG_LEVEL", "info"))); err != nil {
 		return c, fmt.Errorf("ATLAS_LOG_LEVEL: %w", err)
 	}

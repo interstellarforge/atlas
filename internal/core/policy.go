@@ -135,7 +135,7 @@ type Invite struct {
 }
 
 // CreateInvite returns the invite code once; only its hash is stored. An invite with an email can only be
-// redeemed with that email. There is no mail server: the admin passes the code on.
+// redeemed with that email. With email set up (ADR-0012) the invite is also mailed; otherwise the admin passes the code on.
 func (s *Service) CreateInvite(ctx context.Context, a auth.Actor, email string, admin bool, days int) (Invite, string, error) {
 	if err := adminOnly(a); err != nil {
 		return Invite{}, "", err
@@ -163,6 +163,14 @@ func (s *Service) CreateInvite(ctx context.Context, a auth.Actor, email string, 
 			return err
 		}
 		inv.ID, _ = res.LastInsertId()
+		if email != "" {
+			var inviter string
+			_ = tx.QueryRow(`SELECT name FROM users WHERE id = ?`, a.UserID).Scan(&inviter)
+			if err := s.enqueueMail(tx, email, "invite", map[string]any{"Inviter": inviter, "Code": code, "Days": days,
+				"Link": s.link("/register?invite=" + code)}); err != nil {
+				return err
+			}
+		}
 		return s.journal(ctx, tx, a, change{Operation: "invite.create", Target: "invite-" + strconv.FormatInt(inv.ID, 10), Event: "admin.updated",
 			Changes: map[string]any{"email": email, "is_admin": admin}}) // never the code
 	})

@@ -96,3 +96,15 @@ Status category enum: `todo`, `active`, `completed`.
 - `instance_settings` (key/value): `min_password_length`, `registration`, `allowed_domain`, `session_days`; absent keys use the defaults in `core/policy.go`. The environment-only settings (`ATLAS_*`) are unchanged.
 - `invites`: code hash, optional email, admin flag, expiry, used_at/used_by.
 - `item_templates.project_id` is nullable (NULL = instance wide), `subitems` holds the JSON tree. A unique index on `(COALESCE(project_id, 0), name)` replaces the old unique constraint.
+
+## Required steps and merged columns (migration 0014)
+
+- `status_requirements (status_id, required_status_id)`: an item may enter `status_id` only if it is in, or has been in, every required status. Empty = no rule.
+- `item_status_visits (item_id, status_id)`: statuses an item has been in, written with the status change. Backfilled from the current status and the audit log (by name).
+- `projects.merge_columns` (default 0): statuses of one category share a board column. Ranks stay per item; the rank queries work on the set of statuses of a column. See ADR-0011.
+
+## Email (migration 0015)
+
+- `mail_settings` (one row, `id = 1`): SMTP host, port, security, username, `password_enc` (AES-GCM, key in `<data dir>/mail.key`), from address and name. No row = environment defaults.
+- `mail_outbox`: mails to send, written in the transaction of the mutation that causes them; `attempts`, `next_attempt_at`, `sent_at`, `failed_at`, `last_error` (redacted). The body is blanked once sent or abandoned. See ADR-0012.
+- Per-user switch: `email_notifications` inside `users.preferences`.

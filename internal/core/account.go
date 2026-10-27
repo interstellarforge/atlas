@@ -123,6 +123,8 @@ type Preferences struct {
 	Theme              string   `json:"theme"`        // system, light or dark
 	DefaultView        string   `json:"default_view"` // board, list, backlog or tree
 	MutedNotifications []string `json:"muted_notifications"`
+	// EmailNotifications also mails every notification that is not muted (needs email set up by an admin).
+	EmailNotifications bool `json:"email_notifications"`
 }
 
 var (

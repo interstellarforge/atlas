@@ -392,12 +392,15 @@ type TemplateStatus struct {
 	Category    string `json:"category"`
 	WIPLimit    *int   `json:"wip_limit,omitempty"`
 	AllowCreate bool   `json:"allow_create"`
+	// Requires names statuses an item must have been in before it may enter this one.
+	Requires []string `json:"requires,omitempty"`
 }
 
 // ProjectTemplateData is the JSON schema (version 1) of a project template: workflow, labels, custom
 // fields and item templates. Never members, tokens, items or other user data.
 type ProjectTemplateData struct {
 	Version       int              `json:"version"`
+	MergeColumns  bool             `json:"merge_columns,omitempty"`
 	Statuses      []TemplateStatus `json:"statuses"`
 	Transitions   []Transition     `json:"transitions"`
 	Labels        []string         `json:"labels"`
@@ -437,6 +440,13 @@ func (d *ProjectTemplateData) validate() error {
 	}
 	if !creatable {
 		return invalid("at least one status must allow creating items")
+	}
+	for _, st := range d.Statuses {
+		for _, r := range st.Requires {
+			if !names[strings.ToLower(r)] || strings.EqualFold(r, st.Name) {
+				return invalid("status %q requires %q, which is not another status of the template", st.Name, r)
+			}
+		}
 	}
 	for _, t := range d.Transitions {
 		if !names[strings.ToLower(t.From)] || !names[strings.ToLower(t.To)] {
@@ -536,9 +546,9 @@ func (s *Service) projectToTemplate(ctx context.Context, a auth.Actor, key strin
 	if err != nil {
 		return ProjectTemplateData{}, err
 	}
-	d := ProjectTemplateData{Version: 1, Transitions: w.Transitions, Labels: w.Labels, CustomFields: w.CustomFields}
+	d := ProjectTemplateData{Version: 1, MergeColumns: w.MergeColumns, Transitions: w.Transitions, Labels: w.Labels, CustomFields: w.CustomFields}
 	for _, st := range w.Statuses {
-		d.Statuses = append(d.Statuses, TemplateStatus{Name: st.Name, Category: st.Category, WIPLimit: st.WIPLimit, AllowCreate: st.AllowCreate})
+		d.Statuses = append(d.Statuses, TemplateStatus{Name: st.Name, Category: st.Category, WIPLimit: st.WIPLimit, AllowCreate: st.AllowCreate, Requires: st.Requires})
 	}
 	its, err := s.ListItemTemplates(ctx, a, key)
 	if err != nil {
@@ -603,6 +613,23 @@ func (s *Service) CreateProjectFromTemplate(ctx context.Context, a auth.Actor, k
 	for i, st := range t.Data.Statuses {
 		if _, err := tx.Exec(`INSERT INTO project_statuses (project_id, name, position, category, wip_limit, allow_create) VALUES (?, ?, ?, ?, ?, ?)`,
 			p.ID, strings.TrimSpace(st.Name), i, st.Category, st.WIPLimit, st.AllowCreate); err != nil {
+			return Project{}, err
+		}
+	}
+	for _, st := range t.Data.Statuses {
+		if len(st.Requires) == 0 {
+			continue
+		}
+		id, err := resolveStatus(tx, p.ID, st.Name)
+		if err != nil {
+			return Project{}, err
+		}
+		if err := setRequirements(tx, p.ID, id, st.Requires); err != nil {
+			return Project{}, err
+		}
+	}
+	if t.Data.MergeColumns {
+		if err := bs.SetMergeColumns(ctx, a, p.Key, true); err != nil {
 			return Project{}, err
 		}
 	}

@@ -1,0 +1,7 @@
+Subject: [Atlas] {{.Summary}}
+
+{{.Summary}}
+{{if .Link}}
+{{.Link}}
+{{end}}
+You get this email because email notifications are switched on in your Atlas settings.
