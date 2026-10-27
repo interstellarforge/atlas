@@ -19,6 +19,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET | `/health` | Liveness |
 | POST | `/auth/login`, `/auth/logout` | Sessions |
 | GET/POST | `/tokens`, DELETE `/tokens/{id}` | Scoped API tokens |
+| GET | `/mcp/stats` | Aggregate MCP call metrics per tool (calls, errors, bytes, p95 ms, paginated, too_large); in memory, reset on restart |
 | GET/POST/PATCH | `/projects`, `/projects/{key}` | Projects |
 | GET/POST, PATCH/DELETE `/projects/{key}/milestones[/{id}]` | Milestones with progress (`total`, `done` = active items in a completed status). Changes need a project admin; PATCH `{"name"?,"due_at"?,"released"?}`; delete refused while items use it. Items get one via `milestone` (name or null) on create/update; filter with `?milestone=` |
 | GET/PUT | `/projects/{key}/workflow` | GET: types, hierarchy, statuses, transitions, labels, milestones, custom fields. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change |

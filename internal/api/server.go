@@ -31,6 +31,7 @@ type Deps struct {
 	CookieSecure bool
 	SPA          fs.FS
 	MCP          http.Handler
+	MCPStats     http.Handler // aggregate MCP call metrics; may be nil
 	Media        *media.Store
 	MaxUpload    int64 // bytes per uploaded file
 }
@@ -43,12 +44,13 @@ type Server struct {
 	cookieSecure bool
 	spa          fs.FS
 	mcp          http.Handler
+	mcpStats     http.Handler
 	media        *media.Store
 	maxUpload    int64
 }
 
 func New(d Deps) *Server {
-	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, media: d.Media, maxUpload: d.MaxUpload}
+	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, mcpStats: d.MCPStats, media: d.Media, maxUpload: d.MaxUpload}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -66,6 +68,9 @@ func (s *Server) Handler() http.Handler {
 	s.registerBoard(mux, protect)
 	mux.Handle("GET /api/v1/events", protect(s.events))
 	mux.Handle("GET /api/v1/changes", protect(s.changes))
+	if s.mcpStats != nil {
+		mux.Handle("GET /api/v1/mcp/stats", protect(s.mcpStats.ServeHTTP))
+	}
 	if s.mcp != nil {
 		// MCP is POST-only, so the method-based scope check would demand write for reads;
 		// scopes are enforced per tool in core instead.

@@ -4,6 +4,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,18 +36,41 @@ const (
 // Handler serves /mcp. Each request gets its own stateless server bound to the actor the
 // auth middleware resolved, so a revoked token stops working immediately and no actor
 // outlives the request that authenticated it.
-func Handler(svc *core.Service, feed *events.Feed) http.Handler {
-	writes := newLimiter(writesPerHour, time.Hour)
+func Handler(svc *core.Service, feed *events.Feed, o Options) http.Handler {
+	if o.WritesPerHour <= 0 {
+		o.WritesPerHour = writesPerHour
+	}
+	if o.Metrics == nil {
+		o.Metrics = NewMetrics()
+	}
+	g := &guards{
+		writes:   newLimiter(o.WritesPerHour, time.Hour),
+		archives: newLimiter(massArchivePerHour, time.Hour),
+		metrics:  o.Metrics,
+	}
 	h := sdk.NewStreamableHTTPHandler(func(r *http.Request) *sdk.Server {
 		a, _ := auth.ActorFrom(r.Context())
-		return newServer(svc, feed, writes, a)
+		return newServer(svc, feed, g, a)
 	}, &sdk.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	return rateLimit(newLimiter(requestsPerMinute, time.Minute), h)
 }
 
-func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Actor) *sdk.Server {
+// Options tunes the server; zero values use the defaults.
+type Options struct {
+	WritesPerHour int      // mutation quota per token per hour
+	Metrics       *Metrics // shared so the API can serve the aggregate; nil keeps a private one
+}
+
+// guards are the process-wide counters shared by every per-request server.
+type guards struct {
+	writes, archives *limiter
+	metrics          *Metrics
+}
+
+func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *sdk.Server {
+	writes := g.writes
 	s := sdk.NewServer(&sdk.Implementation{Name: serverName, Version: serverVersion}, nil)
-	s.AddReceivingMiddleware(logCalls(a))
+	s.AddReceivingMiddleware(logCalls(a, g.metrics))
 	addResources(s, svc, a)
 	readOnly := &sdk.ToolAnnotations{ReadOnlyHint: true}
 
@@ -202,11 +227,19 @@ func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Act
 		Name: "items_write",
 		Description: "Create, update or move work items, 1-25 operations per call. Updates and moves need the item's version. " +
 			"Atomic by default (first failure applies nothing); partial=true applies what it can and reports each result. " +
-			"Set idempotency_key so a retry returns the first result instead of repeating the writes.",
+			"Set idempotency_key so a retry returns the first result instead of repeating the writes. " +
+			"Archiving more than 10 items per hour needs confirm_mass_archive=true.",
 		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in writeIn) (*sdk.CallToolResult, any, error) {
 		if r, ok := quota(writes, a, len(in.Operations)); !ok {
 			return r, nil, nil
+		}
+		if n := in.archives(); n > 0 && !in.ConfirmMassArchive {
+			if wait, ok := g.archives.take(a.String(), n); !ok {
+				return errorResult(map[string]any{"error": core.BatchError{Code: "confirmation_required",
+					Message: "more than " + strconv.Itoa(massArchivePerHour) + " archives per hour; repeat with confirm_mass_archive=true if intended (window resets in " + wait.Round(time.Second).String() + ")"},
+					"applied": false})
+			}
 		}
 		ops := make([]core.BatchOp, len(in.Operations))
 		for i, o := range in.Operations {
@@ -264,6 +297,9 @@ func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Act
 		if r, ok := quota(writes, a, n); !ok {
 			return r, nil, nil
 		}
+		var id [8]byte
+		_, _ = rand.Read(id[:])
+		ctx = core.WithBatch(ctx, hex.EncodeToString(id[:])) // one batch id groups this call's audit entries
 		for _, text := range in.Add {
 			if _, err := svc.AddChecklistItem(ctx, a, in.Key, text); err != nil {
 				return nil, nil, err
@@ -354,6 +390,17 @@ type writeIn struct {
 	Operations     []opIn `json:"operations" jsonschema:"1-25 operations"`
 	Partial        bool   `json:"partial,omitempty" jsonschema:"apply operations independently instead of all-or-nothing"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// ConfirmMassArchive lifts the hourly archive guard; archiving is the only way to remove items.
+	ConfirmMassArchive bool `json:"confirm_mass_archive,omitempty"`
+}
+
+func (w writeIn) archives() (n int) {
+	for _, o := range w.Operations {
+		if o.Op == "update" && o.Archived != nil && *o.Archived {
+			n++
+		}
+	}
+	return n
 }
 
 type opIn struct {
@@ -455,7 +502,7 @@ func workflowView(w core.Workflow) map[string]any {
 var errTooLarge = errors.New("resource is larger than " + strconv.Itoa(maxResponse) + " bytes")
 
 // logCalls writes one compact line per tool call: what agents use, how big the answers are and how long they take.
-func logCalls(a auth.Actor) sdk.Middleware {
+func logCalls(a auth.Actor, m *Metrics) sdk.Middleware {
 	return func(next sdk.MethodHandler) sdk.MethodHandler {
 		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
 			start := time.Now()
@@ -464,16 +511,18 @@ func logCalls(a auth.Actor) sdk.Middleware {
 			if !ok || method != "tools/call" {
 				return res, err
 			}
-			size, isErr := 0, err != nil
+			text, isErr := "", err != nil
 			if r, ok := res.(*sdk.CallToolResult); ok && r != nil {
 				isErr = isErr || r.IsError
 				for _, c := range r.Content {
 					if t, ok := c.(*sdk.TextContent); ok {
-						size += len(t.Text)
+						text += t.Text
 					}
 				}
 			}
-			slog.Info("mcp call", "tool", call.Params.Name, "actor", a.String(), "ms", time.Since(start).Milliseconds(), "bytes", size, "error", isErr)
+			ms := time.Since(start).Milliseconds()
+			m.record(call.Params.Name, ms, text, isErr)
+			slog.Info("mcp call", "tool", call.Params.Name, "actor", a.String(), "ms", ms, "bytes", len(text), "error", isErr)
 			return res, err
 		}
 	}

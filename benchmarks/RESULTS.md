@@ -55,7 +55,16 @@ Browser (built-in browser, same data): the board with ~2.000 cards per column re
 
 ## MCP catalog (2026-10-27)
 
-`tools/list` for the 8 current tools: 5.978 bytes of JSON (about 1.5k tokens, estimate at 4 bytes/token). Every tool call logs one line (`mcp call tool= ms= bytes= error=`); no aggregation or p95 yet.
+`tools/list` for the 8 current tools: 5.978 bytes of JSON (about 1.5k tokens, estimate at 4 bytes/token). Every tool call logs one line (`mcp call tool= ms= bytes= error=`) and is aggregated per tool at `GET /api/v1/mcp/stats` (p95, bytes, paginated and `too_large` counts).
+
+### Agent scenarios (2026-10-27, local Atlas, 2 items)
+
+| Client | Scenario | Result | Tool calls | Bytes returned |
+|---|---|---|---|---|
+| Claude Code 2.1.307 (haiku) | board_get, move to In Progress, comment, 2 checklist items, item_get | all steps correct | 5 | 1.943 |
+| Codex CLI 0.145.0 | items_search, move, stale-version update, retry | conflict surfaced as `conflict`, retry with the current version succeeded | 4 | not measured |
+
+Codex refuses mutating MCP tools in non-interactive mode unless approved: `-c mcp_servers.atlas.tools.items_write.approval_mode="approve"`. Claude Code needs `--allowedTools "mcp__atlas__*"`. Two scenarios on two small models, one run each: this shows the protocol path works, not reliability across many tasks.
 
 ## Image upload and thumbnails (REL, 2026-10-27)
 
@@ -71,4 +80,4 @@ Reproduce: `ATLAS_BENCH_IMAGE=<file> /usr/bin/time -l <media.test> -test.run Thu
 
 ## Not measured yet
 
-Low-end hardware, concurrent writers under load, uploads, reparenting large subtrees, large-subtree comparison, MCP metrics.
+Low-end hardware, concurrent writers under load, uploads, reparenting large subtrees, large-subtree comparison, MCP calls per user action beyond the two scenarios above.

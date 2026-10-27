@@ -45,7 +45,8 @@ func setup(t *testing.T) env {
 	const maxUpload = 200 << 10
 	store := media.NewStore(t.TempDir(), media.Limits{MaxBytes: maxUpload, MaxPixels: 1_000_000})
 	svc.SetMedia(store)
-	h := api.New(api.Deps{DB: d, Auth: a, Core: svc, Feed: feed, SPA: spa, MCP: mcp.Handler(svc, feed), Media: store, MaxUpload: maxUpload}).Handler()
+	stats := mcp.NewMetrics()
+	h := api.New(api.Deps{DB: d, Auth: a, Core: svc, Feed: feed, SPA: spa, MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: 500, Metrics: stats}), MCPStats: stats, Media: store, MaxUpload: maxUpload}).Handler()
 	return env{h: h, auth: a}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -86,5 +87,63 @@ func TestMCPWithSDKClient(t *testing.T) {
 		if rr, err := session.ReadResource(ctx, &sdk.ReadResourceParams{URI: uri}); err != nil || len(rr.Contents) != 1 {
 			t.Fatalf("%s: %v", uri, err)
 		}
+	}
+}
+
+// TestMCPMassArchiveGuardAndStats: archiving is the only way to remove items, so a runaway agent is
+// stopped after 10 per hour unless it confirms; every call lands in the aggregate metrics.
+func TestMCPMassArchiveGuardAndStats(t *testing.T) {
+	e := setup(t)
+	cookie, csrf := e.login(t)
+	asUser := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, asUser)
+	for i := 0; i < 12; i++ {
+		e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "t"}, asUser)
+	}
+	_, write, _ := e.auth.CreateToken(1, "rw", []string{auth.ScopeRead, auth.ScopeWrite}, nil, nil)
+	srv := httptest.NewServer(e.h)
+	defer srv.Close()
+	ctx := context.Background()
+	session, err := sdk.NewClient(&sdk.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, &sdk.StreamableClientTransport{
+		Endpoint: srv.URL + "/mcp", DisableStandaloneSSE: true, HTTPClient: &http.Client{Transport: bearerTransport{write}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	archive := func(from, to int, confirm bool) *sdk.CallToolResult {
+		var ops []any
+		for i := from; i <= to; i++ {
+			ops = append(ops, map[string]any{"op": "update", "key": "EXO-" + strconv.Itoa(i), "version": 1, "archived": true})
+		}
+		args := map[string]any{"operations": ops}
+		if confirm {
+			args["confirm_mass_archive"] = true
+		}
+		res, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "items_write", Arguments: args})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := archive(1, 10, false); res.IsError {
+		t.Fatalf("10 archives refused: %+v", res.Content)
+	}
+	res := archive(11, 11, false)
+	if !res.IsError || !strings.Contains(res.Content[0].(*sdk.TextContent).Text, "confirmation_required") {
+		t.Fatalf("11th archive in the hour was not stopped: %+v", res.Content)
+	}
+	if res := archive(11, 12, true); res.IsError {
+		t.Fatalf("confirmed archive refused: %+v", res.Content)
+	}
+
+	w := e.do("GET", "/api/v1/mcp/stats", nil, asUser)
+	stats := decodeBody[struct {
+		Calls int
+		Tools map[string]struct{ Calls, Errors int }
+	}](t, w)
+	if stats.Calls != 3 || stats.Tools["items_write"].Calls != 3 || stats.Tools["items_write"].Errors != 1 {
+		t.Fatalf("stats: %s", w.Body)
 	}
 }

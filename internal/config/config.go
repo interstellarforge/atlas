@@ -22,6 +22,8 @@ type Config struct {
 	// Upload limits: bytes per file and megapixels per image.
 	UploadMaxBytes      int64
 	UploadMaxMegapixels int64
+	// MCPWritesPerHour is the mutation quota per MCP token.
+	MCPWritesPerHour int
 }
 
 func Load() (Config, error) {
@@ -50,6 +52,11 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("ATLAS_UPLOAD_MAX_MEGAPIXELS must be a positive number")
 	}
 	c.UploadMaxBytes, c.UploadMaxMegapixels = mb<<20, mp*1_000_000
+	q, err := strconv.Atoi(env("ATLAS_MCP_WRITES_PER_HOUR", "500"))
+	if err != nil || q < 1 {
+		return c, fmt.Errorf("ATLAS_MCP_WRITES_PER_HOUR must be a positive number")
+	}
+	c.MCPWritesPerHour = q
 	if err := c.LogLevel.UnmarshalText([]byte(env("ATLAS_LOG_LEVEL", "info"))); err != nil {
 		return c, fmt.Errorf("ATLAS_LOG_LEVEL: %w", err)
 	}

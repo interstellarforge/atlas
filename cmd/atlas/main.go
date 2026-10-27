@@ -96,10 +96,11 @@ func run() error {
 	defer stop()
 	go pruneJournal(ctx, feed, cfg.EventRetention)
 
+	mcpMetrics := mcp.NewMetrics()
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, Media: uploads, MaxUpload: cfg.UploadMaxBytes, CookieSecure: cfg.CookieSecure,
-			SPA: web.Dist(), MCP: mcp.Handler(svc, feed)}).Handler(),
+			SPA: web.Dist(), MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: cfg.MCPWritesPerHour, Metrics: mcpMetrics}), MCPStats: mcpMetrics}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		// Open event streams watch their request context; cancelling it on SIGTERM lets Shutdown finish promptly.

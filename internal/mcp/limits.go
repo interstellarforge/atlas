@@ -12,6 +12,8 @@ import (
 const (
 	requestsPerMinute = 120
 	writesPerHour     = 500
+	// massArchivePerHour is how many items one token may archive per hour without confirm_mass_archive.
+	massArchivePerHour = 10
 	// maxResponse keeps one tool result small enough to be useful in a model's context.
 	maxResponse = 16 * 1024
 )
