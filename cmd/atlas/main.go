@@ -14,7 +14,9 @@ import (
 	"github.com/kees/atlas/internal/api"
 	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/config"
+	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
+	"github.com/kees/atlas/internal/mcp"
 	"github.com/kees/atlas/migrations"
 	"github.com/kees/atlas/web"
 )
@@ -61,9 +63,14 @@ func run() error {
 		slog.Info("admin user created", "email", cfg.AdminEmail)
 	}
 
+	svc := core.New(database, authSvc)
+	if len(os.Args) > 1 {
+		return runCommand(svc, os.Args[1:])
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.New(database, authSvc, cfg.CookieSecure, web.Dist()).Handler(),
+		Handler:           api.New(database, authSvc, svc, cfg.CookieSecure, web.Dist(), mcp.Handler(svc)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kees/atlas/internal/auth"
+	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
 )
 
@@ -22,12 +23,15 @@ const maxBodyBytes = 1 << 20
 type Server struct {
 	db           *db.DB
 	auth         *auth.Service
+	core         *core.Service
 	cookieSecure bool
 	spa          fs.FS
+	mcp          http.Handler
 }
 
-func New(d *db.DB, a *auth.Service, cookieSecure bool, spa fs.FS) *Server {
-	return &Server{db: d, auth: a, cookieSecure: cookieSecure, spa: spa}
+// New builds the HTTP server. mcp is mounted at /mcp and may be nil.
+func New(d *db.DB, a *auth.Service, c *core.Service, cookieSecure bool, spa fs.FS, mcp http.Handler) *Server {
+	return &Server{db: d, auth: a, core: c, cookieSecure: cookieSecure, spa: spa, mcp: mcp}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -41,6 +45,18 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/tokens", protect(s.listTokens))
 	mux.Handle("POST /api/v1/tokens", protect(s.createToken))
 	mux.Handle("DELETE /api/v1/tokens/{id}", protect(s.revokeToken))
+	s.registerWork(mux, protect)
+	if s.mcp != nil {
+		// MCP is POST-only, so the method-based scope check would demand write for reads;
+		// scopes are enforced per tool in core instead.
+		mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := auth.ActorFrom(r.Context()); !ok {
+				writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+				return
+			}
+			s.mcp.ServeHTTP(w, r)
+		})
+	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "unknown endpoint")
 	})

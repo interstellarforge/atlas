@@ -20,15 +20,19 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | POST | `/auth/login`, `/auth/logout` | Sessions |
 | GET/POST | `/tokens`, DELETE `/tokens/{id}` | Scoped API tokens |
 | GET/POST/PATCH | `/projects`, `/projects/{key}` | Projects |
-| GET/PUT | `/projects/{key}/workflow` | Statuses and transitions |
-| GET | `/projects/{key}/board` | Compact board, paginated per column |
-| GET/POST | `/items` | Search/list, create |
-| GET/PATCH/DELETE | `/items/{key}` | Read, update, archive/delete |
+| GET/PUT | `/projects/{key}/workflow` | GET: types, hierarchy, statuses, transitions, labels, custom fields. PUT `{"transitions":[{"from","to"}]}` replaces the rules; empty list allows every change |
+| POST/PATCH/DELETE | `/projects/{key}/statuses[/{id}]` | Manage statuses (project admin); delete refused while items use it |
+| POST/DELETE | `/projects/{key}/custom-fields[/{name}]` | Custom field definitions (project admin) |
+| GET | `/projects/{key}/members`, PUT/DELETE `/projects/{key}/members/{user}` | Roles: admin, member, viewer |
+| GET/POST | `/users` | List users; create (global admin) |
+| GET | `/projects/{key}/board` | Compact board, paginated per column (KAN) |
+| GET/POST | `/items` | Search/list, create. List filters also: `under` (subtree), `q` (title), `archived=1` |
+| GET/PATCH | `/items/{key}` | Read; update (needs `version` in body or `If-Match`). Archive via `{"archived": true}`; there is no hard delete |
 | POST | `/items/{key}/move` | Status and/or position (neighbour keys) |
 | POST | `/items/batch` | Up to 25 mutations |
 | GET/POST | `/items/{key}/comments` | Comments |
 | GET/POST/PATCH | `/items/{key}/checklist` | Checklist items |
-| GET/POST/DELETE | `/items/{key}/links` | Relations |
+| GET/POST | `/items/{key}/links` (POST `{"type","target"}`), DELETE `/items/{key}/links/{type}/{target}` | Relations; `blocks` cycles are refused |
 | GET/POST | `/items/{key}/attachments` | Metadata / upload |
 | GET | `/attachments/{id}` , `/attachments/{id}/thumb` | Streaming download |
 | GET | `/changes?since=<seq>` | Delta sync |

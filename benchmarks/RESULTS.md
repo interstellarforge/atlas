@@ -25,6 +25,18 @@ Note: update latency on a Mac SSD says little about fsync cost on real servers; 
 | Container memory after one login (`docker stats`, includes page cache) | ~76 MiB of 384 MiB |
 | Image size | 21.8 MB |
 
+## Baseline 2 (WRK, 2026-10-27): subtree strategies
+
+Same machine and dataset. Subtree of the first epic (31 items), 500 runs. The earlier "subtree prefix query" row in Baseline 1 used `LIKE` over a ~3.3k-row subtree and is not comparable.
+
+| Strategy | p50 | p95 |
+|---|---|---|
+| `path LIKE prefix%` | 1.11 ms | 1.27 ms |
+| `path` range scan | 19 µs | 20 µs |
+| Recursive CTE | 52 µs | 59 µs |
+
+Column page (50 cards): p50 51 µs, p95 58 µs (FULL). Single update: p50 120 µs / p95 197 µs (FULL), 64 µs / 120 µs (NORMAL). Decision: ADR-0003.
+
 ## Not measured yet
 
-Board API p95 over HTTP, concurrent clients, SSE, uploads, materialized path vs recursive CTE (WRK), MCP metrics.
+Board API p95 over HTTP, concurrent clients, SSE, uploads, reparenting large subtrees, large-subtree comparison, MCP metrics.

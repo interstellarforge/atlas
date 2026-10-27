@@ -8,7 +8,9 @@ SQLite. One migration file per change in `migrations/`, forward-only, applied au
 Project > Epic > Story > Task (bug allowed per rules)
 ```
 
-All item types live in `work_items`. `type` plus configurable hierarchy rules decide valid parent/child combinations. Default rules: epic (root) > story > task; bug may sit under epic or story; max depth 5 (configurable constant).
+All item types live in `work_items`. `type` plus hierarchy rules decide valid parent/child combinations. Implemented rules (a constant in `internal/core`, not yet per-project): an item may have no parent; epic has no parent type; story under epic; task under story; bug under epic or story. Max depth 5.
+
+Subtree reads use a range scan on `path`, see ADR-0003. Until the board lands (KAN), `rank` is the item number zero-padded; fractional keys replace it then.
 
 ## Tables
 

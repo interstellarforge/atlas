@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,8 +38,22 @@ func TestBaseline(t *testing.T) {
 				return drain(d.R.Query(`SELECT key, title, priority, version FROM work_items
 					WHERE project_id = 1 AND status_id = 3 AND archived_at IS NULL ORDER BY rank LIMIT 50`))
 			}))
-			report(t, "subtree prefix query", measure(500, func(i int) error {
-				return drain(d.R.Query(`SELECT key FROM work_items WHERE path LIKE '/1/%'`))
+			// Subtree read of the first epic's tree, three strategies (ADR-0003).
+			var epicID int64
+			var epicPath string
+			if err := d.R.QueryRow(`SELECT id, path FROM work_items WHERE parent_id IS NULL ORDER BY id LIMIT 1`).Scan(&epicID, &epicPath); err != nil {
+				t.Fatal(err)
+			}
+			report(t, "subtree: path LIKE prefix", measure(500, func(i int) error {
+				return drain(d.R.Query(`SELECT key FROM work_items WHERE path LIKE ? || '%'`, epicPath))
+			}))
+			report(t, "subtree: path range scan", measure(500, func(i int) error {
+				return drain(d.R.Query(`SELECT key FROM work_items WHERE path >= ? AND path < ?`,
+					epicPath, strings.TrimSuffix(epicPath, "/")+"0"))
+			}))
+			report(t, "subtree: recursive CTE", measure(500, func(i int) error {
+				return drain(d.R.Query(`WITH RECURSIVE s(id) AS (SELECT ? UNION ALL SELECT w.id FROM work_items w JOIN s ON w.parent_id = s.id)
+					SELECT w.key FROM work_items w JOIN s ON s.id = w.id`, epicID))
 			}))
 			report(t, "item update (tx, FULL/NORMAL)", measure(500, func(i int) error {
 				_, err := d.W.Exec(`UPDATE work_items SET status_id = 4, version = version + 1, updated_at = ? WHERE id = ?`,
