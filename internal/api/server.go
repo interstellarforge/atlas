@@ -278,6 +278,11 @@ func (s *Server) spaHandler() http.Handler {
 	files := http.FileServerFS(s.spa)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/")
+		// Discovery probes (OAuth metadata) must not get HTML: clients parse it as JSON and abort.
+		if strings.HasPrefix(name, ".well-known/") {
+			http.NotFound(w, r)
+			return
+		}
 		if name == "" {
 			name = "index.html"
 		}
