@@ -285,6 +285,15 @@ textarea {
   border-radius: var(--radius);
 }
 
+/* A custom chevron gives the arrow room; the native one sits against the text and the edge. */
+select {
+  appearance: none;
+  padding-inline: 14px 38px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238aa0b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
 input[type="checkbox"] {
   min-height: 0;
   inline-size: 24px; /* WCAG 2.2 target size minimum */

@@ -12,6 +12,7 @@ export const paths = {
   plus: "M12 5v14M5 12h14",
   search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4",
   "chevron-down": "M6 9l6 6 6-6",
+  "chevron-up": "M6 15l6-6 6 6",
   "chevron-right": "M9 6l6 6-6 6",
   "chevrons-left": "M11 17l-5-5 5-5M18 17l-5-5 5-5",
   "chevrons-right": "M6 17l5-5-5-5M13 17l5-5-5-5",

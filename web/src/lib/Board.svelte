@@ -493,13 +493,20 @@
       >
         <header>
           <span class="dot" aria-hidden="true"></span>
-          <h2>
-            {column.statuses
-              ? t(
-                  `workflow.cat.${column.status.category}` as "workflow.cat.todo",
-                )
-              : column.status.name}
-          </h2>
+          <div class="title">
+            <h2>
+              {column.statuses
+                ? t(
+                    `workflow.cat.${column.status.category}` as "workflow.cat.todo",
+                  )
+                : column.status.name}
+            </h2>
+            {#if column.statuses && column.statuses.length > 1}
+              <p class="members">
+                {column.statuses.map((st) => st.name).join(" · ")}
+              </p>
+            {/if}
+          </div>
           {#if !cross && creatable(column) === undefined}
             <span
               class="lock"
@@ -677,6 +684,17 @@
     border-radius: 50%;
     background: var(--tone);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 24%, transparent);
+  }
+  .title {
+    min-width: 0;
+  }
+  .members {
+    margin: 0;
+    overflow: hidden;
+    color: var(--color-muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   h2 {
     margin: 0;

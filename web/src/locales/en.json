@@ -86,6 +86,7 @@
   "project": {
     "back": "All projects",
     "views": "Project views",
+    "work": "Work",
     "board": "Board",
     "list": "List",
     "backlog": "Backlog",

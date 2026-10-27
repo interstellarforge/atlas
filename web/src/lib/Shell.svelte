@@ -353,6 +353,14 @@
     text-decoration: none;
     min-width: 0;
   }
+  /* The collapsed rail is too narrow for logo and toggle side by side: stack them. */
+  .collapsed .brandrow {
+    flex-direction: column;
+    justify-content: center;
+  }
+  .collapsed .brandlink {
+    flex: none;
+  }
   .iconbtn {
     flex: none;
     display: inline-grid;

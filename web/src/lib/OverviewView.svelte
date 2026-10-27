@@ -48,10 +48,6 @@
 </section>
 
 <style>
-  .overview {
-    height: 100%;
-    overflow-y: auto;
-  }
   .card {
     display: flex;
     flex-direction: column;

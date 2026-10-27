@@ -62,24 +62,16 @@
     view: ProjectViewName;
     suffix: string;
     label:
-      | "project.overview"
+      | "project.work"
       | "project.timeline"
       | "project.time"
-      | "project.board"
-      | "project.list"
-      | "project.backlog"
-      | "project.tree"
       | "project.context"
       | "project.milestones"
       | "project.issues"
       | "project.readme"
       | "project.settings";
   }[] = [
-    { view: "overview", suffix: "/overview", label: "project.overview" },
-    { view: "board", suffix: "", label: "project.board" },
-    { view: "list", suffix: "/list", label: "project.list" },
-    { view: "backlog", suffix: "/backlog", label: "project.backlog" },
-    { view: "tree", suffix: "/tree", label: "project.tree" },
+    { view: "board", suffix: "", label: "project.work" },
     { view: "context", suffix: "/context", label: "project.context" },
     { view: "milestones", suffix: "/milestones", label: "project.milestones" },
     { view: "timeline", suffix: "/timeline", label: "project.timeline" },
@@ -88,8 +80,51 @@
     { view: "readme", suffix: "/readme", label: "project.readme" },
     { view: "settings", suffix: "/settings", label: "project.settings" },
   ];
+  // Board, list, backlog and hierarchy are views of the same items: one tab with sub-tabs. The old
+  // /overview address still works and opens the board with the overview unfolded.
+  const workViews: ProjectViewName[] = [
+    "overview",
+    "board",
+    "list",
+    "backlog",
+    "tree",
+  ];
+  const subtabs = [
+    { view: "board", suffix: "", label: "project.board", icon: "board" },
+    { view: "list", suffix: "/list", label: "project.list", icon: "list" },
+    {
+      view: "backlog",
+      suffix: "/backlog",
+      label: "project.backlog",
+      icon: "backlog",
+    },
+    { view: "tree", suffix: "/tree", label: "project.tree", icon: "tree" },
+  ] as const;
+  const inWork = $derived(workViews.includes(view));
+  function tabActive(tabView: ProjectViewName): boolean {
+    return tabView === "board" ? inWork : view === tabView;
+  }
+
+  const OVERVIEW_KEY = "atlas-overview-open";
+  let overviewOpen = $state(readOverviewOpen());
+  function readOverviewOpen(): boolean {
+    try {
+      return localStorage.getItem(OVERVIEW_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function toggleOverview(): void {
+    overviewOpen = !overviewOpen;
+    try {
+      localStorage.setItem(OVERVIEW_KEY, overviewOpen ? "1" : "0");
+    } catch {
+      /* storage unavailable: the choice just won't persist */
+    }
+  }
+
   const icons = {
-    overview: "overview",
+    overview: "board",
     timeline: "calendar",
     time: "clock",
     board: "board",
@@ -175,7 +210,7 @@
         {#each visibleTabs as tab (tab.view)}
           <a
             href="#/p/{project}{tab.suffix}"
-            aria-current={view === tab.view ? "page" : undefined}
+            aria-current={tabActive(tab.view) ? "page" : undefined}
             ><Icon name={icons[tab.view]} size={16} />{t(tab.label)}</a
           >
         {/each}
@@ -195,13 +230,44 @@
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
   {#if workflow}
     <div class="view">
-      {#if view === "overview"}
-        <OverviewView {project} />
-      {:else if view === "timeline"}
+      {#if inWork}
+        <div class="subtabs" role="tablist" aria-label={t("project.work")}>
+          {#each subtabs as sub (sub.view)}
+            <a
+              href="#/p/{project}{sub.suffix}"
+              aria-current={view === sub.view ||
+              (view === "overview" && sub.view === "board")
+                ? "page"
+                : undefined}><Icon name={sub.icon} size={16} />{t(sub.label)}</a
+            >
+          {/each}
+          {#if view === "board" || view === "overview"}
+            <button
+              type="button"
+              class="foldbtn"
+              aria-expanded={overviewOpen || view === "overview"}
+              aria-controls="project-overview"
+              onclick={toggleOverview}
+              ><Icon name="overview" size={16} />{t("project.overview")}<Icon
+                name={overviewOpen || view === "overview"
+                  ? "chevron-up"
+                  : "chevron-down"}
+                size={16}
+              /></button
+            >
+          {/if}
+        </div>
+        {#if (view === "board" || view === "overview") && (overviewOpen || view === "overview")}
+          <div id="project-overview" class="overviewfold">
+            <OverviewView {project} />
+          </div>
+        {/if}
+      {/if}
+      {#if view === "timeline"}
         <TimelineView {project} />
       {:else if view === "time"}
         <TimeView {project} enabled={workflow.time_tracking} />
-      {:else if view === "board"}
+      {:else if view === "board" || view === "overview"}
         <Board {project} {workflow} />
       {:else if view === "list"}
         <ListView {project} {workflow} />
@@ -299,6 +365,47 @@
     color: #fff;
   }
   .view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-height: 0;
+  }
+  .subtabs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .subtabs a,
+  .foldbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid transparent;
+    border-radius: var(--atlas-radius-sm);
+    background: transparent;
+    color: var(--color-muted);
+    font-weight: var(--atlas-fw-semibold);
+    text-decoration: none;
+  }
+  .subtabs a:hover,
+  .foldbtn:hover {
+    color: var(--color-text);
+    background: var(--color-soft);
+  }
+  .subtabs a[aria-current="page"] {
+    color: var(--color-accent-soft-text);
+    background: var(--color-accent-soft);
+  }
+  .foldbtn {
+    margin-left: auto;
+    border-color: var(--color-border);
+  }
+  /* The views fill what the sub-tab row and the overview leave over. */
+  .view > :global(:not(.subtabs, .overviewfold)) {
     flex: 1;
     min-height: 0;
   }

@@ -33,14 +33,9 @@
     width: 34px;
     height: 34px;
   }
-  /* The logo art has a baked background; fade its edges so it blends into the surface. */
   .logo {
     display: block;
     height: 44px;
     width: auto;
-    mask-image:
-      linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent),
-      linear-gradient(0deg, transparent, #000 12%, #000 88%, transparent);
-    mask-composite: intersect;
   }
 </style>
