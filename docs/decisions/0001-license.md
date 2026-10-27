@@ -1,6 +1,6 @@
 # ADR-0001: License
 
-- Status: proposed (owner decision required)
+- Status: accepted (AGPL-3.0)
 - Date: 2026-10-27
 
 ## Context

@@ -1,0 +1,27 @@
+{
+  "app": { "name": "Atlas", "loading": "Loading…" },
+  "nav": {
+    "boards": "Boards",
+    "tokens": "API tokens",
+    "toggleTheme": "Toggle theme",
+    "signOut": "Sign out",
+    "main": "Main navigation"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in to Atlas",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Sign in",
+      "invalid": "Invalid email or password.",
+      "rateLimited": "Too many attempts. Try again later.",
+      "failed": "Sign-in failed. Try again."
+    }
+  },
+  "home": {
+    "title": "Welcome, {name}",
+    "empty": "Projects and boards will appear here."
+  },
+  "tokens": { "title": "API tokens", "empty": "No API tokens yet." },
+  "notFound": { "title": "Page not found", "back": "Back to start" }
+}

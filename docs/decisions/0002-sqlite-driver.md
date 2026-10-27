@@ -1,6 +1,6 @@
 # ADR-0002: SQLite driver
 
-- Status: proposed (verify in Foundation benchmarks)
+- Status: accepted (modernc.org/sqlite; re-evaluate if benchmarks miss targets)
 - Date: 2026-10-27
 
 ## Context
