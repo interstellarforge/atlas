@@ -39,6 +39,13 @@
     card.due_at !== null && !done && card.due_at < Date.now(),
   );
   const archived = $derived(Boolean(card.archived_at));
+
+  // The whole card drags with mouse or pen. Touch keeps the handle so the column can still scroll.
+  function startFromCard(event: PointerEvent): void {
+    if (readonly || !onhandle || event.pointerType === "touch") return;
+    if ((event.target as Element).closest("button, a")) return;
+    onhandle(event);
+  }
 </script>
 
 <!-- A card is focusable on purpose: Alt + arrow keys move it (the keyboard alternative to dragging). It holds buttons, so it cannot itself be role=button. -->
@@ -54,6 +61,7 @@
   aria-label="{card.key}: {card.title}"
   aria-current={selected ? "true" : undefined}
   {onkeydown}
+  onpointerdown={startFromCard}
 >
   <header>
     <TypeIcon type={card.type} size={14} />
@@ -122,6 +130,7 @@
     border-radius: var(--atlas-radius-md);
     box-shadow: var(--atlas-shadow-sm);
     overflow: hidden;
+    cursor: grab;
     transition:
       border-color var(--atlas-duration) var(--atlas-ease),
       box-shadow var(--atlas-duration) var(--atlas-ease);

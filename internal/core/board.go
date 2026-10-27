@@ -16,7 +16,7 @@ import (
 const defaultColumnPage = 50
 
 // boardFields are the card fields of a board when the client does not ask for others.
-var boardFields = []string{"key", "type", "title", "priority", "assignee", "due_at", "parent", "root", "blocked", "version", "labels"}
+var boardFields = []string{"key", "type", "title", "priority", "assignee", "due_at", "parent", "root", "blocked", "version", "labels", "archived_at"}
 
 type BoardFilter struct {
 	Type, Priority, Label, Milestone, Q string

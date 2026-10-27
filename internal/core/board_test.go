@@ -220,14 +220,34 @@ func TestBoardCountsWIPPagingAndArchive(t *testing.T) {
 	}
 
 	it, _ := e.svc.GetItem(ctx, e.admin, all[0])
-	if _, err := e.svc.UpdateItem(ctx, e.admin, it.Key, it.Version, map[string]any{"archived": true}); err != nil {
+	arch, err := e.svc.UpdateItem(ctx, e.admin, it.Key, it.Version, map[string]any{"archived": true})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if arch.ArchivedAt == nil {
+		t.Fatal("archive did not set archived_at")
 	}
 	if c := column(t, e, "EXO", "Todo", core.BoardFilter{}); c.Count != 4 || slices.Contains(keys(c), all[0]) {
 		t.Fatalf("archived card still on the board: %v", keys(c))
 	}
-	if c := column(t, e, "EXO", "Todo", core.BoardFilter{IncludeArchived: true}); c.Count != 5 {
+	c := column(t, e, "EXO", "Todo", core.BoardFilter{IncludeArchived: true})
+	if c.Count != 5 {
 		t.Fatalf("include archived: %d", c.Count)
+	}
+	for _, card := range c.Items {
+		if card["key"] == it.Key && card["archived_at"] == nil {
+			t.Fatal("board card of an archived item lacks archived_at")
+		}
+	}
+	back, err := e.svc.UpdateItem(ctx, e.admin, it.Key, arch.Version, map[string]any{"archived": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.ArchivedAt != nil {
+		t.Fatal("restore did not clear archived_at")
+	}
+	if c := column(t, e, "EXO", "Todo", core.BoardFilter{}); c.Count != 5 {
+		t.Fatalf("restored card missing from the board: %d", c.Count)
 	}
 }
 
