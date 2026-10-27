@@ -221,7 +221,7 @@
   </div>
 
   <div class="maker" class:hidden={collapsed}>
-    <HeroArt />
+    <HeroArt kind="sidebar" />
     <p>
       <strong>{t("app.maker")}</strong>
       <span>{t("app.tagline")}</span>

@@ -158,7 +158,7 @@
 {:else if !user}
   <div class="auth">
     <aside class="story" aria-hidden="true">
-      <HeroArt />
+      <HeroArt kind="login" />
       <div class="shade"></div>
       <blockquote>
         <p>{t("auth.quote")}</p>

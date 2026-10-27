@@ -8,6 +8,13 @@ const ACCENTS = [
   "#5ad1e6",
 ];
 
+// Same order as ACCENTS; names match the cover artwork in assets/atlas/projects.
+const COVERS = ["blue", "orange", "purple", "green", "pink", "cyan"];
+
+export function projectCoverName(key: string): string {
+  return COVERS[hashString(key) % COVERS.length] ?? "blue";
+}
+
 export function hashString(text: string): number {
   let hash = 7;
   for (let i = 0; i < text.length; i++)

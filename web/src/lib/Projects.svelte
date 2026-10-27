@@ -12,7 +12,7 @@
   import { t } from "./i18n";
   import Icon from "./Icon.svelte";
   import PageHero from "./PageHero.svelte";
-  import { projectColor } from "./projectColor";
+  import { projectColor, projectCoverName } from "./projectColor";
 
   let { projects, onchange }: { projects: Project[]; onchange: () => void } =
     $props();
@@ -70,6 +70,15 @@
       });
     }
   }
+
+  const covers = Object.fromEntries(
+    Object.entries(
+      import.meta.glob<string>("../assets/atlas/projects/*.webp", {
+        eager: true,
+        import: "default",
+      }),
+    ).map(([path, url]) => [path.split("/").pop()?.replace(".webp", ""), url]),
+  ) as Record<string, string>;
 </script>
 
 <PageHero title={t("home.title")} description={t("home.intro")}>
@@ -144,7 +153,15 @@
       {@const c = counts[project.key]}
       <li style:--accent={projectColor(project.key)}>
         <a class="cardlink" href="#/p/{project.key}">
-          <div class="cover" aria-hidden="true"></div>
+          <img
+            class="cover"
+            src={covers[projectCoverName(project.key)]}
+            width="1280"
+            height="720"
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
           <div class="body">
             <div class="head">
               <span class="tile">{project.key.slice(0, 1)}</span>
@@ -268,16 +285,11 @@
     transform: translateY(-2px);
   }
   .cover {
+    display: block;
+    width: 100%;
     height: 84px;
-    background:
-      radial-gradient(
-        ellipse 70% 120% at 80% 130%,
-        color-mix(in srgb, var(--accent) 70%, transparent),
-        transparent 70%
-      ),
-      radial-gradient(circle at 18% 28%, #fff 0 1px, transparent 2px),
-      radial-gradient(circle at 42% 62%, #fff 0 1px, transparent 2px),
-      linear-gradient(130deg, var(--atlas-hero-1), var(--atlas-hero-2));
+    object-fit: cover;
+    object-position: center 75%;
   }
   .body {
     display: grid;

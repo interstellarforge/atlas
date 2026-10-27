@@ -83,7 +83,7 @@ Niet naar productie deployen; dit is een visuele referentie. De content in demo 
 
 ## UIX-herbouw (epic UIX, 2026-10-27)
 
-De app volgt nu de Atlas-referentieschermen in `design-images/`; `docs/design/qa/before` en `qa/after` bevatten echte schermafbeeldingen van de draaiende app (Chrome, 1440x900 en 375x812, dark en light). De uitgangspunten uit de eerste handoff hierboven zijn op deze punten bewust vervangen: er is **wel** een sidebar, inbox, hero met planeethorizon (SVG, geen bitmap), initialenavatars (geen foto's) en een brede detaillade.
+De app volgt nu de Atlas-referentieschermen in `design-images/`; `docs/design/qa/before` en `qa/after` bevatten echte schermafbeeldingen van de draaiende app (Chrome, 1440x900 en 375x812, dark en light). De uitgangspunten uit de eerste handoff hierboven zijn op deze punten bewust vervangen: er is **wel** een sidebar, inbox, hero met planeethorizon (WebP-artwork uit het Atlas-brandpack), initialenavatars (geen foto's) en een brede detaillade.
 
 | Onderdeel | Waarde |
 |---|---|
@@ -101,6 +101,6 @@ Nieuwe componenten in `web/src/lib/`: `Shell` (sidebar, topbar, mobiele drawer),
 
 Statuskleur: statussen hebben een categorie, geen kleur. `statusTone.ts`: eerste todo-status = backlog (grijs), overige todo = blauw, eerste active = oranje, volgende active = paars, completed = groen.
 
-**Bewust weggelaten** (geen backend, dus geen nepdata): dashboard met statistieken, globale zoekbalk, AI/MCP-widget, My Items, sprint/estimate/timeline/docs/roadmap, projectteams en deadlines op projectkaarten, transitions/automation-tabs in de workflow-instellingen, "show on board" per status, notificatietabs Mentions/Assignments/AI. De hero-artwork is SVG omdat het originele bronbestand niet beschikbaar is.
+**Bewust weggelaten** (geen backend, dus geen nepdata): dashboard met statistieken, globale zoekbalk, AI/MCP-widget, My Items, sprint/estimate/timeline/docs/roadmap, projectteams en deadlines op projectkaarten, transitions/automation-tabs in de workflow-instellingen, "show on board" per status, notificatietabs Mentions/Assignments/AI. Artwork: `web/src/assets/atlas/` (hero 1400x350, login 1600x2000, sidebar 800x600, 6 projectcovers 1280x720, app-icon als merkteken, `web/public/favicon.png`). Hero, login en sidebar gebruiken de donkere variant in beide thema's omdat de overlaytekst wit is; de lichte varianten uit het brandpack zijn niet gebruikt. Covers zijn lazy-loaded; de projectkleur bepaalt de cover (`projectCoverName`).
 
 Bekende beperkingen: geen screenreader-test; zie `docs/accessibility.md`.
