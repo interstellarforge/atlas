@@ -161,6 +161,7 @@
 
     <div
       class="table"
+      class:sorting={dragging !== undefined}
       role="table"
       aria-label={t("workflow.title")}
       bind:this={table}
@@ -360,9 +361,31 @@
     cursor: grab;
     touch-action: none;
   }
+  .row {
+    transition:
+      background var(--atlas-duration) var(--atlas-ease),
+      opacity var(--atlas-duration) var(--atlas-ease);
+  }
+  .table.sorting,
+  .table.sorting * {
+    cursor: grabbing;
+    user-select: none;
+  }
+  .table.sorting .row:not(.lifted, .headrow) {
+    opacity: 0.55;
+  }
+  /* Inset ring: the table clips overflow, so an outer shadow would not show. */
   .row.lifted {
-    background: var(--color-soft);
-    box-shadow: var(--atlas-shadow-sm);
+    background: color-mix(
+      in srgb,
+      var(--color-accent) 16%,
+      var(--color-surface)
+    );
+    box-shadow: inset 0 0 0 2px var(--color-accent);
+  }
+  .row.lifted .grip {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
   }
   .name {
     display: flex;
