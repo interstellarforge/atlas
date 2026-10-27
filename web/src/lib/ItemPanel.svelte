@@ -16,9 +16,14 @@
   } from "./api";
   import { onChange, onResync } from "./events.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
   import ItemAttachments from "./ItemAttachments.svelte";
   import ItemNotes from "./ItemNotes.svelte";
   import { people } from "./people.svelte";
+  import PriorityIndicator from "./PriorityIndicator.svelte";
+  import StatusChip from "./StatusChip.svelte";
+  import { statusTone } from "./statusTone";
+  import TypeIcon from "./TypeIcon.svelte";
 
   let {
     itemKey,
@@ -157,6 +162,10 @@
 
   const patch = $derived(item && form ? diff(item, form) : {});
   const dirty = $derived(Object.keys(patch).length > 0);
+  const currentTone = $derived.by(() => {
+    const current = workflow.statuses.find((s) => s.name === form?.status);
+    return current ? statusTone(current, workflow.statuses) : "todo";
+  });
 
   function apply(it: ItemDetail): void {
     item = it;
@@ -304,41 +313,51 @@
   {onclose}
   onclick={backdropClick}
 >
-  <header>
+  <header class="bar">
+    {#if item}<TypeIcon type={item.type} />{/if}
     <h2 id="item-panel-title">{itemKey}</h2>
     {#if item}
       <span class="chip type">{t(`types.${item.type}` as "types.epic")}</span>
       {#if item.archived_at !== null}<span class="chip"
           >{t("board.archived")}</span
         >{/if}
-      {#if item.blocked}<span class="chip warn">{t("board.blocked")}</span>{/if}
+      {#if item.blocked}<span class="chip warn"
+          ><Icon name="alert" size={12} />{t("board.blocked")}</span
+        >{/if}
     {/if}
     <span class="spacer"></span>
     {#if item}
       <button
         type="button"
+        class="ghost"
         aria-pressed={following}
         onclick={() => void toggleFollow()}
-        >{following ? t("item.unfollow") : t("item.follow")}</button
+        ><Icon name="eye" size={16} />{following
+          ? t("item.unfollow")
+          : t("item.follow")}</button
       >
     {/if}
     <button
       type="button"
+      class="iconbtn"
+      aria-label={t("item.close")}
       onclick={() => {
         dialog.close();
-      }}>{t("item.close")}</button
+      }}><Icon name="close" /></button
     >
   </header>
 
   {#if loadError}
-    <p class="banner error" role="alert">{t("item.loadFailed")}</p>
+    <p class="banner error pad" role="alert">{t("item.loadFailed")}</p>
   {:else if !item || !form}
-    <p>{t("item.loading")}</p>
+    <p class="pad muted">{t("item.loading")}</p>
   {:else}
-    <form onsubmit={save}>
+    <form id="item-form" onsubmit={save}></form>
+    <div class="scroll">
       {#if stale}
         <p class="banner conflict" role="alert">
-          {error || t("item.changed")}
+          <Icon name="alert" size={16} />
+          <span>{error || t("item.changed")}</span>
           <button type="button" onclick={() => void load()}
             >{t("item.reload")}</button
           >
@@ -349,172 +368,230 @@
         <p class="banner ok" role="status">{notice}</p>
       {/if}
 
-      <label>
-        {t("item.title")}
-        <input bind:value={form.title} required maxlength="500" />
-      </label>
-      <label>
-        {t("item.description")}
-        <textarea bind:value={form.description} rows="6"></textarea>
-      </label>
-      <div class="row">
-        <label>
-          {t("item.status")}
-          <select bind:value={form.status}>
-            {#each workflow.statuses as st (st.id)}
-              <option value={st.name}>{st.name}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          {t("item.priority")}
-          <select bind:value={form.priority}>
-            {#each PRIORITIES as p (p)}
-              <option value={p}>{t(`priority.${p}` as "priority.low")}</option>
-            {/each}
-          </select>
-        </label>
+      <div class="titlebar">
+        <input
+          class="title"
+          form="item-form"
+          aria-label={t("item.title")}
+          bind:value={form.title}
+          required
+          maxlength="500"
+        />
+        <div class="pills">
+          <StatusChip name={form.status} tone={currentTone} />
+          <PriorityIndicator priority={form.priority} />
+        </div>
       </div>
-      <div class="row">
-        <label>
-          {t("item.assignee")}
-          <select bind:value={form.assignee}>
-            <option value="">{t("item.unassigned")}</option>
-            {#each people.users as u (u.id)}
-              <option value={String(u.id)}>{u.name}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          {t("item.due")}
-          <input type="date" bind:value={form.due} />
-        </label>
-      </div>
-      {#if workflow.milestones.length > 0 || form.milestone !== ""}
-        <label>
-          {t("item.milestone")}
-          <select bind:value={form.milestone}>
-            <option value="">{t("item.noMilestone")}</option>
-            {#each workflow.milestones as m (m.id)}
-              <option value={m.name}>{m.name}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
-      <label>
-        {t("item.labels")}
-        <input bind:value={form.labels} placeholder={t("item.labelsHint")} />
-      </label>
-      <label>
-        {t("item.parent")}
-        <input bind:value={form.parent} placeholder={t("item.parentHint")} />
-      </label>
 
-      {#if workflow.custom_fields.length > 0}
-        <fieldset>
-          <legend>{t("item.customFields")}</legend>
-          {#each workflow.custom_fields as def (def.name)}
-            <label>
-              {def.name}
-              {#if def.type === "select"}
-                <select bind:value={form.custom[def.name]}>
-                  <option value="">{t("item.unset")}</option>
-                  {#each def.options ?? [] as o (o)}<option value={o}
-                      >{o}</option
-                    >{/each}
+      <div class="layout">
+        <div class="main">
+          <section class="panel" aria-labelledby="item-desc">
+            <h3 id="item-desc">{t("item.description")}</h3>
+            <textarea
+              form="item-form"
+              aria-labelledby="item-desc"
+              bind:value={form.description}
+              rows="7"
+              placeholder={t("item.descriptionHint")}></textarea>
+          </section>
+          <div class="panel"><ItemAttachments {itemKey} /></div>
+          <div class="panel"><ItemNotes {itemKey} /></div>
+        </div>
+
+        <aside class="side">
+          <section class="panel" aria-labelledby="item-props">
+            <h3 id="item-props">{t("item.properties")}</h3>
+            <div class="props">
+              <label class="prop">
+                <span class="plabel">{t("item.status")}</span>
+                <select form="item-form" bind:value={form.status}>
+                  {#each workflow.statuses as st (st.id)}
+                    <option value={st.name}>{st.name}</option>
+                  {/each}
                 </select>
-              {:else if def.type === "bool"}
-                <select bind:value={form.custom[def.name]}>
-                  <option value="">{t("item.unset")}</option>
-                  <option value="true">{t("item.yes")}</option>
-                  <option value="false">{t("item.no")}</option>
+              </label>
+              <label class="prop">
+                <span class="plabel">{t("item.priority")}</span>
+                <select form="item-form" bind:value={form.priority}>
+                  {#each PRIORITIES as p (p)}
+                    <option value={p}
+                      >{t(`priority.${p}` as "priority.low")}</option
+                    >
+                  {/each}
                 </select>
-              {:else}
-                <input
-                  type={def.type === "text" ? "text" : def.type}
-                  bind:value={form.custom[def.name]}
-                />
+              </label>
+              <label class="prop">
+                <span class="plabel">{t("item.assignee")}</span>
+                <select form="item-form" bind:value={form.assignee}>
+                  <option value="">{t("item.unassigned")}</option>
+                  {#each people.users as u (u.id)}
+                    <option value={String(u.id)}>{u.name}</option>
+                  {/each}
+                </select>
+              </label>
+              <label class="prop">
+                <span class="plabel">{t("item.due")}</span>
+                <input form="item-form" type="date" bind:value={form.due} />
+              </label>
+              {#if workflow.milestones.length > 0 || form.milestone !== ""}
+                <label class="prop">
+                  <span class="plabel">{t("item.milestone")}</span>
+                  <select form="item-form" bind:value={form.milestone}>
+                    <option value="">{t("item.noMilestone")}</option>
+                    {#each workflow.milestones as m (m.id)}
+                      <option value={m.name}>{m.name}</option>
+                    {/each}
+                  </select>
+                </label>
               {/if}
-            </label>
-          {/each}
-        </fieldset>
-      {/if}
+              <label class="prop">
+                <span class="plabel">{t("item.labels")}</span>
+                <input
+                  form="item-form"
+                  bind:value={form.labels}
+                  placeholder={t("item.labelsHint")}
+                />
+              </label>
+              <label class="prop">
+                <span class="plabel">{t("item.parent")}</span>
+                <input
+                  form="item-form"
+                  bind:value={form.parent}
+                  placeholder={t("item.parentHint")}
+                />
+              </label>
+              {#each workflow.custom_fields as def (def.name)}
+                <label class="prop">
+                  <span class="plabel">{def.name}</span>
+                  {#if def.type === "select"}
+                    <select form="item-form" bind:value={form.custom[def.name]}>
+                      <option value="">{t("item.unset")}</option>
+                      {#each def.options ?? [] as o (o)}<option value={o}
+                          >{o}</option
+                        >{/each}
+                    </select>
+                  {:else if def.type === "bool"}
+                    <select form="item-form" bind:value={form.custom[def.name]}>
+                      <option value="">{t("item.unset")}</option>
+                      <option value="true">{t("item.yes")}</option>
+                      <option value="false">{t("item.no")}</option>
+                    </select>
+                  {:else}
+                    <input
+                      form="item-form"
+                      type={def.type === "text" ? "text" : def.type}
+                      bind:value={form.custom[def.name]}
+                    />
+                  {/if}
+                </label>
+              {/each}
+            </div>
+            <p class="meta">
+              {t("item.updated", { date: dateTime.format(item.updated_at) })}
+            </p>
+          </section>
 
-      <div class="actions">
-        <button class="primary" type="submit" disabled={!dirty || saving}>
-          {saving ? t("item.saving") : t("item.save")}
-        </button>
-        <button
-          type="button"
-          disabled={!dirty}
-          onclick={() => {
-            if (item) apply(item);
-          }}>{t("item.discard")}</button
-        >
-        <span class="spacer"></span>
-        <button type="button" disabled={dirty} onclick={toggleArchive}>
-          {item.archived_at === null ? t("item.archive") : t("item.restore")}
-        </button>
-      </div>
-      <p class="meta">
-        {t("item.updated", { date: dateTime.format(item.updated_at) })}
-      </p>
-    </form>
-
-    <section aria-labelledby="item-links">
-      <h3 id="item-links">{t("item.links")}</h3>
-      {#if linkError}<p class="banner error" role="alert">{linkError}</p>{/if}
-      {#if links && links.outgoing.length + links.incoming.length > 0}
-        <ul>
-          {#each links.outgoing as l (`out-${l.type}-${l.key}`)}
-            <li>
-              {t(`item.out.${l.type}` as "item.out.blocks")}
-              <a href="#/p/{l.key.slice(0, l.key.lastIndexOf('-'))}/{l.key}"
-                >{l.key}</a
-              >
-              {l.title} <span class="chip">{l.status}</span>
+          <section class="panel" aria-labelledby="item-links">
+            <h3 id="item-links">{t("item.links")}</h3>
+            {#if linkError}<p class="banner error" role="alert">
+                {linkError}
+              </p>{/if}
+            {#if links && links.outgoing.length + links.incoming.length > 0}
+              <ul class="linklist">
+                {#each links.outgoing as l (`out-${l.type}-${l.key}`)}
+                  <li>
+                    <span class="dir"
+                      >{t(`item.out.${l.type}` as "item.out.blocks")}</span
+                    >
+                    <a
+                      class="lkey"
+                      href="#/p/{l.key.slice(
+                        0,
+                        l.key.lastIndexOf('-'),
+                      )}/{l.key}">{l.key}</a
+                    >
+                    <span class="ltitle">{l.title}</span>
+                    <span class="chip">{l.status}</span>
+                    <button
+                      type="button"
+                      class="iconbtn small"
+                      aria-label={t("item.removeLink", { key: l.key })}
+                      onclick={() =>
+                        void changeLink(() =>
+                          removeLink(itemKey, l.type, l.key),
+                        )}><Icon name="close" size={14} /></button
+                    >
+                  </li>
+                {/each}
+                {#each links.incoming as l (`in-${l.type}-${l.key}`)}
+                  <li>
+                    <span class="dir"
+                      >{t(`item.in.${l.type}` as "item.in.blocks")}</span
+                    >
+                    <a
+                      class="lkey"
+                      href="#/p/{l.key.slice(
+                        0,
+                        l.key.lastIndexOf('-'),
+                      )}/{l.key}">{l.key}</a
+                    >
+                    <span class="ltitle">{l.title}</span>
+                    <span class="chip">{l.status}</span>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="meta">{t("item.noLinks")}</p>
+            {/if}
+            <form class="linkform" onsubmit={submitLink}>
+              <select aria-label={t("item.linkType")} bind:value={linkType}>
+                {#each LINK_TYPES as lt (lt)}
+                  <option value={lt}>{t(`item.out.${lt}`)}</option>
+                {/each}
+              </select>
+              <input
+                aria-label={t("item.linkTarget")}
+                placeholder={t("item.linkTarget")}
+                bind:value={linkTarget}
+              />
               <button
-                type="button"
-                aria-label={t("item.removeLink", { key: l.key })}
-                onclick={() =>
-                  void changeLink(() => removeLink(itemKey, l.type, l.key))}
-                >×</button
+                class="primary"
+                type="submit"
+                disabled={!linkTarget.trim()}
+                ><Icon name="link" size={14} />{t("item.addLink")}</button
               >
-            </li>
-          {/each}
-          {#each links.incoming as l (`in-${l.type}-${l.key}`)}
-            <li>
-              {t(`item.in.${l.type}` as "item.in.blocks")}
-              <a href="#/p/{l.key.slice(0, l.key.lastIndexOf('-'))}/{l.key}"
-                >{l.key}</a
-              >
-              {l.title} <span class="chip">{l.status}</span>
-            </li>
-          {/each}
-        </ul>
-      {:else}
-        <p class="meta">{t("item.noLinks")}</p>
-      {/if}
-      <form class="row" onsubmit={submitLink}>
-        <label>
-          {t("item.linkType")}
-          <select bind:value={linkType}>
-            {#each LINK_TYPES as lt (lt)}
-              <option value={lt}>{t(`item.out.${lt}`)}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          {t("item.linkTarget")}
-          <input bind:value={linkTarget} />
-        </label>
-        <button class="primary" type="submit" disabled={!linkTarget.trim()}
-          >{t("item.addLink")}</button
-        >
-      </form>
-    </section>
-    <ItemAttachments {itemKey} />
-    <ItemNotes {itemKey} />
+            </form>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <footer class="foot">
+      <button type="button" disabled={dirty} onclick={toggleArchive}>
+        <Icon
+          name={item.archived_at === null ? "archive" : "restore"}
+          size={16}
+        />
+        {item.archived_at === null ? t("item.archive") : t("item.restore")}
+      </button>
+      <span class="spacer"></span>
+      {#if dirty}<span class="unsaved">{t("item.unsaved")}</span>{/if}
+      <button
+        type="button"
+        disabled={!dirty}
+        onclick={() => {
+          if (item) apply(item);
+        }}>{t("item.discard")}</button
+      >
+      <button
+        class="primary"
+        type="submit"
+        form="item-form"
+        disabled={!dirty || saving}
+      >
+        {saving ? t("item.saving") : t("item.save")}
+      </button>
+    </footer>
   {/if}
 </dialog>
 
@@ -525,89 +602,250 @@
     max-height: 100dvh;
     width: min(var(--atlas-panel-w), 100vw);
     max-width: 100vw;
-    padding: 20px 24px;
-    background: var(--color-surface);
+    padding: 0;
+    background: var(--color-bg);
     color: var(--color-text);
     border: none;
     border-left: 1px solid var(--color-border);
     box-shadow: var(--atlas-shadow-lg);
-    overflow-y: auto;
+  }
+  dialog[open] {
+    display: flex;
+    flex-direction: column;
   }
   dialog::backdrop {
     background: var(--atlas-overlay);
   }
-  header,
-  .actions,
-  .row {
+  .bar {
+    flex: none;
     display: flex;
-    flex-wrap: wrap;
-    align-items: end;
-    gap: var(--space-2);
-  }
-  header {
     align-items: center;
-    margin-bottom: var(--space-3);
+    gap: var(--space-2);
+    padding: 12px 20px;
+    background: var(--atlas-sidebar);
+    border-bottom: 1px solid var(--color-border);
   }
   h2 {
     margin: 0;
     font: 700 var(--atlas-fs-md) var(--font-mono);
   }
-  h3 {
-    margin: 0;
-    padding-bottom: 7px;
-    border-bottom: 1px solid var(--color-border);
-    font-size: 13px;
-    font-weight: var(--atlas-fw-bold);
-  }
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    font-size: var(--atlas-fs-sm);
-    font-weight: var(--atlas-fw-semibold);
-    color: var(--color-muted);
-    flex: 1;
-    min-width: 8rem;
-  }
-  fieldset {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-  }
-  textarea {
-    resize: vertical;
-  }
-  section {
-    margin-top: var(--space-5);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-  ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
   .spacer {
     flex: 1;
   }
-  .meta {
-    margin: 0;
-    font-size: 0.75rem;
+  .ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    background: transparent;
+  }
+  .iconbtn {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    min-height: 36px;
+    height: 36px;
+    padding: 0;
+    background: transparent;
+    border-color: transparent;
     color: var(--color-muted);
   }
-  .error,
-  .ok {
+  .iconbtn.small {
+    width: 28px;
+    min-height: 28px;
+    height: 28px;
+  }
+  .scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: 20px;
+  }
+  .pad {
+    margin: 20px;
+  }
+  .titlebar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .title {
+    flex: 1 1 18rem;
+    min-width: 0;
+    padding: 6px 10px;
+    font-size: 24px;
+    font-weight: var(--atlas-fw-bold);
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+    background: transparent;
+    border: 1px solid transparent;
+  }
+  .title:hover {
+    border-color: var(--color-border);
+  }
+  .title:focus {
+    background: var(--color-surface);
+    border-color: var(--color-accent);
+  }
+  .pills {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: var(--space-4);
+    align-items: start;
+  }
+  .main,
+  .side {
+    display: grid;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+  .panel {
+    display: grid;
+    gap: var(--space-3);
+    padding: 16px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-md);
+  }
+  h3 {
     margin: 0;
+    font-size: var(--atlas-fs-md);
+    font-weight: var(--atlas-fw-bold);
+  }
+  textarea {
+    resize: vertical;
+    line-height: 1.55;
+    background: var(--color-bg);
+  }
+  .props {
+    display: grid;
+    gap: 6px;
+  }
+  .prop {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .plabel {
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-semibold);
+    color: var(--color-muted);
+  }
+  .prop select,
+  .prop input {
+    min-height: 34px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .meta {
+    margin: 0;
+    font-size: var(--atlas-fs-sm);
+    color: var(--color-muted);
+  }
+  .linklist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 6px;
+  }
+  .linklist li {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    font-size: var(--atlas-fs-sm);
+    background: var(--color-soft);
+    border-radius: var(--atlas-radius-sm);
+  }
+  .dir {
+    color: var(--color-muted);
+    font-size: var(--atlas-fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .lkey {
+    font: 700 11px var(--font-mono);
+  }
+  .ltitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .linkform {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+  .linkform button {
+    grid-column: 1 / -1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+  .banner.conflict {
+    border-left: 4px solid currentcolor;
+  }
+  .banner.conflict span {
+    flex: 1;
+  }
+  .foot {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 12px 20px;
+    background: var(--atlas-sidebar);
+    border-top: 1px solid var(--color-border);
+  }
+  .foot button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .unsaved {
+    font-size: var(--atlas-fs-sm);
+    color: var(--color-warning);
+    font-weight: var(--atlas-fw-semibold);
+  }
+  @media (max-width: 720px) {
+    .title {
+      font-size: 20px;
+    }
+    dialog {
+      width: 100vw;
+      border-left: none;
+    }
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .side {
+      order: -1;
+    }
+    .scroll {
+      padding: 14px 12px;
+    }
+    .bar,
+    .foot {
+      padding: 10px 12px;
+    }
   }
 </style>

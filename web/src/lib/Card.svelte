@@ -1,9 +1,13 @@
 <script lang="ts">
   import { type Card } from "./api";
+  import Avatar from "./Avatar.svelte";
   import { t } from "./i18n";
-  import { initials, personName } from "./people.svelte";
+  import Icon from "./Icon.svelte";
+  import { personName } from "./people.svelte";
   import { cardFields } from "./prefs.svelte";
+  import PriorityIndicator from "./PriorityIndicator.svelte";
   import { itemHref } from "./routes";
+  import TypeIcon from "./TypeIcon.svelte";
 
   let {
     card,
@@ -11,6 +15,7 @@
     showProject = false,
     readonly = false,
     dragging = false,
+    selected = false,
     onhandle,
     onkeydown,
     onarchive,
@@ -20,6 +25,7 @@
     showProject?: boolean;
     readonly?: boolean;
     dragging?: boolean;
+    selected?: boolean;
     onhandle?: (event: PointerEvent) => void;
     onkeydown?: (event: KeyboardEvent) => void;
     onarchive?: () => void;
@@ -42,17 +48,21 @@
   class:blocked={card.blocked}
   class:archived
   class:dragging
+  class:selected
   data-key={card.key}
   tabindex="0"
   aria-label="{card.key}: {card.title}"
+  aria-current={selected ? "true" : undefined}
   {onkeydown}
 >
   <header>
+    <TypeIcon type={card.type} size={14} />
     <span class="key">{card.key}</span>
-    <span class="chip type">{t(`types.${card.type}` as "types.epic")}</span>
     {#if showProject && card.project}<span class="chip">{card.project}</span
       >{/if}
-    {#if card.blocked}<span class="chip warn">{t("board.blocked")}</span>{/if}
+    {#if card.blocked}<span class="chip warn"
+        ><Icon name="alert" size={12} />{t("board.blocked")}</span
+      >{/if}
     {#if archived}<span class="chip">{t("board.archived")}</span>{/if}
     <span class="spacer"></span>
     {#if !readonly && onhandle}
@@ -61,60 +71,77 @@
         class="handle"
         tabindex="-1"
         aria-label={t("board.moveHandle", { key: card.key })}
-        onpointerdown={onhandle}>⠿</button
+        onpointerdown={onhandle}><Icon name="drag" size={16} /></button
       >
     {/if}
   </header>
   <p class="title"><a href={itemHref(card.key)}>{card.title}</a></p>
-  <footer>
-    {#if cardFields.priority && card.priority !== "normal"}
-      <span class="chip" class:warn={card.priority === "urgent"}
-        >{t(`priority.${card.priority}` as "priority.low")}</span
-      >
-    {/if}
-    {#if cardFields.due && card.due_at !== null}
-      <span class="chip" class:warn={overdue}
-        >{dateFormat.format(card.due_at)}</span
-      >
-    {/if}
+  <div class="labels">
     {#if cardFields.labels}
       {#each card.labels.slice(0, 2) as label (label)}
         <span class="chip tag">{label}</span>
       {/each}
     {/if}
+  </div>
+  <footer>
+    {#if cardFields.priority}
+      <PriorityIndicator priority={card.priority} />
+    {/if}
+    {#if cardFields.due && card.due_at !== null}
+      <span class="due" class:late={overdue}>
+        <Icon name="calendar" size={13} />{dateFormat.format(card.due_at)}
+      </span>
+    {/if}
     <span class="spacer"></span>
     {#if !readonly && onarchive}
-      <button type="button" class="link" onclick={onarchive}>
-        {archived ? t("board.restore") : t("board.archive")}
-      </button>
+      <button
+        type="button"
+        class="action"
+        title={archived ? t("board.restore") : t("board.archive")}
+        aria-label={archived ? t("board.restore") : t("board.archive")}
+        onclick={onarchive}
+        ><Icon name={archived ? "restore" : "archive"} size={15} /></button
+      >
     {/if}
     {#if cardFields.assignee && card.assignee !== null}
-      <span class="avatar" title={personName(card.assignee)}
-        >{initials(personName(card.assignee))}</span
-      >
+      <Avatar name={personName(card.assignee)} size={24} />
     {/if}
   </footer>
 </article>
 
 <style>
   .card {
+    position: relative;
     height: var(--atlas-card-h);
-    padding: 8px 9px;
+    padding: 8px 12px;
     display: grid;
-    grid-template-rows: auto 1fr auto;
-    gap: 2px;
-    background: var(--color-surface);
+    grid-template-rows: auto auto 1fr auto;
+    gap: 3px;
+    background: var(--atlas-surface-raised);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--atlas-radius-md);
     box-shadow: var(--atlas-shadow-sm);
     overflow: hidden;
+    transition:
+      border-color var(--atlas-duration) var(--atlas-ease),
+      box-shadow var(--atlas-duration) var(--atlas-ease);
   }
   .card:hover {
     border-color: var(--color-border-strong);
+    box-shadow: var(--atlas-shadow-md);
   }
-  .card.blocked {
-    border-left: 4px solid var(--color-danger);
-    padding-left: 6px;
+  .card.selected {
+    border-color: var(--color-accent);
+    box-shadow:
+      0 0 0 1px var(--color-accent),
+      var(--atlas-shadow-md);
+  }
+  .card.blocked::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--color-danger);
   }
   .card.archived {
     opacity: 0.62;
@@ -128,38 +155,50 @@
   footer {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     min-width: 0;
   }
   header {
-    min-height: 17px;
+    min-height: 22px;
   }
   footer {
-    min-height: 21px;
+    min-height: 28px;
   }
   .key {
     font: 700 11px var(--font-mono);
     color: var(--color-muted);
     white-space: nowrap;
   }
+  .chip.warn {
+    gap: 3px;
+  }
   .title {
     margin: 0;
-    font-size: 13px;
+    font-size: 13.5px;
     font-weight: var(--atlas-fw-semibold);
-    line-height: 1.23;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .title a {
-    color: inherit;
+    color: var(--color-text);
     text-decoration: none;
   }
   .title a:hover {
     text-decoration: underline;
   }
-  footer .chip {
-    max-width: 73px;
+  .labels {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .labels .chip {
+    max-width: 48%;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -167,37 +206,37 @@
     flex: 1;
     min-width: 0;
   }
-  .handle {
-    min-height: 0;
-    padding: 2px 6px;
+  .due {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--atlas-fs-sm);
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  .due.late {
+    color: var(--color-danger);
+    font-weight: var(--atlas-fw-semibold);
+  }
+  .handle,
+  .action {
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    min-height: 28px;
+    height: 28px;
+    padding: 0;
     border: none;
     background: none;
     color: var(--color-muted);
+  }
+  .handle {
     cursor: grab;
     touch-action: none;
-    line-height: 1.2;
   }
-  .link {
-    min-height: 0;
-    padding: 2px 0;
-    border: none;
-    background: none;
-    color: var(--color-muted);
-    font-size: 0.7rem;
-    font-weight: var(--atlas-fw-regular);
-    text-decoration: underline;
-  }
-  .avatar {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    font-size: var(--atlas-fs-xs);
-    font-weight: var(--atlas-fw-bold);
-    border: 1px solid var(--color-border);
-    border-radius: 50%;
-    background: var(--color-accent-soft);
-    color: var(--color-accent-soft-text);
+  .handle:hover:not(:disabled),
+  .action:hover:not(:disabled) {
+    color: var(--color-text);
+    background: var(--color-soft);
   }
 </style>

@@ -6,8 +6,10 @@
     type Milestone,
     updateMilestone,
   } from "./api";
+  import EmptyState from "./EmptyState.svelte";
   import { onChange, onResync } from "./events.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
 
   let { project }: { project: string } = $props();
 
@@ -76,13 +78,14 @@
 
 <section class="milestones">
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
-  {#if ready && items.length === 0}<p class="muted">
-      {t("milestones.empty")}
-    </p>{/if}
+  {#if ready && items.length === 0}
+    <EmptyState icon="milestone" title={t("milestones.empty")} />
+  {/if}
   <ul>
     {#each items as m (m.id)}
       <li>
         <div class="head">
+          <Icon name="milestone" size={18} />
           <h2>{m.name}</h2>
           {#if m.released_at !== null}<span class="chip type"
               >{t("milestones.released")}</span
@@ -157,7 +160,7 @@
     padding: 20px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--atlas-radius-lg);
   }
   .head,
   .actions,

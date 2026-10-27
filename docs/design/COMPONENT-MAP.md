@@ -87,6 +87,8 @@ Deze selectorwaarden zijn het designcontract. **De bestaande app gebruikt mogeli
 
 Het paneel demonstreert conflictstatus, maar verandert geen API-versies, lock errors of wijzigingen elders. Details van echte state komen uit je bestaande app.
 
+> **Achterhaald door epic UIX:** de sidebar, notificaties (inbox) en de detailpaneel-indeling bestaan nu; zie `README.md` (*UIX-herbouw*). Fotoavatars, comments-in-detail-als-activiteitenfeed en globale zoek blijven buiten scope.
+
 ## Nieuwe componenten — expliciete beslissing
 
 | Nieuw element uit screenshots van eerder | In deze restyling? | Reden |

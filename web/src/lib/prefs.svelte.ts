@@ -34,3 +34,25 @@ export function saveCardFields(): void {
     /* storage unavailable: the choice just won't persist */
   }
 }
+
+const LAYOUT_KEY = "atlas-sidebar-collapsed";
+
+function loadCollapsed(): boolean {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+// Sidebar width choice; a per-viewer convenience like the card fields.
+export const layout = $state({ collapsed: loadCollapsed() });
+
+export function toggleSidebar(): void {
+  layout.collapsed = !layout.collapsed;
+  try {
+    localStorage.setItem(LAYOUT_KEY, layout.collapsed ? "1" : "0");
+  } catch {
+    /* storage unavailable: the choice just won't persist */
+  }
+}

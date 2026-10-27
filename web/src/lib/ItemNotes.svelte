@@ -100,6 +100,11 @@
     {t("item.checklist")}{#if checklist.length > 0}
       <span class="count">{done}/{checklist.length}</span>{/if}
   </h3>
+  {#if checklist.length > 0}
+    <div class="bar" aria-hidden="true">
+      <span style:width="{Math.round((done / checklist.length) * 100)}%"></span>
+    </div>
+  {/if}
   {#if checklistError}<p class="banner error" role="alert">
       {checklistError}
     </p>{/if}
@@ -178,16 +183,16 @@
 
 <style>
   section {
-    margin-top: var(--space-5);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
   }
   h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     margin: 0;
-    padding-bottom: 7px;
-    border-bottom: 1px solid var(--color-border);
-    font-size: 13px;
+    font-size: var(--atlas-fs-md);
     font-weight: var(--atlas-fw-bold);
   }
   ul {
@@ -239,6 +244,18 @@
   .done {
     text-decoration: line-through;
     color: var(--color-muted);
+  }
+  .bar {
+    height: 6px;
+    border-radius: var(--atlas-radius-pill);
+    background: var(--color-soft);
+    overflow: hidden;
+  }
+  .bar span {
+    display: block;
+    height: 100%;
+    background: var(--atlas-success);
+    border-radius: inherit;
   }
   .count,
   .meta {

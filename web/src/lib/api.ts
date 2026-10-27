@@ -78,6 +78,8 @@ export interface Project {
   key: string;
   name: string;
   role?: string;
+  archived_at?: number | null;
+  created_at?: number;
 }
 
 export interface StatusInfo {
@@ -523,4 +525,51 @@ export async function getFollowing(key: string): Promise<boolean> {
 
 export function setFollowing(key: string, on: boolean): Promise<undefined> {
   return request<undefined>(on ? "PUT" : "DELETE", `/items/${key}/follow`);
+}
+
+export interface Token {
+  id: number;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  projects: string[] | null;
+  expires_at: number | null;
+  revoked_at: number | null;
+  created_at: number;
+}
+
+export async function listTokens(): Promise<Token[]> {
+  return (await request<{ items: Token[] }>("GET", "/tokens")).items;
+}
+
+// The secret is returned once, here, and never again.
+export function createToken(body: {
+  name: string;
+  scopes: string[];
+  projects: string[];
+}): Promise<{ token: Token; secret: string }> {
+  return request("POST", "/tokens", body);
+}
+
+export function revokeToken(id: number): Promise<undefined> {
+  return request("DELETE", `/tokens/${String(id)}`);
+}
+
+export function addStatus(
+  project: string,
+  body: { name: string; category: string; wip_limit: number | null },
+): Promise<StatusInfo> {
+  return request("POST", `/projects/${project}/statuses`, body);
+}
+
+export function updateStatus(
+  project: string,
+  id: number,
+  patch: Record<string, unknown>,
+): Promise<StatusInfo> {
+  return request("PATCH", `/projects/${project}/statuses/${String(id)}`, patch);
+}
+
+export function deleteStatus(project: string, id: number): Promise<undefined> {
+  return request("DELETE", `/projects/${project}/statuses/${String(id)}`);
 }

@@ -7,10 +7,16 @@
     getItems,
     type Workflow,
   } from "./api";
+  import EmptyState from "./EmptyState.svelte";
   import { onChange, onResync } from "./events.svelte";
   import FiltersBar from "./Filters.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
+  import PriorityIndicator from "./PriorityIndicator.svelte";
   import { itemHref } from "./routes";
+  import StatusChip from "./StatusChip.svelte";
+  import { statusTone } from "./statusTone";
+  import TypeIcon from "./TypeIcon.svelte";
 
   const FIELDS = "key,type,title,priority,parent,root,blocked,version,status";
 
@@ -29,6 +35,13 @@
   let filters = $state<Filters>({ ...emptyFilters });
   let ready = $state(false);
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let closed = $state<Record<string, boolean>>({});
+
+  function tone(name: string | undefined): ReturnType<typeof statusTone> {
+    const all = workflow?.statuses ?? [];
+    const st = all.find((x) => x.name === name);
+    return st ? statusTone(st, all) : "todo";
+  }
 
   // Work that has not started yet (status category "todo"), in board order, grouped under its epic.
   const groups = $derived(group(items, epics));
@@ -110,31 +123,44 @@
     milestones={workflow?.milestones ?? []}
     types={workflow?.types ?? []}
   />
-  {#if ready && groups.length === 0}<p class="muted">
-      {t("backlog.empty")}
-    </p>{/if}
+  {#if ready && groups.length === 0}
+    <EmptyState icon="backlog" title={t("backlog.empty")} />
+  {/if}
   {#each groups as g (g.epic)}
     <section class="group">
-      <h2>{g.epic ? `${g.epic} · ${g.title}` : g.title}</h2>
-      <ul>
-        {#each g.items as item (item.key)}
-          <li>
-            <a class="mono" href={itemHref(item.key)}>{item.key}</a>
-            <span class="chip type"
-              >{t(`types.${item.type}` as "types.epic")}</span
-            >
-            <span class="title">{item.title}</span>
-            {#if item.blocked}<span class="chip warn">{t("board.blocked")}</span
-              >{/if}
-            <span class="chip">{item.status ?? ""}</span>
-            {#if item.priority !== "normal"}<span
-                class="chip"
-                class:warn={item.priority === "urgent"}
-                >{t(`priority.${item.priority}` as "priority.low")}</span
-              >{/if}
-          </li>
-        {/each}
-      </ul>
+      <h2>
+        <button
+          type="button"
+          class="gtoggle"
+          aria-expanded={!closed[g.epic]}
+          onclick={() => (closed[g.epic] = !closed[g.epic])}
+        >
+          <Icon
+            name={closed[g.epic] ? "chevron-right" : "chevron-down"}
+            size={16}
+          />
+          {#if g.epic}<TypeIcon type="epic" />
+            <span class="mono">{g.epic}</span>{/if}
+          <span class="gtitle">{g.title}</span>
+          <span class="chip">{g.items.length}</span>
+        </button>
+      </h2>
+      {#if !closed[g.epic]}
+        <ul>
+          {#each g.items as item (item.key)}
+            <li>
+              <TypeIcon type={item.type} size={14} />
+              <a class="mono" href={itemHref(item.key)}>{item.key}</a>
+              <span class="title">{item.title}</span>
+              {#if item.blocked}<span class="chip warn"
+                  ><Icon name="alert" size={12} />{t("board.blocked")}</span
+                >{/if}
+              <StatusChip name={item.status ?? ""} tone={tone(item.status)} />
+              <PriorityIndicator priority={item.priority} />
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </section>
   {/each}
   {#if nextCursor}
@@ -154,20 +180,36 @@
   }
   .group {
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--atlas-radius-md);
     background: var(--color-surface);
     overflow: hidden;
   }
   .group h2 {
     margin: 0;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    padding: 0 14px;
     font-size: var(--atlas-fs-md);
-    font-weight: var(--atlas-fw-bold);
     background: var(--color-soft);
     border-bottom: 1px solid var(--color-border);
+  }
+  .gtoggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 48px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 0;
+    background: none;
+    text-align: left;
+    font: inherit;
+    font-weight: var(--atlas-fw-bold);
+  }
+  .gtitle {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   ul {
     list-style: none;
@@ -180,16 +222,21 @@
     align-items: center;
     gap: 10px;
     min-width: 0;
-    padding: 0 14px;
-    font-size: 12px;
-    border-bottom: 1px solid var(--color-border);
+    padding: 0 14px 0 32px;
+    font-size: var(--atlas-fs-md);
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--color-border) 60%, transparent);
+  }
+  li:hover {
+    background: var(--color-soft);
   }
   li:last-child {
     border-bottom: 0;
   }
   .mono {
     font: 700 11px var(--font-mono);
-    color: var(--color-muted);
+    color: var(--color-accent);
+    text-decoration: none;
   }
   .title {
     flex: 1;
@@ -197,5 +244,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: var(--atlas-fw-semibold);
+  }
+  @media (max-width: 720px) {
+    li {
+      padding-left: 14px;
+      gap: 8px;
+    }
   }
 </style>

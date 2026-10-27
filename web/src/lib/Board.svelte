@@ -19,13 +19,19 @@
     type Workflow,
   } from "./api";
   import CardView from "./Card.svelte";
+  import CardFieldsMenu from "./CardFieldsMenu.svelte";
+  import EmptyState from "./EmptyState.svelte";
   import { onChange, onResync } from "./events.svelte";
   import FiltersBar from "./Filters.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
+  import { route } from "./router.svelte";
+  import { matchProject } from "./routes";
+  import { statusTone, toneVar } from "./statusTone";
   import VirtualList from "./VirtualList.svelte";
 
-  // One card slot: the 88px card plus an 8px gap. Fixed heights keep windowing and drag maths simple.
-  const SLOT = 96;
+  // One card slot: the 140px card (--atlas-card-h) plus an 8px gap. Fixed heights keep windowing and drag maths simple.
+  const SLOT = 148;
   const CARD_FIELDS =
     "key,type,title,priority,assignee,due_at,parent,root,blocked,version,labels,status,archived_at";
 
@@ -54,8 +60,10 @@
   let loadingMore = $state<Record<number, boolean>>({});
   const scrollers = $state<Record<number, HTMLElement | undefined>>({});
 
-  // On a phone the filters and the add form start collapsed, so the columns get the screen.
-  let toolsOpen = $state(!matchMedia("(max-width: 640px)").matches);
+  // On a phone the filters start collapsed, so the columns get the screen.
+  let filtersOpen = $state(!matchMedia("(max-width: 900px)").matches);
+  let dialog = $state<HTMLDialogElement | undefined>();
+  const openKey = $derived(matchProject(route.path)?.item);
 
   let newType = $state("task");
   let newTitle = $state("");
@@ -63,6 +71,11 @@
 
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let dirty = false;
+
+  function openNew(status?: string): void {
+    if (status) newStatus = status;
+    dialog?.showModal();
+  }
 
   // New cards start in the first status unless another is chosen.
   $effect(() => {
@@ -410,6 +423,7 @@
       });
       newTitle = "";
       error = "";
+      dialog?.close();
       await load();
     } catch (e) {
       fail(e);
@@ -418,44 +432,77 @@
 </script>
 
 <section class="board">
-  <details class="tools" bind:open={toolsOpen}>
-    <summary>{t("board.tools")}</summary>
-    <div class="toolbar">
+  <div class="toolbar">
+    <button
+      type="button"
+      class="filtertoggle"
+      aria-expanded={filtersOpen}
+      onclick={() => (filtersOpen = !filtersOpen)}
+      ><Icon name="search" size={16} />{t("filters.label")}</button
+    >
+    <div class="filters" class:open={filtersOpen}>
       <FiltersBar
         bind:filters
         labels={workflow?.labels ?? []}
         milestones={workflow?.milestones ?? []}
         types={workflow?.types ?? ["epic", "story", "task", "bug"]}
-        showCardFields
       />
+    </div>
+    <div class="actions">
+      <CardFieldsMenu />
       {#if !cross && workflow}
-        <form class="add" onsubmit={add}>
-          <select aria-label={t("board.type")} bind:value={newType}>
+        <button
+          type="button"
+          class="primary new"
+          onclick={() => {
+            openNew();
+          }}><Icon name="plus" size={16} />{t("board.newItem")}</button
+        >
+      {/if}
+    </div>
+  </div>
+
+  {#if !cross && workflow}
+    <dialog class="newdialog" bind:this={dialog} aria-labelledby="new-title">
+      <form class="add" onsubmit={add}>
+        <h2 id="new-title">{t("board.newItem")}</h2>
+        <label>
+          {t("board.type")}
+          <select bind:value={newType}>
             {#each workflow.types as typ (typ)}
               <option value={typ}>{t(`types.${typ}` as "types.epic")}</option>
             {/each}
           </select>
+        </label>
+        <label>
+          {t("board.itemTitle")}
           <input
-            class="title-input"
-            placeholder={t("board.itemTitle")}
-            aria-label={t("board.itemTitle")}
             bind:value={newTitle}
             required
             maxlength="500"
+            autocomplete="off"
           />
-          <select aria-label={t("board.status")} bind:value={newStatus}>
+        </label>
+        <label>
+          {t("board.status")}
+          <select bind:value={newStatus}>
             {#each workflow.statuses as st (st.id)}
               <option value={st.name}>{st.name}</option>
             {/each}
           </select>
+        </label>
+        <div class="buttons">
+          <button type="button" onclick={() => dialog?.close()}
+            >{t("board.cancel")}</button
+          >
           <button class="primary" type="submit">{t("board.submit")}</button>
-        </form>
-      {/if}
-    </div>
-  </details>
+        </div>
+      </form>
+    </dialog>
+  {/if}
 
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <p class="muted note">{cross ? t("cross.readOnly") : t("board.help")}</p>
+  {#if error}<p class="banner error" role="alert">{error}</p>{/if}
+  <p class="sr-only">{cross ? t("cross.readOnly") : t("board.help")}</p>
   <p class="sr-only" aria-live="polite">{announcement}</p>
 
   <div class="columns">
@@ -464,8 +511,16 @@
         class="column"
         data-col={column.status.id}
         class:over={drag?.over?.status === column.status.id}
+        class:overwip={column.over_wip}
+        style:--tone={toneVar(
+          statusTone(
+            column.status,
+            columns.map((c) => c.status),
+          ),
+        )}
       >
         <header>
+          <span class="dot" aria-hidden="true"></span>
           <h2>{column.status.name}</h2>
           <span class="count" class:warn={column.over_wip}>
             {column.status.wip_limit
@@ -473,16 +528,26 @@
                   count: column.count,
                   limit: column.status.wip_limit,
                 })
-              : t("board.count", { count: column.count })}
+              : column.count}
           </span>
           {#if column.over_wip}<span class="warn-text"
               >{t("board.overWip")}</span
             >{/if}
         </header>
         <div class="body">
-          {#if ready && column.items.length === 0}<p class="muted empty">
-              {t("board.empty")}
-            </p>{/if}
+          {#if ready && column.items.length === 0}
+            <EmptyState compact icon="board" title={t("board.empty")}>
+              {#if !cross}
+                <button
+                  type="button"
+                  class="addhere"
+                  onclick={() => {
+                    openNew(column.status.name);
+                  }}><Icon name="plus" size={14} />{t("board.addItem")}</button
+                >
+              {/if}
+            </EmptyState>
+          {/if}
           <VirtualList
             items={column.items}
             itemHeight={SLOT}
@@ -498,6 +563,7 @@
                   showProject={cross}
                   readonly={cross}
                   dragging={drag?.card.key === card.key}
+                  selected={openKey === card.key}
                   onhandle={(e: PointerEvent) => {
                     startDrag(e, card);
                   }}
@@ -513,6 +579,15 @@
             <div class="drop" style:top="{drag.over.top}px"></div>
           {/if}
         </div>
+        {#if !cross && column.items.length > 0}
+          <button
+            type="button"
+            class="addbtn"
+            onclick={() => {
+              openNew(column.status.name);
+            }}><Icon name="plus" size={14} />{t("board.addItem")}</button
+          >
+        {/if}
       </div>
     {/each}
   </div>
@@ -533,54 +608,102 @@
     height: 100%;
     min-height: 0;
   }
-  .tools summary {
-    cursor: pointer;
-    margin-bottom: var(--space-2);
-    font-size: var(--atlas-fs-sm);
-    font-weight: var(--atlas-fw-bold);
-    color: var(--color-muted);
-  }
   .toolbar {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-3);
+    align-items: center;
     justify-content: space-between;
+    gap: var(--space-3);
   }
-  .add {
+  .filters {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .filtertoggle {
+    display: none;
+    align-items: center;
+    gap: 8px;
+  }
+  .actions {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     gap: var(--space-2);
   }
-  .title-input {
-    min-width: 12rem;
+  .new {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 38px;
   }
-  .note {
+  .newdialog {
+    width: min(420px, calc(100vw - 32px));
+    padding: 0;
+    color: var(--color-text);
+    background: var(--atlas-surface-raised);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-lg);
+    box-shadow: var(--atlas-shadow-lg);
+  }
+  .newdialog::backdrop {
+    background: var(--atlas-overlay);
+  }
+  .add {
+    display: grid;
+    gap: var(--space-3);
+    padding: 20px;
+  }
+  .add h2 {
     margin: 0;
-    font-size: 0.8rem;
+    font-size: var(--atlas-fs-lg);
+  }
+  .add label {
+    display: grid;
+    gap: 6px;
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-semibold);
+    color: var(--color-muted);
+  }
+  .buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
   }
   .columns {
     flex: 1;
     min-height: 0;
     display: flex;
-    gap: var(--space-3);
+    gap: var(--space-4);
     overflow-x: auto;
     scroll-snap-type: x proximity;
     padding-bottom: var(--space-2);
   }
   .column {
+    position: relative;
     flex: 0 0 var(--atlas-column-w);
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: var(--space-2);
-    background: var(--color-soft);
+    padding: 0 var(--space-2) var(--space-2);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--tone) 7%, var(--color-surface)),
+      var(--color-surface) 90px
+    );
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-top: 3px solid var(--tone);
+    border-radius: var(--atlas-radius-md);
     scroll-snap-align: start;
+    transition:
+      border-color var(--atlas-duration) var(--atlas-ease),
+      background var(--atlas-duration) var(--atlas-ease);
   }
   .column.over {
     border-color: var(--color-accent);
+    border-top-color: var(--color-accent);
     background: var(--color-accent-soft);
+  }
+  .column.overwip {
+    border-color: var(--color-danger);
   }
   .column header {
     flex: none;
@@ -590,9 +713,17 @@
     gap: var(--space-2);
     padding: 0 6px;
   }
+  .dot {
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--tone);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 24%, transparent);
+  }
   h2 {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--atlas-fs-md);
     font-weight: var(--atlas-fw-bold);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -600,10 +731,10 @@
   }
   .count {
     margin-left: auto;
-    padding: 3px 7px;
-    font: 600 11px var(--font-mono);
-    color: var(--color-muted);
-    background: var(--color-surface);
+    padding: 2px 9px;
+    font: 700 11px var(--font-mono);
+    color: var(--color-text);
+    background: var(--color-soft);
     border: 1px solid var(--color-border);
     border-radius: var(--atlas-radius-pill);
     white-space: nowrap;
@@ -611,7 +742,6 @@
   .count.warn {
     color: var(--color-danger);
     border-color: var(--color-danger);
-    font-weight: 700;
   }
   .warn-text {
     color: var(--color-danger);
@@ -619,19 +749,32 @@
     font-weight: 700;
     white-space: nowrap;
   }
-  .column:has(.count.warn) {
-    border-color: var(--color-danger);
-  }
   .body {
     position: relative;
     flex: 1;
     min-height: 0;
-    padding: 0 var(--space-2);
   }
-  .empty {
-    margin: 0;
-    padding: var(--space-3);
-    font-size: 0.85rem;
+  .addhere,
+  .addbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    color: var(--color-muted);
+    font-size: var(--atlas-fs-sm);
+    background: transparent;
+    border: 1px dashed var(--color-border-strong);
+  }
+  .addbtn {
+    flex: none;
+    margin-top: var(--space-2);
+    width: 100%;
+  }
+  .addhere:hover:not(:disabled),
+  .addbtn:hover:not(:disabled) {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
   }
   .slot {
     height: 100%;
@@ -639,30 +782,49 @@
   }
   .drop {
     position: absolute;
-    left: var(--space-2);
-    right: var(--space-2);
+    left: 0;
+    right: 0;
     height: 4px;
     margin-top: -2px;
     border-radius: var(--atlas-radius-pill);
     background: var(--color-accent);
+    box-shadow: 0 0 8px var(--color-accent);
     pointer-events: none;
   }
   .ghost {
     position: fixed;
-    z-index: 20;
+    z-index: 60;
     max-width: 18rem;
     padding: var(--space-2) var(--space-3);
     font-size: 0.85rem;
-    background: var(--color-surface);
+    background: var(--atlas-surface-raised);
     border: 1px solid var(--color-accent);
     border-radius: var(--radius);
     pointer-events: none;
     box-shadow: var(--atlas-shadow-lg);
     transform: rotate(-1.5deg);
   }
-  @media (max-width: 640px) {
+  @media (max-width: 900px) {
+    .toolbar {
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .filtertoggle {
+      display: inline-flex;
+    }
+    .filters {
+      display: none;
+      order: 3;
+      flex-basis: 100%;
+    }
+    .filters.open {
+      display: block;
+    }
+    .actions {
+      margin-left: auto;
+    }
     .column {
-      flex-basis: var(--atlas-column-w);
+      flex-basis: min(86vw, var(--atlas-column-w));
     }
   }
 </style>

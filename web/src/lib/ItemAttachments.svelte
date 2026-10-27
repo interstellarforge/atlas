@@ -122,16 +122,16 @@
 
 <style>
   section {
-    margin-top: var(--space-5);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
   }
   h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     margin: 0;
-    padding-bottom: 7px;
-    border-bottom: 1px solid var(--color-border);
-    font-size: 13px;
+    font-size: var(--atlas-fs-md);
     font-weight: var(--atlas-fw-bold);
   }
   ul {

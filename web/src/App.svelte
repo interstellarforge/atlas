@@ -5,19 +5,23 @@
     login,
     logout,
     me,
+    type Project,
     type User,
   } from "./lib/api";
   import Board from "./lib/Board.svelte";
   import Brand from "./lib/Brand.svelte";
-  import { connect, disconnect, onChange, realtime } from "./lib/events.svelte";
+  import { connect, disconnect, onChange } from "./lib/events.svelte";
+  import HeroArt from "./lib/HeroArt.svelte";
   import { t } from "./lib/i18n";
   import Inbox from "./lib/Inbox.svelte";
+  import PageHero from "./lib/PageHero.svelte";
   import { loadPeople } from "./lib/people.svelte";
   import Projects from "./lib/Projects.svelte";
   import ProjectView from "./lib/ProjectView.svelte";
   import { navigate, route } from "./lib/router.svelte";
   import { matchProject } from "./lib/routes";
-  import { theme, toggleTheme } from "./lib/theme.svelte";
+  import Shell from "./lib/Shell.svelte";
+  import Tokens from "./lib/Tokens.svelte";
   import { inbox, refreshInbox } from "./lib/unread.svelte";
 
   let user = $state<User | undefined>();
@@ -25,13 +29,18 @@
   let email = $state("");
   let password = $state("");
   let error = $state("");
-  let allProjects = $state<string[]>([]);
+  let projects = $state<Project[]>([]);
 
   const current = $derived(matchProject(route.path));
+  const allKeys = $derived(projects.map((p) => p.key));
 
   void me()
     .then((u) => (user = u))
     .finally(() => (ready = true));
+
+  async function loadProjects(): Promise<void> {
+    projects = (await listProjects()).filter((p) => !p.archived_at);
+  }
 
   // Live updates and the people list only make sense while signed in.
   $effect(() => {
@@ -39,17 +48,19 @@
       connect();
       void loadPeople();
       void refreshInbox();
-      void listProjects().then((ps) => (allProjects = ps.map((p) => p.key)));
+      void loadProjects();
     } else {
       disconnect();
     }
   });
 
   // A notification signal is addressed to this user only; it updates the unread count.
+  // Project changes refresh the sidebar list.
   $effect(() =>
     user
       ? onChange((event) => {
           if (event.type === "notification.created") void refreshInbox();
+          if (event.type === "project.created") void loadProjects();
         })
       : undefined,
   );
@@ -77,138 +88,157 @@
 </script>
 
 {#if !ready}
-  <p class="center muted">{t("app.loading")}</p>
+  <p class="loading muted">{t("app.loading")}</p>
 {:else if !user}
-  <main class="center">
-    <form class="card" onsubmit={submit}>
-      <div class="auth-header">
-        <Brand />
-        <h1>{t("auth.login.title")}</h1>
-      </div>
-      <label>
-        {t("auth.login.email")}
-        <input
-          type="email"
-          bind:value={email}
-          autocomplete="username"
-          required
-        />
-      </label>
-      <label>
-        {t("auth.login.password")}
-        <input
-          type="password"
-          bind:value={password}
-          autocomplete="current-password"
-          required
-        />
-      </label>
-      {#if error}<p class="banner error" role="alert">{error}</p>{/if}
-      <button class="primary" type="submit">{t("auth.login.submit")}</button>
-    </form>
-  </main>
-{:else}
-  <div class="shell">
-    <header>
-      <Brand />
-      <nav aria-label={t("nav.main")}>
-        <a
-          href="#/"
-          aria-current={route.path === "/" || current ? "page" : undefined}
-          >{t("nav.projects")}</a
-        >
-        <a
-          href="#/board"
-          aria-current={route.path === "/board" ? "page" : undefined}
-          >{t("nav.overview")}</a
-        >
-        <a
-          href="#/inbox"
-          aria-current={route.path === "/inbox" ? "page" : undefined}
-          >{t("nav.inbox")}{#if inbox.unread > 0}
-            <span
-              class="badge"
-              aria-label={t("nav.unread", { count: inbox.unread })}
-              >{inbox.unread}</span
-            >{/if}</a
-        >
-        <a
-          href="#/tokens"
-          aria-current={route.path === "/tokens" ? "page" : undefined}
-          >{t("nav.tokens")}</a
-        >
-      </nav>
-      <span class="spacer"></span>
-      <span class="live" class:off={!realtime.connected} role="status">
-        <span aria-hidden="true" class="dot">●</span>
-        <span class="sr-only"
-          >{realtime.connected ? t("nav.live") : t("nav.offline")}</span
-        >
-      </span>
-      <button onclick={toggleTheme} aria-pressed={theme.current === "dark"}
-        >{t("nav.toggleTheme")}</button
-      >
-      <button onclick={signOut}>{t("nav.signOut")}</button>
-    </header>
-    <main>
-      <div class="page">
-        {#if route.path === "/"}
-          <Projects />
-        {:else if current}
-          <ProjectView
-            project={current.key}
-            view={current.view}
-            item={current.item}
+  <div class="auth">
+    <aside class="story" aria-hidden="true">
+      <HeroArt />
+      <div class="shade"></div>
+      <blockquote>
+        <p>{t("auth.quote")}</p>
+        <cite>{t("app.maker")}</cite>
+      </blockquote>
+    </aside>
+    <main class="formside">
+      <form onsubmit={submit}>
+        <div class="header">
+          <Brand />
+          <h1>{t("auth.login.title")}</h1>
+          <p class="muted">{t("auth.login.subtitle")}</p>
+        </div>
+        <label>
+          {t("auth.login.email")}
+          <input
+            type="email"
+            bind:value={email}
+            autocomplete="username"
+            required
           />
-        {:else if route.path === "/inbox"}
-          <Inbox />
-        {:else if route.path === "/board"}
-          <h1>{t("cross.title")}</h1>
-          <Board projects={allProjects} />
-        {:else if route.path === "/tokens"}
-          <h1>{t("tokens.title")}</h1>
-          <p class="muted">{t("tokens.empty")}</p>
-        {:else}
-          <h1>{t("notFound.title")}</h1>
-          <p><a href="#/">{t("notFound.back")}</a></p>
-        {/if}
-      </div>
+        </label>
+        <label>
+          {t("auth.login.password")}
+          <input
+            type="password"
+            bind:value={password}
+            autocomplete="current-password"
+            required
+          />
+        </label>
+        {#if error}<p class="banner error" role="alert">{error}</p>{/if}
+        <button class="primary" type="submit">{t("auth.login.submit")}</button>
+      </form>
     </main>
   </div>
+{:else}
+  <Shell
+    {user}
+    {projects}
+    unread={inbox.unread}
+    onsignout={() => void signOut()}
+  >
+    {#if route.path === "/"}
+      <Projects {projects} onchange={() => void loadProjects()} />
+    {:else if current}
+      <ProjectView
+        project={current.key}
+        name={projects.find((p) => p.key === current.key)?.name ?? ""}
+        canAdmin={user.is_admin ||
+          projects.find((p) => p.key === current.key)?.role === "admin"}
+        view={current.view}
+        item={current.item}
+      />
+    {:else if route.path === "/inbox"}
+      <Inbox />
+    {:else if route.path === "/board"}
+      <PageHero title={t("cross.title")} description={t("cross.intro")} />
+      <div class="fill"><Board projects={allKeys} /></div>
+    {:else if route.path === "/tokens"}
+      <Tokens />
+    {:else}
+      <h1>{t("notFound.title")}</h1>
+      <p><a href="#/">{t("notFound.back")}</a></p>
+    {/if}
+  </Shell>
 {/if}
 
 <style>
-  .center {
+  .fill {
+    flex: 1;
+    min-height: 420px;
+  }
+  .loading {
     min-height: 100dvh;
     display: grid;
     place-items: center;
-    padding: var(--space-6);
-    background:
-      radial-gradient(
-        ellipse at 80% 75%,
-        color-mix(in srgb, var(--color-accent) 17%, transparent),
-        transparent 42%
-      ),
-      var(--color-bg);
   }
-  .card {
-    width: min(430px, 100%);
+  .auth {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    min-height: 100dvh;
+    background: var(--color-bg);
+  }
+  .story {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: flex;
+    align-items: flex-end;
+    padding: 48px;
+    background: linear-gradient(
+      160deg,
+      var(--atlas-hero-1),
+      var(--atlas-hero-2)
+    );
+    color: var(--atlas-hero-text);
+  }
+  .shade {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(0deg, rgb(4 10 22 / 70%), transparent 60%);
+  }
+  blockquote {
+    position: relative;
+    margin: 0;
+    max-width: 24ch;
+    font-size: 28px;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+  }
+  blockquote p {
+    margin: 0 0 var(--space-3);
+  }
+  cite {
+    font-size: var(--atlas-fs-xs);
+    font-style: normal;
+    font-weight: var(--atlas-fw-semibold);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #c5d6ea;
+  }
+  .formside {
+    display: grid;
+    place-items: center;
+    padding: var(--space-6);
+  }
+  form {
+    width: min(400px, 100%);
     display: grid;
     gap: var(--space-4);
-    padding: 32px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--atlas-radius-xl);
-    box-shadow: var(--atlas-shadow-lg);
   }
-  .auth-header {
+  .header {
     display: grid;
-    justify-items: center;
     gap: var(--space-3);
-    text-align: center;
+    margin-bottom: var(--space-2);
   }
-  .card button {
+  .header p {
+    margin: 0;
+  }
+  form button {
     width: 100%;
+    min-height: 44px;
+  }
+  form input {
+    min-height: 44px;
   }
   label {
     display: grid;
@@ -217,110 +247,12 @@
     font-weight: var(--atlas-fw-semibold);
     color: var(--color-muted);
   }
-  .shell {
-    display: flex;
-    flex-direction: column;
-    height: 100dvh;
-  }
-  header {
-    flex: none;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-3) 22px;
-    min-height: var(--atlas-topbar-h);
-    padding: var(--space-2) 28px;
-    background: var(--color-surface);
-    border-bottom: 1px solid var(--color-border);
-  }
-  nav {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-1);
-  }
-  nav a {
-    padding: 10px 13px;
-    border-radius: var(--radius);
-    color: var(--color-muted);
-    font-weight: var(--atlas-fw-semibold);
-    text-decoration: none;
-    white-space: nowrap;
-  }
-  nav a:hover {
-    background: var(--color-soft);
-  }
-  nav a[aria-current="page"] {
-    color: var(--color-accent);
-    background: var(--color-accent-soft);
-  }
-  .badge {
-    display: inline-block;
-    min-width: 18px;
-    margin-left: 6px;
-    padding: 0 5px;
-    border-radius: var(--atlas-radius-pill);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    font-size: var(--atlas-fs-xs);
-    font-weight: var(--atlas-fw-bold);
-    text-align: center;
-  }
-  .spacer {
-    flex: 1;
-  }
-  .live {
-    display: inline-flex;
-    align-items: center;
-    color: var(--color-success);
-    font-size: var(--atlas-fs-sm);
-    font-weight: var(--atlas-fw-semibold);
-  }
-  .live.off {
-    color: var(--color-warning);
-  }
-  .dot {
-    font-size: 0.7rem;
-  }
-  main {
-    flex: 1;
-    min-height: 0;
-    padding: 28px;
-  }
-  .page {
-    height: 100%;
-    min-height: 0;
-    max-width: 1600px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    overflow-y: auto;
-  }
-  .page > :global(.board),
-  .page > :global(.project) {
-    flex: 1;
-    min-height: 0;
-  }
-  @media (max-width: 900px) {
-    header {
-      padding: var(--space-2) 16px;
+  @media (max-width: 860px) {
+    .auth {
+      grid-template-columns: minmax(0, 1fr);
     }
-    main {
-      padding: 20px 16px;
-    }
-  }
-  @media (max-width: 600px) {
-    header {
-      padding: var(--space-2) 12px;
-      gap: var(--space-2);
-    }
-    nav a {
-      padding: 9px;
-      font-size: var(--atlas-fs-sm);
-    }
-    main {
-      padding: 14px 12px 24px;
+    .story {
+      display: none;
     }
   }
 </style>

@@ -1,8 +1,12 @@
 <script lang="ts">
   import { type Card, getItems } from "./api";
+  import EmptyState from "./EmptyState.svelte";
   import { onChange, onResync } from "./events.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
+  import PriorityIndicator from "./PriorityIndicator.svelte";
   import { itemHref } from "./routes";
+  import TypeIcon from "./TypeIcon.svelte";
   import VirtualList from "./VirtualList.svelte";
 
   const ROW = 44; // --atlas-hierarchy-row-h
@@ -81,14 +85,15 @@
 </script>
 
 <section class="tree">
-  {#if ready && rows.length === 0}<p class="muted">{t("tree.empty")}</p>{/if}
+  {#if ready && rows.length === 0}<EmptyState
+      icon="tree"
+      title={t("tree.empty")}
+    />{/if}
   <div class="rows">
     <VirtualList items={rows} itemHeight={ROW} itemKey={(r: Row) => r.item.key}>
       {#snippet row(r: Row)}
-        <div
-          class="line"
-          style:padding-left="calc({r.depth} * 1.5rem + var(--space-2))"
-        >
+        <div class="line" role="row" aria-level={r.depth + 1}>
+          <span class="guides" style:width="calc({r.depth} * 1.5rem)"></span>
           {#if r.children > 0}
             <button
               type="button"
@@ -99,19 +104,23 @@
                 { key: r.item.key },
               )}
               onclick={() => (collapsed[r.item.key] = !collapsed[r.item.key])}
-              >{collapsed[r.item.key] ? "▸" : "▾"}</button
+              ><Icon
+                name={collapsed[r.item.key] ? "chevron-right" : "chevron-down"}
+                size={16}
+              /></button
             >
           {:else}
             <span class="toggle"></span>
           {/if}
+          <TypeIcon type={r.item.type} />
           <a class="mono" href={itemHref(r.item.key)}>{r.item.key}</a>
-          <span class="chip type"
-            >{t(`types.${r.item.type}` as "types.epic")}</span
-          >
           <span class="title">{r.item.title}</span>
-          {#if r.item.blocked}<span class="chip warn">{t("board.blocked")}</span
+          {#if r.children > 0}<span class="chip">{r.children}</span>{/if}
+          {#if r.item.blocked}<span class="chip warn"
+              ><Icon name="alert" size={12} />{t("board.blocked")}</span
             >{/if}
           <span class="chip">{r.item.status ?? ""}</span>
+          <PriorityIndicator priority={r.item.priority} label={false} />
         </div>
       {/snippet}
     </VirtualList>
@@ -129,7 +138,7 @@
     flex: 1;
     min-height: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--atlas-radius-md);
     background: var(--color-surface);
     overflow: hidden;
   }
@@ -138,17 +147,32 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding-right: 14px;
-    border-bottom: 1px solid var(--color-border);
-    font-size: 12px;
+    padding: 0 14px 0 var(--space-3);
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--color-border) 60%, transparent);
+    font-size: var(--atlas-fs-md);
     min-width: 0;
   }
   .line:hover {
     background: var(--color-soft);
   }
+  .guides {
+    flex: none;
+    align-self: stretch;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0 11px,
+      var(--color-border) 11px 12px,
+      transparent 12px 24px
+    );
+  }
   .toggle {
-    width: 20px;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: 26px;
     min-height: 26px;
+    height: 26px;
     padding: 0;
     border: none;
     background: none;
@@ -156,7 +180,8 @@
   }
   .mono {
     font: 700 11px var(--font-mono);
-    color: var(--color-muted);
+    color: var(--color-accent);
+    text-decoration: none;
   }
   .title {
     flex: 1;
@@ -164,5 +189,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: var(--atlas-fw-semibold);
   }
 </style>

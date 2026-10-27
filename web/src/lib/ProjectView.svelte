@@ -4,19 +4,30 @@
   import Board from "./Board.svelte";
   import { onChange } from "./events.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
   import ItemPanel from "./ItemPanel.svelte";
   import ListView from "./ListView.svelte";
   import MilestonesView from "./MilestonesView.svelte";
+  import PageHero from "./PageHero.svelte";
+  import { projectColor } from "./projectColor";
   import { navigate } from "./router.svelte";
   import { type ProjectViewName, viewPath } from "./routes";
   import TreeView from "./TreeView.svelte";
+  import WorkflowSettings from "./WorkflowSettings.svelte";
 
   let {
     project,
+    name = "",
+    canAdmin = false,
     view,
     item,
-  }: { project: string; view: ProjectViewName; item: string | undefined } =
-    $props();
+  }: {
+    project: string;
+    name?: string;
+    canAdmin?: boolean;
+    view: ProjectViewName;
+    item: string | undefined;
+  } = $props();
 
   let workflow = $state<Workflow | undefined>();
   let error = $state("");
@@ -29,14 +40,27 @@
       | "project.list"
       | "project.backlog"
       | "project.tree"
-      | "project.milestones";
+      | "project.milestones"
+      | "project.settings";
   }[] = [
     { view: "board", suffix: "", label: "project.board" },
     { view: "list", suffix: "/list", label: "project.list" },
     { view: "backlog", suffix: "/backlog", label: "project.backlog" },
     { view: "tree", suffix: "/tree", label: "project.tree" },
     { view: "milestones", suffix: "/milestones", label: "project.milestones" },
+    { view: "settings", suffix: "/settings", label: "project.settings" },
   ];
+  const icons = {
+    board: "board",
+    list: "list",
+    backlog: "backlog",
+    tree: "tree",
+    milestones: "milestone",
+    settings: "settings",
+  } as const;
+  const visibleTabs = $derived(
+    tabs.filter((tab) => tab.view !== "settings" || canAdmin),
+  );
 
   async function loadWorkflow(key: string): Promise<void> {
     try {
@@ -63,18 +87,27 @@
 </script>
 
 <section class="project">
-  <div class="hero">
-    <a class="back" href="#/">{t("project.back")}</a>
-    <h1>{project}</h1>
-  </div>
-  <nav class="tabs" aria-label={t("project.views")}>
-    {#each tabs as tab (tab.view)}
-      <a
-        href="#/p/{project}{tab.suffix}"
-        aria-current={view === tab.view ? "page" : undefined}>{t(tab.label)}</a
+  <PageHero
+    title={name || project}
+    description={name ? "" : t("project.heroText")}
+  >
+    {#snippet icon()}
+      <span class="tile" style:--accent={projectColor(project)}
+        >{project.slice(0, 1)}</span
       >
-    {/each}
-  </nav>
+    {/snippet}
+    {#snippet tabs()}
+      <nav class="tabs" aria-label={t("project.views")}>
+        {#each visibleTabs as tab (tab.view)}
+          <a
+            href="#/p/{project}{tab.suffix}"
+            aria-current={view === tab.view ? "page" : undefined}
+            ><Icon name={icons[tab.view]} size={16} />{t(tab.label)}</a
+          >
+        {/each}
+      </nav>
+    {/snippet}
+  </PageHero>
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
   {#if workflow}
     <div class="view">
@@ -86,6 +119,8 @@
         <BacklogView {project} {workflow} />
       {:else if view === "milestones"}
         <MilestonesView {project} />
+      {:else if view === "settings"}
+        <WorkflowSettings {project} {workflow} />
       {:else}
         <TreeView {project} />
       {/if}
@@ -106,101 +141,63 @@
 
 <style>
   .project {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: var(--space-4);
     min-height: 0;
   }
-  .hero {
-    position: relative;
-    overflow: hidden;
-    isolation: isolate;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    gap: var(--space-2);
-    min-height: 120px;
-    padding: 20px 28px;
-    border-radius: var(--radius-lg);
-    background: linear-gradient(
-      115deg,
-      var(--atlas-hero-1),
-      var(--atlas-hero-2)
-    );
-    color: var(--atlas-hero-text);
-  }
-  .hero::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    opacity: 0.75;
-    pointer-events: none;
-    background:
-      radial-gradient(circle at 71% 29%, #fff 0 1px, transparent 2px),
-      radial-gradient(circle at 89% 15%, #fff 0 1px, transparent 2px),
-      radial-gradient(circle at 49% 62%, #8bc7ff 0 1px, transparent 2px),
-      radial-gradient(
-        ellipse 31% 90% at 104% 115%,
-        rgb(79 165 255 / 65%) 1%,
-        transparent 70%
-      );
-  }
-  .hero h1 {
-    color: #fff;
-    font-size: var(--atlas-fs-2xl);
-    letter-spacing: -0.035em;
-  }
-  .back {
-    display: inline-block;
-    padding: 4px 0; /* WCAG 2.2 target size minimum */
-    color: #d7e8ff;
-    font-size: var(--atlas-fs-sm);
+  .tile {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border-radius: var(--atlas-radius-md);
+    background: var(--accent);
+    color: #06101f;
+    font-size: 26px;
+    font-weight: var(--atlas-fw-bold);
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 25%);
   }
   .tabs {
     display: flex;
     gap: var(--space-1);
-    width: max-content;
     max-width: 100%;
-    padding: var(--space-1);
-    overflow: auto;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    overflow-x: auto;
+    scrollbar-width: none;
   }
   .tabs a {
     display: inline-flex;
     align-items: center;
-    min-height: 36px;
-    padding: 7px 15px;
-    border-radius: var(--radius);
-    color: var(--color-muted);
+    gap: 8px;
+    min-height: 40px;
+    padding: 8px 14px;
+    border-bottom: 2px solid transparent;
+    color: #c5d6ea;
     font-weight: var(--atlas-fw-semibold);
     text-decoration: none;
     white-space: nowrap;
   }
   .tabs a:hover {
-    background: var(--color-soft);
+    color: #fff;
   }
   .tabs a[aria-current="page"] {
-    color: var(--color-accent-soft-text);
-    background: var(--color-accent-soft);
+    color: #fff;
+    border-bottom-color: #4aa0ff;
+    background: linear-gradient(0deg, rgb(74 160 255 / 22%), transparent);
   }
   .view {
     flex: 1;
     min-height: 0;
   }
-  @media (max-width: 600px) {
-    .hero {
-      min-height: 100px;
-      padding: 16px;
-      border-radius: var(--radius-md);
-    }
-    .tabs {
-      width: 100%;
+  @media (max-width: 720px) {
+    .tile {
+      width: 44px;
+      height: 44px;
+      font-size: 20px;
     }
     .tabs a {
-      padding: 7px 10px;
+      padding: 8px 10px;
       font-size: var(--atlas-fs-sm);
     }
   }

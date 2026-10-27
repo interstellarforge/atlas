@@ -1,11 +1,14 @@
 {
   "app": {
     "name": "Atlas",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "by": "by Interstellarforge",
+    "tagline": "Build further.",
+    "maker": "Interstellarforge"
   },
   "nav": {
     "projects": "Projects",
-    "overview": "All projects",
+    "overview": "Overview",
     "tokens": "API tokens",
     "toggleTheme": "Toggle theme",
     "signOut": "Sign out",
@@ -13,7 +16,16 @@
     "live": "Live updates connected",
     "offline": "Reconnecting…",
     "inbox": "Inbox",
-    "unread": "{count} unread"
+    "unread": "{count} unread",
+    "workspace": "Projects",
+    "viewAll": "View all projects",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
+    "openMenu": "Open navigation",
+    "closeMenu": "Close navigation",
+    "account": "Account",
+    "sidebar": "Sidebar",
+    "breadcrumb": "Breadcrumb"
   },
   "auth": {
     "login": {
@@ -23,13 +35,23 @@
       "submit": "Sign in",
       "invalid": "Invalid email or password.",
       "rateLimited": "Too many attempts. Try again later.",
-      "failed": "Sign-in failed. Try again."
-    }
+      "failed": "Sign-in failed. Try again.",
+      "subtitle": "Welcome back. Sign in to continue."
+    },
+    "quote": "A clearer tomorrow builds from a more focused today."
   },
   "home": {
     "title": "Projects",
-    "empty": "No projects yet. Create one below.",
-    "role": "Your role: {role}"
+    "empty": "Create a project to start planning work.",
+    "role": "Your role: {role}",
+    "intro": "All your projects in one place. Open a board, a list or a hierarchy.",
+    "emptyTitle": "Your projects will appear here",
+    "filter": "Filter projects…",
+    "count": "{count} projects",
+    "progress": "Share of items done",
+    "items": "items",
+    "inProgress": "in progress",
+    "done": "done"
   },
   "projects": {
     "create": "New project",
@@ -46,7 +68,9 @@
     "backlog": "Backlog",
     "tree": "Hierarchy",
     "loadFailed": "Could not load this project.",
-    "milestones": "Milestones"
+    "milestones": "Milestones",
+    "settings": "Workflow",
+    "heroText": "Board, list, backlog and hierarchy of this project."
   },
   "filters": {
     "label": "Filters",
@@ -92,7 +116,10 @@
     "conflict": "Someone else changed this card. The board was reloaded.",
     "saveFailed": "Could not save: {message}",
     "loadFailed": "Could not load the board.",
-    "help": "Drag a card by its handle, or focus it and use Alt + arrow keys to move it."
+    "help": "Drag a card by its handle, or focus it and use Alt + arrow keys to move it.",
+    "newItem": "New item",
+    "cancel": "Cancel",
+    "addItem": "Add item"
   },
   "list": {
     "key": "Key",
@@ -120,7 +147,8 @@
   "cross": {
     "title": "All projects",
     "projects": "Projects",
-    "readOnly": "Overview only: columns group statuses by category. Open a project to move cards."
+    "readOnly": "Overview only: columns group statuses by category. Open a project to move cards.",
+    "intro": "Every project's cards by status category. Read-only: open a project to move cards."
   },
   "priority": {
     "low": "low",
@@ -136,7 +164,25 @@
   },
   "tokens": {
     "title": "API tokens",
-    "empty": "No API tokens yet."
+    "intro": "Personal access tokens let agents and scripts use Atlas over REST and MCP. A token can read, or read and write, and can be limited to projects.",
+    "yours": "Your tokens",
+    "empty": "No API tokens yet",
+    "emptyText": "Create a token to connect Claude, Codex or a script.",
+    "allProjects": "all projects",
+    "created": "created {date}",
+    "revoked": "Revoked",
+    "revoke": "Revoke",
+    "new": "New token",
+    "secretOnce": "Copy this token now. It is shown only once.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "name": "Name",
+    "allowWrite": "Allow changes (write)",
+    "projects": "Limit to projects (keys, empty = all)",
+    "create": "Create token",
+    "loadFailed": "Could not load your tokens.",
+    "createFailed": "Could not create the token: {message}",
+    "revokeFailed": "Could not revoke the token."
   },
   "notFound": {
     "title": "Page not found",
@@ -213,7 +259,10 @@
     "milestone": "Milestone",
     "noMilestone": "No milestone",
     "follow": "Follow",
-    "unfollow": "Following"
+    "unfollow": "Following",
+    "properties": "Properties",
+    "descriptionHint": "Describe the work. Markdown is supported.",
+    "unsaved": "Unsaved changes"
   },
   "milestones": {
     "title": "Milestones",
@@ -249,6 +298,39 @@
       "item.moved": "{actor} moved {key}",
       "item.archived": "{actor} archived or restored {key}",
       "comment.added": "{actor} commented on {key}"
+    },
+    "intro": "Updates from the items you follow and the work assigned to you.",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "earlier": "Earlier",
+    "count": "{count} notifications",
+    "emptyText": "You are all caught up."
+  },
+  "workflow": {
+    "title": "Statuses",
+    "intro": "The columns of your board. Order them, set work-in-progress limits and choose the category that decides what counts as done.",
+    "status": "Status",
+    "category": "Category",
+    "wip": "WIP limit",
+    "actions": "Actions",
+    "position": "Step {n}",
+    "nameOf": "Name of {name}",
+    "categoryOf": "Category of {name}",
+    "wipOf": "WIP limit of {name}",
+    "moveUp": "Move {name} up",
+    "moveDown": "Move {name} down",
+    "delete": "Delete {name}",
+    "newName": "New status name",
+    "noLimit": "No limit",
+    "add": "Add status",
+    "failed": "Could not save: {message}",
+    "preview": "Workflow preview",
+    "previewText": "How your statuses run across the board.",
+    "limit": "limit {count}",
+    "cat": {
+      "todo": "To do",
+      "active": "In progress",
+      "completed": "Completed"
     }
   }
 }

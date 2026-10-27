@@ -1,18 +1,54 @@
 <script lang="ts">
-  import { ApiError, createProject, listProjects, type Project } from "./api";
+  import {
+    ApiError,
+    createProject,
+    emptyFilters,
+    getBoard,
+    type Project,
+  } from "./api";
+  import EmptyState from "./EmptyState.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
+  import PageHero from "./PageHero.svelte";
+  import { projectColor } from "./projectColor";
 
-  let projects = $state<Project[]>([]);
-  let loaded = $state(false);
+  let { projects, onchange }: { projects: Project[]; onchange: () => void } =
+    $props();
+
+  let creating = $state(false);
   let key = $state("");
   let name = $state("");
   let error = $state("");
+  let query = $state("");
+  let counts = $state<
+    Record<string, { total: number; active: number; done: number }>
+  >({});
 
-  async function load(): Promise<void> {
-    projects = await listProjects();
-    loaded = true;
-  }
-  void load();
+  const shown = $derived(
+    projects.filter((p) =>
+      `${p.key} ${p.name}`.toLowerCase().includes(query.trim().toLowerCase()),
+    ),
+  );
+
+  // Item counts come from each project's board (limit 1: only the column counts are used).
+  $effect(() => {
+    for (const project of projects) {
+      if (counts[project.key]) continue;
+      void getBoard(project.key, emptyFilters, 1)
+        .then((board) => {
+          const sum = (category: string): number =>
+            board.columns
+              .filter((c) => c.status.category === category)
+              .reduce((n, c) => n + c.count, 0);
+          counts[project.key] = {
+            total: board.columns.reduce((n, c) => n + c.count, 0),
+            active: sum("active"),
+            done: sum("completed"),
+          };
+        })
+        .catch(() => undefined);
+    }
+  });
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -21,7 +57,8 @@
       await createProject(key, name);
       key = "";
       name = "";
-      await load();
+      creating = false;
+      onchange();
     } catch (e) {
       error = t("projects.failed", {
         message: e instanceof ApiError ? e.message : String(e),
@@ -30,88 +67,133 @@
   }
 </script>
 
-<h1>{t("home.title")}</h1>
+<PageHero title={t("home.title")} description={t("home.intro")}>
+  {#snippet actions()}
+    <button
+      type="button"
+      class="primary withicon"
+      aria-expanded={creating}
+      onclick={() => (creating = !creating)}
+      ><Icon name="plus" size={16} />{t("projects.create")}</button
+    >
+  {/snippet}
+</PageHero>
 
-{#if loaded && projects.length === 0}
-  <p class="muted">{t("home.empty")}</p>
+{#if creating || projects.length === 0}
+  <form class="newform" onsubmit={submit}>
+    <h2>{t("projects.create")}</h2>
+    <div class="fields">
+      <label>
+        {t("projects.key")}
+        <input
+          bind:value={key}
+          required
+          maxlength="10"
+          pattern={"[A-Za-z][A-Za-z0-9]{1,9}"}
+        />
+      </label>
+      <label>
+        {t("projects.name")}
+        <input bind:value={name} required />
+      </label>
+      <button class="primary" type="submit">{t("projects.submit")}</button>
+    </div>
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
+  </form>
 {/if}
 
-<ul class="projects">
-  {#each projects as project (project.key)}
-    <li>
-      <a href="#/p/{project.key}">
-        <strong>{project.key}</strong>
-        <span>{project.name}</span>
-      </a>
-      {#if project.role}<small class="muted"
-          >{t("home.role", { role: project.role })}</small
-        >{/if}
-    </li>
-  {/each}
-</ul>
-
-<form class="card" onsubmit={submit}>
-  <h2>{t("projects.create")}</h2>
-  <label>
-    {t("projects.key")}
-    <input
-      bind:value={key}
-      required
-      maxlength="10"
-      pattern={"[A-Za-z][A-Za-z0-9]{1,9}"}
+{#if projects.length === 0}
+  <div class="emptycard">
+    <EmptyState
+      icon="projects"
+      title={t("home.emptyTitle")}
+      text={t("home.empty")}
     />
-  </label>
-  <label>
-    {t("projects.name")}
-    <input bind:value={name} required />
-  </label>
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <button class="primary" type="submit">{t("projects.submit")}</button>
-</form>
+  </div>
+{:else}
+  <div class="bar">
+    <div class="search">
+      <Icon name="search" size={16} />
+      <input
+        type="search"
+        placeholder={t("home.filter")}
+        aria-label={t("home.filter")}
+        bind:value={query}
+      />
+    </div>
+    <span class="muted">{t("home.count", { count: shown.length })}</span>
+  </div>
+  <ul class="grid">
+    {#each shown as project (project.key)}
+      {@const c = counts[project.key]}
+      <li style:--accent={projectColor(project.key)}>
+        <a class="cardlink" href="#/p/{project.key}">
+          <div class="cover" aria-hidden="true"></div>
+          <div class="body">
+            <div class="head">
+              <span class="tile">{project.key.slice(0, 1)}</span>
+              <div class="titles">
+                <strong>{project.name}</strong>
+                <span class="key">{project.key}</span>
+              </div>
+              {#if project.role}<span class="chip">{project.role}</span>{/if}
+            </div>
+            {#if c}
+              <div
+                class="progress"
+                role="progressbar"
+                aria-label={t("home.progress")}
+                aria-valuemin="0"
+                aria-valuemax={c.total}
+                aria-valuenow={c.done}
+              >
+                <span
+                  style:width="{c.total
+                    ? Math.round((c.done / c.total) * 100)
+                    : 0}%"
+                ></span>
+              </div>
+              <p class="stats">
+                <span><b>{c.total}</b> {t("home.items")}</span>
+                <span><b>{c.active}</b> {t("home.inProgress")}</span>
+                <span><b>{c.done}</b> {t("home.done")}</span>
+              </p>
+            {:else}
+              <p class="stats muted">…</p>
+            {/if}
+          </div>
+        </a>
+      </li>
+    {/each}
+  </ul>
+{/if}
 
 <style>
   h2 {
     margin: 0;
     font-size: var(--atlas-fs-lg);
   }
-  .projects {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
+  .withicon {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
-  .projects li {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+  .newform,
+  .emptycard {
+    padding: 20px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-lg);
+  }
+  .newform {
+    display: grid;
     gap: var(--space-3);
-    min-height: 96px;
-    padding: 20px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
   }
-  .projects li:hover {
-    border-color: var(--color-border-strong);
-  }
-  .projects a {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2) var(--space-3);
-    color: var(--color-text);
-    font-weight: var(--atlas-fw-semibold);
-    text-decoration: none;
-  }
-  .card {
+  .fields {
     display: grid;
-    gap: 14px;
-    max-width: 700px;
-    padding: 20px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    grid-template-columns: 160px minmax(0, 1fr) auto;
+    gap: var(--space-3);
+    align-items: end;
   }
   label {
     display: grid;
@@ -120,14 +202,144 @@
     font-weight: var(--atlas-fw-semibold);
     color: var(--color-muted);
   }
-  @media (max-width: 900px) {
-    .projects {
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+  .search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 1;
+    max-width: 360px;
+    padding-left: 12px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    color: var(--color-muted);
+  }
+  .search input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding-left: 0;
+  }
+  .grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+  .cardlink {
+    display: block;
+    height: 100%;
+    overflow: hidden;
+    color: var(--color-text);
+    text-decoration: none;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-lg);
+    transition:
+      border-color var(--atlas-duration) var(--atlas-ease),
+      transform var(--atlas-duration) var(--atlas-ease);
+  }
+  .cardlink:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .cover {
+    height: 84px;
+    background:
+      radial-gradient(
+        ellipse 70% 120% at 80% 130%,
+        color-mix(in srgb, var(--accent) 70%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(circle at 18% 28%, #fff 0 1px, transparent 2px),
+      radial-gradient(circle at 42% 62%, #fff 0 1px, transparent 2px),
+      linear-gradient(130deg, var(--atlas-hero-1), var(--atlas-hero-2));
+  }
+  .body {
+    display: grid;
+    gap: var(--space-3);
+    padding: 16px 18px 18px;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: -34px;
+  }
+  .tile {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--atlas-radius-md);
+    border: 2px solid var(--color-surface);
+    background: var(--accent);
+    color: #06101f;
+    font-size: 20px;
+    font-weight: var(--atlas-fw-bold);
+  }
+  .titles {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    margin-top: 30px;
+  }
+  .titles strong {
+    font-size: var(--atlas-fs-lg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .key {
+    font: var(--atlas-fw-semibold) var(--atlas-fs-xs) var(--font-mono);
+    color: var(--color-muted);
+  }
+  .head .chip {
+    margin-top: 30px;
+  }
+  .progress {
+    height: 6px;
+    border-radius: var(--atlas-radius-pill);
+    background: var(--color-soft);
+    overflow: hidden;
+  }
+  .progress span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+  }
+  .stats {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px var(--space-4);
+    font-size: var(--atlas-fs-sm);
+    color: var(--color-muted);
+  }
+  .stats b {
+    color: var(--color-text);
+  }
+  @media (max-width: 1100px) {
+    .grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
-  @media (max-width: 600px) {
-    .projects {
-      grid-template-columns: 1fr;
+  @media (max-width: 640px) {
+    .grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .fields {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

@@ -7,11 +7,18 @@
     getItems,
     type Workflow,
   } from "./api";
+  import Avatar from "./Avatar.svelte";
+  import EmptyState from "./EmptyState.svelte";
   import { onChange, onResync } from "./events.svelte";
   import FiltersBar from "./Filters.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
   import { personName } from "./people.svelte";
+  import PriorityIndicator from "./PriorityIndicator.svelte";
   import { itemHref } from "./routes";
+  import StatusChip from "./StatusChip.svelte";
+  import { statusTone } from "./statusTone";
+  import TypeIcon from "./TypeIcon.svelte";
   import VirtualList from "./VirtualList.svelte";
 
   const ROW = 48; // --atlas-list-row-h
@@ -104,6 +111,18 @@
     }),
   );
 
+  function tone(name: string | undefined): ReturnType<typeof statusTone> {
+    const all = workflow?.statuses ?? [];
+    const st = all.find((x) => x.name === name);
+    return st ? statusTone(st, all) : "todo";
+  }
+
+  function isDone(name: string | undefined): boolean {
+    return (
+      workflow?.statuses.find((x) => x.name === name)?.category === "completed"
+    );
+  }
+
   function more(): void {
     if (nextCursor) void load(false);
   }
@@ -131,7 +150,10 @@
               class:active={sort === sortKey}
               onclick={() => (sort = sortKey)}
             >
-              {t(column.label)}
+              {t(column.label)}{#if sort === sortKey}<Icon
+                  name="arrow-down"
+                  size={12}
+                />{/if}
             </button>
           {:else}
             {t(column.label)}
@@ -140,9 +162,9 @@
       {/each}
     </div>
     <div class="rows">
-      {#if ready && items.length === 0}<p class="muted pad">
-          {t("list.empty")}
-        </p>{/if}
+      {#if ready && items.length === 0}
+        <EmptyState icon="list" title={t("list.empty")} />
+      {/if}
       <VirtualList
         {items}
         itemHeight={ROW}
@@ -153,26 +175,48 @@
           <div
             class="line"
             class:archived={Boolean(item.archived_at)}
+            class:blocked={item.blocked}
             role="row"
           >
-            <a class="mono" href={itemHref(item.key)}>{item.key}</a>
-            <span class="title"
-              >{item.title}{#if item.blocked}<em class="blocked">
+            <span role="cell"
+              ><a class="mono" href={itemHref(item.key)}>{item.key}</a></span
+            >
+            <span role="cell" class="title"
+              >{item.title}{#if item.blocked}<em class="blocked-label">
                   · {t("board.blocked")}</em
                 >{/if}</span
             >
-            <span>{t(`types.${item.type}` as "types.epic")}</span>
-            <span>{item.status ?? ""}</span>
-            <span>{t(`priority.${item.priority}` as "priority.low")}</span>
-            <span
-              >{item.assignee === null ? "" : personName(item.assignee)}</span
+            <span role="cell" class="typ"
+              ><TypeIcon type={item.type} size={14} />{t(
+                `types.${item.type}` as "types.epic",
+              )}</span
+            >
+            <span role="cell"
+              ><StatusChip
+                name={item.status ?? ""}
+                tone={tone(item.status)}
+              /></span
+            >
+            <span role="cell"
+              ><PriorityIndicator priority={item.priority} /></span
+            >
+            <span role="cell" class="who"
+              >{#if item.assignee !== null}<Avatar
+                  name={personName(item.assignee)}
+                  size={22}
+                />{personName(item.assignee)}{/if}</span
             >
             <span
+              role="cell"
+              class="due"
+              class:late={item.due_at !== null &&
+                item.due_at < Date.now() &&
+                !isDone(item.status)}
               >{item.due_at === null
                 ? ""
                 : dateFormat.format(item.due_at)}</span
             >
-            <span
+            <span role="cell" class="muted"
               >{item.updated_at ? dateFormat.format(item.updated_at) : ""}</span
             >
           </div>
@@ -196,7 +240,7 @@
     display: flex;
     flex-direction: column;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--atlas-radius-md);
     background: var(--color-surface);
     overflow-x: auto;
   }
@@ -205,48 +249,68 @@
     display: grid;
     grid-template-columns:
       6rem minmax(14rem, 1fr)
-      5rem 8rem 6rem 8rem 7rem 7rem;
+      6.5rem 9rem 6.5rem 9rem 6.5rem 6.5rem;
     gap: var(--space-3);
     align-items: center;
-    min-width: 60rem;
-    padding: 0 var(--space-3);
+    min-width: 62rem;
+    padding: 0 var(--space-4);
     height: 100%;
-    font-size: 12px;
+    font-size: var(--atlas-fs-md);
     border-bottom: 1px solid var(--color-border);
   }
   .head {
+    flex: none;
     height: 44px;
-    font-size: 11px;
+    font-size: var(--atlas-fs-xs);
     font-weight: var(--atlas-fw-bold);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     color: var(--color-muted);
     background: var(--color-soft);
-    border-bottom: 1px solid var(--color-border);
   }
   .head button {
-    min-height: 24px; /* WCAG 2.2 target size minimum */
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 28px;
     padding: 0 2px;
     border: none;
     background: none;
     color: inherit;
-    font-weight: inherit;
-    text-decoration: underline;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+  .head button:hover:not(:disabled) {
+    color: var(--color-text);
+    background: none;
   }
   .head button.active {
     color: var(--color-accent);
-    font-weight: 700;
   }
   .rows {
     flex: 1;
     min-height: 0;
-    min-width: 60rem;
+    min-width: 62rem;
   }
   .line {
-    height: 100%;
-    font-size: 0.875rem;
-    border-bottom: 1px solid var(--color-border);
+    position: relative;
+    border-bottom-color: color-mix(
+      in srgb,
+      var(--color-border) 60%,
+      transparent
+    );
   }
   .line.archived {
     opacity: 0.62;
+  }
+  .line.blocked::before {
+    content: "";
+    position: absolute;
+    inset: 6px auto 6px 0;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--color-danger);
   }
   .line:hover {
     background: var(--color-soft);
@@ -256,15 +320,39 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .mono {
-    font: 700 11px var(--font-mono);
+  .title {
+    font-weight: var(--atlas-fw-semibold);
+  }
+  .typ,
+  .who {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--atlas-fs-sm);
     color: var(--color-muted);
   }
-  .blocked {
+  .mono {
+    font: 700 11px var(--font-mono);
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+  .mono:hover {
+    text-decoration: underline;
+  }
+  .blocked-label {
     color: var(--color-danger);
     font-style: normal;
+    font-weight: var(--atlas-fw-regular);
   }
-  .pad {
-    padding: var(--space-3);
+  .due {
+    font-size: var(--atlas-fs-sm);
+    color: var(--color-muted);
+  }
+  .due.late {
+    color: var(--color-danger);
+    font-weight: var(--atlas-fw-semibold);
+  }
+  .muted {
+    font-size: var(--atlas-fs-sm);
   }
 </style>

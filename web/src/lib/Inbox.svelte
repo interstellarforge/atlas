@@ -6,8 +6,12 @@
     markNotificationRead,
     type Notification,
   } from "./api";
+  import Avatar from "./Avatar.svelte";
+  import EmptyState from "./EmptyState.svelte";
   import { onChange, onResync } from "./events.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
+  import PageHero from "./PageHero.svelte";
   import { actorName } from "./people.svelte";
   import { itemHref } from "./routes";
   import { inbox, refreshInbox } from "./unread.svelte";
@@ -19,6 +23,25 @@
   const dateTime = new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
+  });
+
+  // Notifications are listed under Today, Yesterday and Earlier; the list arrives newest first.
+  const groups = $derived.by(() => {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local value inside the derivation, never state
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const today = start.getTime();
+    const yesterday = today - 86_400_000;
+    const buckets = [
+      { label: t("inbox.today"), items: [] as Notification[] },
+      { label: t("inbox.yesterday"), items: [] as Notification[] },
+      { label: t("inbox.earlier"), items: [] as Notification[] },
+    ];
+    for (const n of items)
+      buckets[
+        n.created_at >= today ? 0 : n.created_at >= yesterday ? 1 : 2
+      ]?.items.push(n);
+    return buckets.filter((b) => b.items.length > 0);
   });
 
   function message(n: Notification): string {
@@ -65,100 +88,181 @@
   });
 </script>
 
-<section class="inbox">
-  <div class="bar">
-    <h1>{t("inbox.title")}</h1>
+<PageHero title={t("inbox.title")} description={t("inbox.intro")}>
+  {#snippet actions()}
     <button
       type="button"
+      class="markall"
       disabled={inbox.unread === 0}
       onclick={() => void run(markAllNotificationsRead)}
-      >{t("inbox.markAll")}</button
+      ><Icon name="check" size={16} />{t("inbox.markAll")}</button
     >
-  </div>
+  {/snippet}
+</PageHero>
+
+<section class="inbox">
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
-  {#if ready && items.length === 0}<p class="muted">{t("inbox.empty")}</p>{/if}
-  <ul>
-    {#each items as n (n.id)}
-      <li class:unread={!n.read}>
-        <div class="text">
-          <a
-            href={itemHref(n.item)}
-            onclick={() => {
-              if (!n.read) void markNotificationRead(n.id).then(refreshInbox);
-            }}>{message(n)}</a
-          >
-          <span class="meta">{dateTime.format(n.created_at)}</span>
-        </div>
-        <div class="actions">
-          {#if !n.read}
-            <button
-              type="button"
-              onclick={() => void run(() => markNotificationRead(n.id))}
-              >{t("inbox.markRead")}</button
-            >
-          {/if}
-          <button
-            type="button"
-            onclick={() => void run(() => deleteNotification(n.id))}
-            >{t("inbox.delete")}</button
-          >
-        </div>
-      </li>
-    {/each}
-  </ul>
+  {#if ready && items.length === 0}
+    <div class="panel">
+      <EmptyState
+        icon="inbox"
+        title={t("inbox.empty")}
+        text={t("inbox.emptyText")}
+      />
+    </div>
+  {/if}
+  {#each groups as group (group.label)}
+    <div class="panel">
+      <h2>
+        {group.label}
+        <span class="muted"
+          >{t("inbox.count", { count: group.items.length })}</span
+        >
+      </h2>
+      <ul>
+        {#each group.items as n (n.id)}
+          <li class:unread={!n.read}>
+            <span class="dot" aria-hidden="true"></span>
+            <Avatar name={actorName(n.actor)} size={36} />
+            <div class="text">
+              <a
+                href={itemHref(n.item)}
+                onclick={() => {
+                  if (!n.read)
+                    void markNotificationRead(n.id).then(refreshInbox);
+                }}>{message(n)}</a
+              >
+              <span class="meta"
+                ><span class="mono">{n.item}</span> · {dateTime.format(
+                  n.created_at,
+                )}</span
+              >
+            </div>
+            <div class="actions">
+              {#if !n.read}
+                <button
+                  type="button"
+                  class="iconbtn"
+                  title={t("inbox.markRead")}
+                  aria-label={t("inbox.markRead")}
+                  onclick={() => void run(() => markNotificationRead(n.id))}
+                  ><Icon name="check" size={16} /></button
+                >
+              {/if}
+              <button
+                type="button"
+                class="iconbtn"
+                title={t("inbox.delete")}
+                aria-label={t("inbox.delete")}
+                onclick={() => void run(() => deleteNotification(n.id))}
+                ><Icon name="trash" size={16} /></button
+              >
+            </div>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/each}
 </section>
 
 <style>
   .inbox {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
-    max-width: 800px;
+    gap: var(--space-4);
   }
-  .bar {
-    display: flex;
+  .markall {
+    display: inline-flex;
     align-items: center;
+    gap: 6px;
+  }
+  .panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-lg);
+    overflow: hidden;
+  }
+  h2 {
+    display: flex;
     justify-content: space-between;
-    gap: var(--space-3);
+    margin: 0;
+    padding: 14px 18px;
+    font-size: var(--atlas-fs-lg);
+    border-bottom: 1px solid var(--color-border);
+  }
+  h2 .muted {
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-regular);
   }
   ul {
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
   }
   li {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    padding: 12px 18px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--color-border) 60%, transparent);
   }
-  li.unread {
-    border-left: 4px solid var(--color-accent);
-    padding-left: 12px;
+  li:first-child {
+    border-top: none;
+  }
+  li:hover {
+    background: var(--color-soft);
+  }
+  .dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: transparent;
+  }
+  li.unread .dot {
+    background: var(--atlas-primary);
+    box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--atlas-primary) 28%, transparent);
   }
   .text {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 2px;
     min-width: 0;
   }
-  li.unread a {
+  .text a {
+    color: var(--color-text);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+  .text a:hover {
+    text-decoration: underline;
+  }
+  li.unread .text a {
     font-weight: var(--atlas-fw-bold);
   }
   .meta {
-    font-size: var(--atlas-fs-xs);
+    font-size: var(--atlas-fs-sm);
     color: var(--color-muted);
+  }
+  .mono {
+    font: 700 11px var(--font-mono);
   }
   .actions {
     display: flex;
-    gap: var(--space-2);
+    gap: 2px;
+  }
+  .iconbtn {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    min-height: 36px;
+    height: 36px;
+    padding: 0;
+    color: var(--color-muted);
+    background: transparent;
+    border-color: transparent;
   }
 </style>

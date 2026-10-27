@@ -1,8 +1,8 @@
 <script lang="ts">
   import { emptyFilters, type Filters, type Milestone } from "./api";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
   import { people } from "./people.svelte";
-  import { cardFields, saveCardFields } from "./prefs.svelte";
 
   let {
     // eslint-disable-next-line @typescript-eslint/no-useless-default-assignment -- $bindable() is how Svelte 5 declares a two-way prop
@@ -10,13 +10,11 @@
     labels,
     milestones,
     types,
-    showCardFields = false,
   }: {
     filters: Filters;
     labels: string[];
     milestones: Milestone[];
     types: string[];
-    showCardFields?: boolean;
   } = $props();
 
   const active = $derived(
@@ -42,12 +40,15 @@
     e.preventDefault();
   }}
 >
-  <input
-    type="search"
-    placeholder={t("filters.search")}
-    aria-label={t("filters.search")}
-    bind:value={filters.q}
-  />
+  <div class="search">
+    <Icon name="search" size={16} />
+    <input
+      type="search"
+      placeholder={t("filters.search")}
+      aria-label={t("filters.search")}
+      bind:value={filters.q}
+    />
+  </div>
   <select aria-label={t("filters.type")} bind:value={filters.type}>
     <option value="">{t("filters.anyType")}</option>
     {#each types as typ (typ)}
@@ -87,24 +88,9 @@
     {t("filters.archived")}
   </label>
   {#if active}
-    <button type="button" onclick={clear}>{t("filters.clear")}</button>
-  {/if}
-  {#if showCardFields}
-    <details class="fields">
-      <summary>{t("filters.fields")}</summary>
-      <div class="menu">
-        {#each [["priority", "filters.showPriority"], ["assignee", "filters.showAssignee"], ["due", "filters.showDue"], ["labels", "filters.showLabels"]] as const as [field, label] (field)}
-          <label class="check">
-            <input
-              type="checkbox"
-              bind:checked={cardFields[field]}
-              onchange={saveCardFields}
-            />
-            {t(label)}
-          </label>
-        {/each}
-      </div>
-    </details>
+    <button type="button" class="clear" onclick={clear}
+      >{t("filters.clear")}</button
+    >
   {/if}
 </form>
 
@@ -115,9 +101,38 @@
     align-items: center;
     gap: var(--space-2);
   }
-  .filters input[type="search"] {
-    flex: 1 1 10rem;
-    max-width: 16rem;
+  .search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 1 1 12rem;
+    max-width: 18rem;
+    padding-left: 11px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    color: var(--color-muted);
+  }
+  .search:focus-within {
+    border-color: var(--color-accent);
+  }
+  .search input {
+    flex: 1;
+    min-height: 38px;
+    padding-left: 0;
+    border: none;
+    background: transparent;
+  }
+  .search input:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+  .filters select {
+    min-height: 38px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    font-size: var(--atlas-fs-sm);
+    font-weight: var(--atlas-fw-semibold);
   }
   .check {
     display: inline-flex;
@@ -126,31 +141,10 @@
     font-size: var(--atlas-fs-sm);
     color: var(--color-muted);
   }
-  .fields {
-    position: relative;
-  }
-  .fields summary {
-    cursor: pointer;
-    min-height: 40px;
-    display: inline-flex;
-    align-items: center;
-    padding: var(--space-2) var(--space-3);
-    font-weight: var(--atlas-fw-semibold);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    background: var(--color-surface);
-    list-style: none;
-  }
-  .menu {
-    position: absolute;
-    z-index: 5;
-    margin-top: var(--space-1);
-    padding: var(--space-3);
-    display: grid;
-    gap: var(--space-2);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    box-shadow: var(--atlas-shadow-md);
+  .clear {
+    min-height: 38px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--color-accent);
   }
 </style>
