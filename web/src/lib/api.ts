@@ -85,10 +85,19 @@ export async function logout(): Promise<void> {
 
 // ---- projects and workflow ----
 
+export interface Repository {
+  url: string;
+  host: string;
+  path: string;
+  provider: "github" | "gitlab" | "gitea" | "bitbucket" | "other";
+  branch: string;
+}
+
 export interface Project {
   key: string;
   name: string;
   role?: string;
+  repository?: Repository | null;
   archived_at?: number | null;
   created_at?: number;
 }
@@ -194,6 +203,7 @@ export interface Board {
 export interface Filters {
   q: string;
   type: string;
+  status: string;
   priority: string;
   label: string;
   milestone: string;
@@ -204,6 +214,7 @@ export interface Filters {
 export const emptyFilters: Filters = {
   q: "",
   type: "",
+  status: "",
   priority: "",
   label: "",
   milestone: "",
@@ -226,6 +237,7 @@ function filterParams(f: Filters): Record<string, string | boolean> {
   return {
     q: f.q,
     type: f.type,
+    status: f.status,
     priority: f.priority,
     label: f.label,
     milestone: f.milestone,
@@ -685,9 +697,28 @@ export function removeMember(
 
 export function updateProject(
   project: string,
-  patch: { name?: string; archived?: boolean },
+  patch: {
+    name?: string;
+    archived?: boolean;
+    repository?: { url: string; branch: string } | null;
+  },
 ): Promise<Project> {
   return request("PATCH", `/projects/${project}`, patch);
+}
+
+export interface Readme {
+  state: "unlinked" | "ok" | "empty" | "error";
+  markdown?: string;
+  source_url?: string;
+  fetched_at?: number;
+  message?: string;
+}
+
+export function getReadme(project: string, refresh = false): Promise<Readme> {
+  return request(
+    "GET",
+    `/projects/${project}/readme${refresh ? "?refresh=1" : ""}`,
+  );
 }
 
 export interface ProjectToken extends Token {

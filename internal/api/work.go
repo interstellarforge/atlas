@@ -46,6 +46,8 @@ func (s *Server) registerWork(mux *http.ServeMux, protect func(http.HandlerFunc)
 	mux.Handle("GET /api/v1/projects", protect(s.listProjects))
 	mux.Handle("POST /api/v1/projects", protect(s.createProject))
 	mux.Handle("GET /api/v1/projects/{key}", protect(s.getProject))
+	mux.Handle("GET /api/v1/projects/{key}/readme", protect(s.getReadme))
+	mux.Handle("GET /api/v1/projects/{key}/readme/asset", protect(s.getReadmeAsset))
 	mux.Handle("PATCH /api/v1/projects/{key}", protect(s.patchProject))
 
 	mux.Handle("GET /api/v1/projects/{key}/workflow", protect(s.getWorkflow))
@@ -144,6 +146,32 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) getReadme(w http.ResponseWriter, r *http.Request) {
+	res, err := s.core.Readme(r.Context(), actor(r), r.PathValue("key"), r.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// getReadmeAsset serves an image from a README. Images load in an <img> only: the sandboxing CSP and nosniff
+// keep an SVG from running anything even if it is opened directly.
+func (s *Server) getReadmeAsset(w http.ResponseWriter, r *http.Request) {
+	body, ct, err := s.core.ReadmeAsset(r.Context(), actor(r), r.PathValue("key"), r.URL.Query().Get("u"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", ct)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	h.Set("Cache-Control", "private, max-age=3600")
+	h.Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = w.Write(body)
 }
 
 func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {

@@ -76,7 +76,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "projects_list",
-		Description: "List the projects you can access (key, name, archived).",
+		Description: "List the projects you can access (key, name, archived, linked git repository).",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
 		ps, err := svc.ListProjects(ctx, a)
@@ -85,7 +85,11 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 		}
 		items := make([]map[string]any, 0, len(ps))
 		for _, p := range ps {
-			items = append(items, map[string]any{"key": p.Key, "name": p.Name, "archived": p.ArchivedAt != nil})
+			m := map[string]any{"key": p.Key, "name": p.Name, "archived": p.ArchivedAt != nil}
+			if p.Repository != nil {
+				m["repository"] = map[string]any{"url": p.Repository.URL, "branch": p.Repository.Branch, "provider": p.Repository.Provider}
+			}
+			items = append(items, m)
 		}
 		return result(map[string]any{"items": items})
 	})
@@ -140,6 +144,131 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor) *s
 			return nil, nil, err
 		}
 		return result(page)
+	})
+
+	// Issues are work items of type bug (ADR-0013): these tools only differ from items_search/items_write in
+	// fixing that type, so an agent can work a project's issue list with a smaller, clearer catalogue.
+	type issuesIn struct {
+		Project         string   `json:"project" jsonschema:"project key"`
+		Status          string   `json:"status,omitempty" jsonschema:"status name"`
+		Priority        string   `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
+		Label           string   `json:"label,omitempty"`
+		Assignee        *int64   `json:"assignee,omitempty" jsonschema:"user id"`
+		Query           string   `json:"query,omitempty" jsonschema:"case-insensitive title substring"`
+		IncludeArchived bool     `json:"include_archived,omitempty"`
+		Fields          []string `json:"fields,omitempty" jsonschema:"fields to return; default key,type,title,status,priority,assignee,parent,blocked,version"`
+		Limit           int      `json:"limit,omitempty" jsonschema:"page size, default 25, max 100"`
+		Cursor          string   `json:"cursor,omitempty" jsonschema:"next_cursor from a previous result"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "issues_search",
+		Description: "List a project's issues (work items of type bug), filtered by status, priority, label, assignee or title. Read one with item_get; comment with comment_add.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in issuesIn) (*sdk.CallToolResult, any, error) {
+		limit := in.Limit
+		if limit <= 0 {
+			limit = searchLimit
+		}
+		page, err := svc.ListItems(ctx, a, core.ItemFilter{
+			Project: in.Project, Type: "bug", Status: in.Status, Priority: in.Priority, Label: in.Label, Q: in.Query, Assignee: in.Assignee,
+			IncludeArchived: in.IncludeArchived, Cursor: in.Cursor, Limit: min(limit, searchLimitMax), Fields: in.Fields,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return result(page)
+	})
+
+	type issueCreateIn struct {
+		Project     string   `json:"project" jsonschema:"project key"`
+		Title       string   `json:"title"`
+		Description string   `json:"description,omitempty" jsonschema:"markdown: steps to reproduce, expected, actual"`
+		Priority    string   `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
+		Status      string   `json:"status,omitempty" jsonschema:"status name; default is the project's first status"`
+		Assignee    *int64   `json:"assignee,omitempty" jsonschema:"user id"`
+		Labels      []string `json:"labels,omitempty"`
+		Template    string   `json:"template,omitempty" jsonschema:"name of an item template of the project (see workflow_get)"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "issue_create",
+		Description: "Report an issue (creates a work item of type bug). Returns its key and version.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in issueCreateIn) (*sdk.CallToolResult, any, error) {
+		if r, ok := quota(writes, a, 1); !ok {
+			return r, nil, nil
+		}
+		it, err := svc.CreateItem(ctx, a, core.CreateItem{Project: in.Project, Type: "bug", Title: in.Title, Description: in.Description,
+			Priority: in.Priority, Status: in.Status, Assignee: in.Assignee, Labels: in.Labels, Template: in.Template})
+		if err != nil {
+			return nil, nil, err
+		}
+		m, err := core.Select(it, issueFields)
+		if err != nil {
+			return nil, nil, err
+		}
+		return result(m)
+	})
+
+	type issueUpdateIn struct {
+		Key         string   `json:"key" jsonschema:"issue key, e.g. EXO-42 (must be a bug)"`
+		Version     int64    `json:"version" jsonschema:"current item version"`
+		Title       string   `json:"title,omitempty"`
+		Description *string  `json:"description,omitempty"`
+		Status      string   `json:"status,omitempty" jsonschema:"status name: this is how an issue is moved to In Progress, Done, ..."`
+		Priority    string   `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
+		Assignee    *int64   `json:"assignee,omitempty" jsonschema:"user id"`
+		Labels      []string `json:"labels,omitempty" jsonschema:"replaces the issue's labels"`
+		Clear       []string `json:"clear,omitempty" jsonschema:"fields to set to null: assignee"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "issue_update",
+		Description: "Change an issue's fields or status. Needs the current version (a stale one fails with a conflict that names the current version). Refuses items that are not bugs.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in issueUpdateIn) (*sdk.CallToolResult, any, error) {
+		if r, ok := quota(writes, a, 1); !ok {
+			return r, nil, nil
+		}
+		if err := svc.RequireType(ctx, a, in.Key, "bug"); err != nil {
+			return nil, nil, err
+		}
+		patch := map[string]any{}
+		if in.Title != "" {
+			patch["title"] = in.Title
+		}
+		if in.Description != nil {
+			patch["description"] = *in.Description
+		}
+		if in.Status != "" {
+			patch["status"] = in.Status
+		}
+		if in.Priority != "" {
+			patch["priority"] = in.Priority
+		}
+		if in.Assignee != nil {
+			patch["assignee"] = float64(*in.Assignee)
+		}
+		if in.Labels != nil {
+			ls := make([]any, len(in.Labels))
+			for i, l := range in.Labels {
+				ls[i] = l
+			}
+			patch["labels"] = ls
+		}
+		for _, f := range in.Clear {
+			if f != "assignee" {
+				return nil, nil, fmt.Errorf("clear supports assignee only")
+			}
+			patch[f] = nil
+		}
+		it, err := svc.UpdateItem(ctx, a, in.Key, in.Version, patch)
+		if err != nil {
+			return nil, nil, err
+		}
+		m, err := core.Select(it, issueFields)
+		if err != nil {
+			return nil, nil, err
+		}
+		return result(m)
 	})
 
 	type getIn struct {
@@ -382,6 +511,9 @@ func errorResult(v any) (*sdk.CallToolResult, any, error) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// issueFields is the compact shape returned by the issue write tools.
+var issueFields = []string{"key", "title", "status", "priority", "assignee", "labels", "version"}
 
 // boardFields keeps board cards small; agents fetch more with item_get.
 var boardFields = []string{"key", "type", "title", "priority", "assignee", "version"}

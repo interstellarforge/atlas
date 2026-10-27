@@ -66,3 +66,10 @@
 - The SMTP password is encrypted at rest (AES-256-GCM) with `<data dir>/mail.key` (mode 0600). It is not part of API answers, audit entries or logs, and send errors are redacted before they are stored or shown. Environment settings (`ATLAS_SMTP_PASSWORD`) stay in the process environment. A backup does not contain the key: after a restore elsewhere, enter the password again.
 - Mail is sent by a worker outside any database transaction, with limited retries. Recipient and subject with line breaks are refused (header injection). Plain SMTP login over an unencrypted connection to a remote host is refused by `net/smtp`.
 - Notification mails go only to users who switched them on; they contain a summary and a link, never item contents.
+
+### Repository link and README (ADR-0013)
+
+- The link holds no secrets: URLs with credentials are refused, and Atlas never logs in to a git server. Only project admins can link or unlink; the change is audited.
+- Atlas fetches READMEs and README images itself, so the fetch must not become a way into the internal network (SSRF). The HTTP client refuses every address that is not a public internet address at the moment it connects (loopback, private ranges, link-local and cloud metadata, CGNAT, multicast, IPv4-mapped IPv6), allows https only, follows at most three redirects and only on the same host, ignores proxies, and caps size (README 1 MiB, image 5 MiB) and time (10 s). `ATLAS_REPO_ALLOW_PRIVATE=true` lifts the address check for a self-hosted server on a private network: only set it when project admins are trusted to point Atlas at anything it can reach.
+- The image proxy only fetches from the repository's hosts, `*.githubusercontent.com` and a few badge hosts, requires a session or token with read access to the project, checks that the data is an image and answers with `nosniff` and a sandboxing CSP, so a malicious SVG cannot run script. The page CSP is unchanged (`img-src 'self' data:`).
+- README markdown is rendered with raw HTML switched off; `javascript:`, `data:` and `file:` links and images are dropped. Failures are logged with project, host and reason, never with response bodies.

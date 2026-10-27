@@ -26,8 +26,12 @@
     "key,type,title,status,priority,assignee,due_at,blocked,updated_at,archived_at";
   type SortKey = "key" | "priority" | "due" | "updated";
 
-  let { project, workflow }: { project: string; workflow?: Workflow } =
-    $props();
+  // With `fixedType` the list shows only items of that type (the issues page lists bugs).
+  let {
+    project,
+    workflow,
+    fixedType = "",
+  }: { project: string; workflow?: Workflow; fixedType?: string } = $props();
 
   let items = $state<Card[]>([]);
   let nextCursor = $state<string | null>(null);
@@ -68,6 +72,7 @@
     try {
       const page = await getItems({
         ...filterQuery(filters),
+        ...(fixedType && { type: fixedType }),
         project,
         sort,
         fields: FIELDS,
@@ -133,7 +138,8 @@
     bind:filters
     labels={workflow?.labels ?? []}
     milestones={workflow?.milestones ?? []}
-    types={workflow?.types ?? []}
+    types={fixedType ? [fixedType] : (workflow?.types ?? [])}
+    statuses={fixedType ? (workflow?.statuses.map((st) => st.name) ?? []) : []}
   />
 
   <div class="table" role="table" aria-label={t("project.list")}>

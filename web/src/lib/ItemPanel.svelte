@@ -38,7 +38,7 @@
     onclose,
   }: {
     itemKey?: string;
-    create?: { project: string; status: string };
+    create?: { project: string; status: string; type?: string };
     workflow: Workflow;
     onclose: () => void;
   } = $props();
@@ -225,6 +225,7 @@
 
   async function load(): Promise<void> {
     if (create) {
+      if (create.type) draftType = create.type;
       apply(draft(create.status));
       void tick().then(() => titleInput?.focus());
       if (workflow.item_templates.length > 0)

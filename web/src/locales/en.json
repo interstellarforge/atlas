@@ -93,7 +93,10 @@
     "loadFailed": "Could not load this project.",
     "milestones": "Milestones",
     "settings": "Settings",
-    "heroText": "Board, list, backlog and hierarchy of this project."
+    "heroText": "Board, list, backlog, hierarchy, issues and README of this project.",
+    "issues": "Issues",
+    "readme": "README",
+    "repository": "Repository, branch {branch}"
   },
   "filters": {
     "label": "Filters",
@@ -114,7 +117,9 @@
     "showDue": "Due date",
     "showLabels": "Labels",
     "milestone": "Milestone",
-    "anyMilestone": "Any milestone"
+    "anyMilestone": "Any milestone",
+    "status": "Status",
+    "anyStatus": "Any status"
   },
   "board": {
     "tools": "Filters and add item",
@@ -512,7 +517,17 @@
     "subitems": "Subitems (optional)",
     "subitemsHint": "One per line as type: title. Indent two spaces to nest. They are created together with the item, in one go.",
     "instanceWide": "all projects",
-    "subitemCount": "{count} subitems"
+    "subitemCount": "{count} subitems",
+    "repo": {
+      "title": "Git repository",
+      "intro": "Link the repository that holds this project's code. Atlas only stores the address and shows the README; it never clones or logs in. Do not put credentials in the address.",
+      "url": "Repository address",
+      "branch": "Default branch",
+      "provider": "Detected provider: {provider}.",
+      "save": "Save repository",
+      "unlink": "Unlink",
+      "unlinked": "Repository unlinked."
+    }
   },
   "admin": {
     "title": "Administration",
@@ -637,5 +652,19 @@
     "mailTestSent": "Test email sent to your address.",
     "mailUseEnv": "Use the environment settings",
     "mailCleared": "Saved settings removed."
+  },
+  "issues": {
+    "intro": "Bugs of this project. Report one, filter and work them like any item.",
+    "new": "New issue"
+  },
+  "readme": {
+    "title": "README",
+    "refresh": "Refresh",
+    "open": "Open in repository",
+    "fetched": "Fetched {date}",
+    "loading": "Loading the README…",
+    "empty": "This repository has no README.md in its root.",
+    "unlinked": "No repository is linked. A project admin can link one in the project settings.",
+    "failed": "Could not load the README: {message}"
   }
 }

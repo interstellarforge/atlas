@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kees/atlas/internal/auth"
+	"github.com/kees/atlas/internal/repo"
 )
 
 var projectKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
@@ -62,7 +63,7 @@ func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, er
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, key, name, archived_at, created_at, merge_columns FROM projects ORDER BY key`)
+	rows, err := s.db.R.Query(`SELECT id, key, name, archived_at, created_at, merge_columns, repo_url, repo_branch FROM projects ORDER BY key`)
 	if err != nil {
 		return nil, err
 	}
@@ -71,9 +72,11 @@ func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, er
 	for rows.Next() {
 		var p Project
 		var archived sql.NullInt64
-		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns); err != nil {
+		var repoURL, repoBranch string
+		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns, &repoURL, &repoBranch); err != nil {
 			return nil, err
 		}
+		p.Repository = linkedRepo(repoURL, repoBranch)
 		if _, ok := readable[p.ID]; !ok {
 			continue
 		}
@@ -90,7 +93,7 @@ func (s *Service) GetProject(ctx context.Context, a auth.Actor, key string) (Pro
 	return p, err
 }
 
-// UpdateProject accepts name (string) and archived (bool).
+// UpdateProject accepts name (string), archived (bool) and repository ({"url","branch"}, or null to unlink).
 func (s *Service) UpdateProject(ctx context.Context, a auth.Actor, key string, patch map[string]any) (Project, error) {
 	var out Project
 	err := s.tx(func(tx *sql.Tx) error {
@@ -123,6 +126,25 @@ func (s *Service) UpdateProject(ctx context.Context, a auth.Actor, key string, p
 					return err
 				}
 				changes[k] = archived
+			case "repository":
+				url, branch := "", ""
+				if v != nil {
+					m, ok := v.(map[string]any)
+					if !ok {
+						return invalid("repository must be an object with url and branch, or null")
+					}
+					u, _ := m["url"].(string)
+					b, _ := m["branch"].(string)
+					r, err := repo.Parse(u, b)
+					if err != nil {
+						return invalid("%v", err)
+					}
+					url, branch = r.URL, r.Branch
+				}
+				if _, err := tx.Exec(`UPDATE projects SET repo_url = ?, repo_branch = ? WHERE id = ?`, url, branch, p.ID); err != nil {
+					return err
+				}
+				changes[k] = map[string]any{"url": url, "branch": branch}
 			default:
 				return invalid("unknown field %q", k)
 			}

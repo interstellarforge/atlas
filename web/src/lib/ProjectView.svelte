@@ -1,16 +1,23 @@
 <script lang="ts">
-  import { getWorkflow, type User, type Workflow } from "./api";
+  import {
+    getWorkflow,
+    type Repository,
+    type User,
+    type Workflow,
+  } from "./api";
   import BacklogView from "./BacklogView.svelte";
   import Board from "./Board.svelte";
   import { onChange } from "./events.svelte";
   import { t } from "./i18n";
   import Icon from "./Icon.svelte";
+  import IssuesView from "./IssuesView.svelte";
   import ItemPanel from "./ItemPanel.svelte";
   import ListView from "./ListView.svelte";
   import MilestonesView from "./MilestonesView.svelte";
   import PageHero from "./PageHero.svelte";
   import { projectColor } from "./projectColor";
   import ProjectSettings from "./ProjectSettings.svelte";
+  import ReadmeView from "./ReadmeView.svelte";
   import { navigate } from "./router.svelte";
   import { type ProjectViewName, viewPath } from "./routes";
   import TreeView from "./TreeView.svelte";
@@ -19,6 +26,7 @@
     project,
     name = "",
     canAdmin = false,
+    repository = null,
     user,
     section = "",
     onchange = () => undefined,
@@ -28,6 +36,7 @@
     project: string;
     name?: string;
     canAdmin?: boolean;
+    repository?: Repository | null;
     user: User;
     section?: string;
     onchange?: () => void;
@@ -47,6 +56,8 @@
       | "project.backlog"
       | "project.tree"
       | "project.milestones"
+      | "project.issues"
+      | "project.readme"
       | "project.settings";
   }[] = [
     { view: "board", suffix: "", label: "project.board" },
@@ -54,6 +65,8 @@
     { view: "backlog", suffix: "/backlog", label: "project.backlog" },
     { view: "tree", suffix: "/tree", label: "project.tree" },
     { view: "milestones", suffix: "/milestones", label: "project.milestones" },
+    { view: "issues", suffix: "/issues", label: "project.issues" },
+    { view: "readme", suffix: "/readme", label: "project.readme" },
     { view: "settings", suffix: "/settings", label: "project.settings" },
   ];
   const icons = {
@@ -62,10 +75,16 @@
     backlog: "backlog",
     tree: "tree",
     milestones: "milestone",
+    issues: "bug",
+    readme: "story",
     settings: "settings",
   } as const;
   const visibleTabs = $derived(
-    tabs.filter((tab) => tab.view !== "settings" || canAdmin),
+    tabs.filter(
+      (tab) =>
+        (tab.view !== "settings" || canAdmin) &&
+        (tab.view !== "readme" || repository !== null),
+    ),
   );
 
   async function loadWorkflow(key: string): Promise<void> {
@@ -111,6 +130,16 @@
             ><Icon name={icons[tab.view]} size={16} />{t(tab.label)}</a
           >
         {/each}
+        {#if repository}
+          <a
+            class="repo"
+            href={repository.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={t("project.repository", { branch: repository.branch })}
+            ><Icon name="external" size={16} />{repository.path}</a
+          >
+        {/if}
       </nav>
     {/snippet}
   </PageHero>
@@ -125,6 +154,10 @@
         <BacklogView {project} {workflow} />
       {:else if view === "milestones"}
         <MilestonesView {project} />
+      {:else if view === "issues"}
+        <IssuesView {project} {workflow} />
+      {:else if view === "readme"}
+        <ReadmeView {project} />
       {:else if view === "settings"}
         <ProjectSettings
           {project}
@@ -133,6 +166,7 @@
           {workflow}
           {onchange}
           {user}
+          {repository}
         />
       {:else}
         <TreeView {project} />
@@ -190,6 +224,10 @@
     font-weight: var(--atlas-fw-semibold);
     text-decoration: none;
     white-space: nowrap;
+  }
+  .tabs a.repo {
+    margin-left: auto;
+    font-weight: var(--atlas-fw-regular, 400);
   }
   .tabs a:hover {
     color: #fff;

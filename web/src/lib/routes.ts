@@ -1,10 +1,17 @@
 import { route } from "./router.svelte";
 
 export type ProjectViewName =
-  "board" | "list" | "backlog" | "tree" | "milestones" | "settings";
+  | "board"
+  | "list"
+  | "backlog"
+  | "tree"
+  | "milestones"
+  | "issues"
+  | "readme"
+  | "settings";
 
 const PROJECT_ROUTE =
-  /^\/p\/([A-Za-z][A-Za-z0-9]{1,9})(?:\/(list|backlog|tree|milestones|settings))?(?:\/([A-Za-z][A-Za-z0-9]{1,9}-[0-9]+))?$/;
+  /^\/p\/([A-Za-z][A-Za-z0-9]{1,9})(?:\/(list|backlog|tree|milestones|issues|readme|settings))?(?:\/([A-Za-z][A-Za-z0-9]{1,9}-[0-9]+))?$/;
 
 // /p/EXO is the board; /p/EXO/list, /backlog and /tree are the other views of the same data.
 // A trailing item key (/p/EXO/list/EXO-12) opens that item's panel over the view.

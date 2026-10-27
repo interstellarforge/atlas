@@ -74,6 +74,8 @@
     backlog: "project.backlog",
     tree: "project.tree",
     milestones: "project.milestones",
+    issues: "project.issues",
+    readme: "project.readme",
     settings: "project.settings",
   } as const;
 

@@ -48,3 +48,7 @@ Atlas sends no email until SMTP is set up, either with environment variables or 
 | `ATLAS_PUBLIC_URL` | Address users open Atlas at, for links in mails (for example `https://atlas.example.com`) |
 
 A password saved in the admin screen is encrypted with `<data dir>/mail.key`. Backups do not include this file; after restoring on another machine the password must be entered again (the settings otherwise survive). Mails that cannot be delivered are retried five times (1, 5, 15, 60 minutes) and then dropped; `mail_outbox.last_error` has the reason.
+
+## Repository README
+
+`ATLAS_REPO_ALLOW_PRIVATE=true` lets Atlas fetch READMEs from a git server on a private address (for example a Gitea on the LAN). By default only public internet addresses are fetched. Provider support for the README: GitHub, GitLab, Gitea/Codeberg/Forgejo, Bitbucket; any other host is assumed to use Gitea-style raw URLs. Private repositories are not supported.

@@ -11,6 +11,7 @@ import (
 	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/db"
 	"github.com/kees/atlas/internal/media"
+	"github.com/kees/atlas/internal/repo"
 )
 
 var (
@@ -49,6 +50,9 @@ type Service struct {
 	outer *sql.Tx
 	media *media.Store
 	mail  MailConfig
+	repos RepoFetcher
+	// readmes caches fetched READMEs per project key (ADR-0013).
+	readmes *readmeCache
 }
 
 // SetNotifier registers a callback that runs after every committed mutation, so realtime
@@ -68,7 +72,9 @@ func (s *Service) ReadableProjectKeys(a auth.Actor) (map[string]bool, error) {
 	return out, nil
 }
 
-func New(d *db.DB, users *auth.Service) *Service { return &Service{db: d, users: users, now: time.Now} }
+func New(d *db.DB, users *auth.Service) *Service {
+	return &Service{db: d, users: users, now: time.Now, readmes: &readmeCache{m: map[string]readmeEntry{}}}
+}
 
 func (s *Service) nowMs() int64 { return s.now().UnixMilli() }
 
@@ -127,6 +133,20 @@ type Project struct {
 	Role       string `json:"role,omitempty"`
 	// MergeColumns shows statuses of one category in a single board column (ADR-0011).
 	MergeColumns bool `json:"merge_columns"`
+	// Repository is the linked git repository, or null (ADR-0013).
+	Repository *repo.Repo `json:"repository"`
+}
+
+// linkedRepo rebuilds the repository link stored on a project row.
+func linkedRepo(url, branch string) *repo.Repo {
+	if url == "" {
+		return nil
+	}
+	r, err := repo.Parse(url, branch)
+	if err != nil {
+		return nil
+	}
+	return &r
 }
 
 // access resolves the project and checks the actor's role grants act on it.
@@ -142,8 +162,9 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	}
 	var p Project
 	var archived sql.NullInt64
-	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_columns FROM projects WHERE key = ?`, key).
-		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns)
+	var repoURL, repoBranch string
+	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_columns, repo_url, repo_branch FROM projects WHERE key = ?`, key).
+		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns, &repoURL, &repoBranch)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !a.CanProject(p.Key)) {
 		return Project{}, "", ErrNotFound
 	}
@@ -153,6 +174,7 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	if archived.Valid {
 		p.ArchivedAt = &archived.Int64
 	}
+	p.Repository = linkedRepo(repoURL, repoBranch)
 
 	role, allowed := "admin", true
 	if !a.IsAdmin {

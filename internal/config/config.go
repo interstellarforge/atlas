@@ -28,6 +28,8 @@ type Config struct {
 	MCPWritesPerHour int
 	// SMTP are the defaults for outgoing email; settings saved in the admin screen override them (ADR-0012).
 	SMTP notifications.Settings
+	// RepoAllowPrivate lets Atlas fetch READMEs from servers on private addresses (self-hosted git on the LAN).
+	RepoAllowPrivate bool
 	// PublicURL is the address users reach Atlas at, for links in emails. Optional.
 	PublicURL string
 }
@@ -63,6 +65,7 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("ATLAS_MCP_WRITES_PER_HOUR must be a positive number")
 	}
 	c.MCPWritesPerHour = q
+	c.RepoAllowPrivate = os.Getenv("ATLAS_REPO_ALLOW_PRIVATE") == "true"
 	c.PublicURL = strings.TrimRight(os.Getenv("ATLAS_PUBLIC_URL"), "/")
 	port, err := strconv.Atoi(env("ATLAS_SMTP_PORT", "587"))
 	if err != nil || port < 1 || port > 65535 {

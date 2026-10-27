@@ -10,16 +10,20 @@
     labels,
     milestones,
     types,
+    statuses = [],
   }: {
     filters: Filters;
     labels: string[];
     milestones: Milestone[];
     types: string[];
+    /** Status names to filter on; the select is only shown when given. */
+    statuses?: string[];
   } = $props();
 
   const active = $derived(
     filters.q !== "" ||
       filters.type !== "" ||
+      filters.status !== "" ||
       filters.priority !== "" ||
       filters.label !== "" ||
       filters.milestone !== "" ||
@@ -49,12 +53,22 @@
       bind:value={filters.q}
     />
   </div>
-  <select aria-label={t("filters.type")} bind:value={filters.type}>
-    <option value="">{t("filters.anyType")}</option>
-    {#each types as typ (typ)}
-      <option value={typ}>{t(`types.${typ}` as "types.epic")}</option>
-    {/each}
-  </select>
+  {#if types.length > 1}
+    <select aria-label={t("filters.type")} bind:value={filters.type}>
+      <option value="">{t("filters.anyType")}</option>
+      {#each types as typ (typ)}
+        <option value={typ}>{t(`types.${typ}` as "types.epic")}</option>
+      {/each}
+    </select>
+  {/if}
+  {#if statuses.length > 0}
+    <select aria-label={t("filters.status")} bind:value={filters.status}>
+      <option value="">{t("filters.anyStatus")}</option>
+      {#each statuses as st (st)}
+        <option value={st}>{st}</option>
+      {/each}
+    </select>
+  {/if}
   <select aria-label={t("filters.priority")} bind:value={filters.priority}>
     <option value="">{t("filters.anyPriority")}</option>
     {#each ["urgent", "high", "normal", "low"] as p (p)}

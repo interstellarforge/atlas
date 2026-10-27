@@ -119,3 +119,13 @@ With `merge_columns` on, `GET /projects/{key}/board` returns one column per stat
 | POST | `/admin/mail/test` | Sends a test mail to the caller's address; 422 with the (redacted) SMTP error on failure |
 
 `/me/preferences` has `email_notifications` (bool, default false): also mail the notifications that are not muted. Invites with an email address are mailed when email is configured (ADR-0012).
+
+## Repository link, README and issues (ADR-0013)
+
+| Method | Path | Notes |
+|---|---|---|
+| PATCH | `/projects/{key}` | Also accepts `repository`: `{"url","branch"}` links a repository (`project.update` action), `null` unlinks. `url` is `https://host/owner/name`, `ssh://git@host/...` or `git@host:owner/name`, no credentials (400 otherwise). Projects carry `repository: {url, host, path, provider, branch}` or `null` |
+| GET | `/projects/{key}/readme[?refresh=1]` | `{state: unlinked\|ok\|empty\|error, markdown, source_url, fetched_at, message}`. Markdown is already rewritten: relative links point at the repository, images at the asset endpoint. Cached 10 minutes; `refresh` at most every 15 s. Needs read access |
+| GET | `/projects/{key}/readme/asset?u=<https image URL>` | Image proxy for README images. Hosts: the repository, its raw host, `*.githubusercontent.com`, a few badge hosts; others 404. Served with `nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`. Max 5 MiB |
+
+Issues are items of type `bug`: list them with `GET /items?project=KEY&type=bug` (optionally `status`, `priority`, `label`, `assignee`), create with `POST /items` and `"type":"bug"`. The UI page is `#/p/KEY/issues`.

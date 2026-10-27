@@ -108,3 +108,7 @@ Status category enum: `todo`, `active`, `completed`.
 - `mail_settings` (one row, `id = 1`): SMTP host, port, security, username, `password_enc` (AES-GCM, key in `<data dir>/mail.key`), from address and name. No row = environment defaults.
 - `mail_outbox`: mails to send, written in the transaction of the mutation that causes them; `attempts`, `next_attempt_at`, `sent_at`, `failed_at`, `last_error` (redacted). The body is blanked once sent or abandoned. See ADR-0012.
 - Per-user switch: `email_notifications` inside `users.preferences`.
+
+## Repository link (migration 0016)
+
+- `projects.repo_url` (normalised `https://host/owner/name`, empty = not linked) and `projects.repo_branch`. The provider is derived from the host. Issues need no tables: they are items of type `bug`. See ADR-0013.

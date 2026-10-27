@@ -13,6 +13,7 @@
     type Member,
     type ProjectToken,
     removeMember,
+    type Repository,
     revokeProjectToken,
     type Role,
     saveItemTemplate,
@@ -34,7 +35,9 @@
     workflow,
     onchange,
     user,
+    repository = null,
   }: {
+    repository?: Repository | null;
     user: User;
     project: string;
     name: string;
@@ -62,6 +65,8 @@
   let notice = $state("");
   let error = $state("");
   let newName = $derived(name);
+  let repoUrl = $derived(repository?.url ?? "");
+  let repoBranch = $derived(repository?.branch ?? "");
 
   async function run(
     done: string,
@@ -213,6 +218,63 @@
         </label>
         <div>
           <button class="primary" type="submit">{t("settings.save")}</button>
+        </div>
+      </form>
+      <form
+        class="panel"
+        aria-labelledby="repo-title"
+        onsubmit={(e) => {
+          e.preventDefault();
+          void run(t("settings.saved"), async () => {
+            await updateProject(project, {
+              repository: { url: repoUrl.trim(), branch: repoBranch.trim() },
+            });
+            onchange();
+          });
+        }}
+      >
+        <h2 id="repo-title">{t("psettings.repo.title")}</h2>
+        <p class="muted hint">{t("psettings.repo.intro")}</p>
+        <label>
+          {t("psettings.repo.url")}
+          <input
+            bind:value={repoUrl}
+            required
+            maxlength="300"
+            placeholder="https://github.com/owner/name"
+            autocomplete="off"
+          />
+        </label>
+        <label>
+          {t("psettings.repo.branch")}
+          <input
+            bind:value={repoBranch}
+            maxlength="100"
+            placeholder="main"
+            autocomplete="off"
+          />
+        </label>
+        {#if repository}
+          <p class="muted hint">
+            {t("psettings.repo.provider", { provider: repository.provider })}
+          </p>
+        {/if}
+        <div class="row">
+          <button class="primary" type="submit"
+            >{t("psettings.repo.save")}</button
+          >
+          {#if repository}
+            <button
+              type="button"
+              onclick={() =>
+                void run(t("psettings.repo.unlinked"), async () => {
+                  await updateProject(project, { repository: null });
+                  repoUrl = "";
+                  repoBranch = "";
+                  onchange();
+                })}>{t("psettings.repo.unlink")}</button
+            >
+          {/if}
         </div>
       </form>
     {:else if active === "members"}
