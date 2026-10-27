@@ -123,6 +123,24 @@
     }
   }
 
+  const HERO_KEY = "atlas-project-hero-collapsed";
+  let heroCollapsed = $state(readHeroCollapsed());
+  function readHeroCollapsed(): boolean {
+    try {
+      return localStorage.getItem(HERO_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function toggleHero(): void {
+    heroCollapsed = !heroCollapsed;
+    try {
+      localStorage.setItem(HERO_KEY, heroCollapsed ? "1" : "0");
+    } catch {
+      /* storage unavailable: the choice just won't persist */
+    }
+  }
+
   const icons = {
     overview: "board",
     timeline: "calendar",
@@ -194,6 +212,11 @@
   <PageHero
     title={name || project}
     description={name ? "" : t("project.heroText")}
+    collapsed={heroCollapsed}
+    toggleLabel={t(
+      heroCollapsed ? "project.expandHeader" : "project.collapseHeader",
+    )}
+    ontoggle={toggleHero}
   >
     {#snippet icon()}
       <span class="tile" style:--accent={projectColor(project)}

@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
 
   import HeroArt from "./HeroArt.svelte";
+  import Icon from "./Icon.svelte";
 
   // The cinematic page header: breadcrumb, title and description on the left, actions on the right,
   // optional tab row at the bottom. The artwork is decorative and sits behind a readability overlay.
@@ -12,6 +13,9 @@
     crumbs,
     actions,
     tabs,
+    collapsed = false,
+    toggleLabel = "",
+    ontoggle,
   }: {
     title: string;
     description?: string;
@@ -19,15 +23,34 @@
     crumbs?: Snippet;
     actions?: Snippet;
     tabs?: Snippet;
+    collapsed?: boolean;
+    toggleLabel?: string;
+    ontoggle?: () => void;
   } = $props();
 </script>
 
-<header class="hero" class:with-tabs={Boolean(tabs)}>
+<header class="hero" class:with-tabs={Boolean(tabs)} class:collapsed>
   <HeroArt />
   <div class="shade"></div>
+  {#if ontoggle}
+    <button
+      type="button"
+      class="toggle"
+      aria-label={toggleLabel}
+      title={toggleLabel}
+      aria-expanded={!collapsed}
+      onclick={ontoggle}
+      ><Icon
+        name={collapsed ? "chevron-down" : "chevron-up"}
+        size={18}
+      /></button
+    >
+  {/if}
   <div class="inner">
-    {#if crumbs}<div class="crumbs">{@render crumbs()}</div>{/if}
-    <div class="row">
+    {#if crumbs}<div class="crumbs" class:sr-only={collapsed}>
+        {@render crumbs()}
+      </div>{/if}
+    <div class="row" class:sr-only={collapsed}>
       {#if icon}<div class="icon">{@render icon()}</div>{/if}
       <div class="text">
         <h1>{title}</h1>
@@ -58,6 +81,9 @@
   .hero.with-tabs {
     min-height: 164px;
   }
+  .hero.collapsed {
+    min-height: 52px;
+  }
   .shade {
     position: absolute;
     inset: 0;
@@ -80,6 +106,9 @@
   }
   .hero:not(.with-tabs) .inner {
     padding-bottom: 20px;
+  }
+  .collapsed .inner {
+    padding: 0 56px 0 16px;
   }
   .crumbs {
     display: flex;
@@ -126,6 +155,28 @@
   .tabs {
     padding-top: var(--space-2);
   }
+  .collapsed .tabs {
+    padding-top: 0;
+  }
+  .toggle {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 1;
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    min-height: 36px;
+    height: 36px;
+    padding: 0;
+    color: #fff;
+    background: rgb(4 10 22 / 58%);
+    border-color: rgb(255 255 255 / 28%);
+  }
+  .toggle:hover:not(:disabled) {
+    background: rgb(4 10 22 / 78%);
+    border-color: rgb(255 255 255 / 45%);
+  }
   @media (max-width: 720px) {
     .hero,
     .hero.with-tabs {
@@ -136,6 +187,12 @@
     }
     .hero:not(.with-tabs) .inner {
       padding-bottom: 14px;
+    }
+    .hero.collapsed {
+      min-height: 52px;
+    }
+    .collapsed .inner {
+      padding: 0 56px 0 8px;
     }
     .row {
       flex-wrap: wrap;

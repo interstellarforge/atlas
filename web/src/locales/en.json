@@ -98,6 +98,8 @@
     "issues": "Issues",
     "readme": "README",
     "repository": "Repository, branch {branch}",
+    "collapseHeader": "Collapse project header",
+    "expandHeader": "Expand project header",
     "overview": "Overview",
     "timeline": "Timeline",
     "time": "Time",
