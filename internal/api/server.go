@@ -16,22 +16,34 @@ import (
 	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
+	"github.com/kees/atlas/internal/events"
 )
 
 const maxBodyBytes = 1 << 20
+
+// Deps are the collaborators of the HTTP server. MCP is mounted at /mcp and may be nil.
+type Deps struct {
+	DB           *db.DB
+	Auth         *auth.Service
+	Core         *core.Service
+	Feed         *events.Feed
+	CookieSecure bool
+	SPA          fs.FS
+	MCP          http.Handler
+}
 
 type Server struct {
 	db           *db.DB
 	auth         *auth.Service
 	core         *core.Service
+	feed         *events.Feed
 	cookieSecure bool
 	spa          fs.FS
 	mcp          http.Handler
 }
 
-// New builds the HTTP server. mcp is mounted at /mcp and may be nil.
-func New(d *db.DB, a *auth.Service, c *core.Service, cookieSecure bool, spa fs.FS, mcp http.Handler) *Server {
-	return &Server{db: d, auth: a, core: c, cookieSecure: cookieSecure, spa: spa, mcp: mcp}
+func New(d Deps) *Server {
+	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -46,6 +58,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/tokens", protect(s.createToken))
 	mux.Handle("DELETE /api/v1/tokens/{id}", protect(s.revokeToken))
 	s.registerWork(mux, protect)
+	s.registerBoard(mux, protect)
+	mux.Handle("GET /api/v1/events", protect(s.events))
+	mux.Handle("GET /api/v1/changes", protect(s.changes))
 	if s.mcp != nil {
 		// MCP is POST-only, so the method-based scope check would demand write for reads;
 		// scopes are enforced per tool in core instead.

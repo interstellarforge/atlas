@@ -37,6 +37,22 @@ Same machine and dataset. Subtree of the first epic (31 items), 500 runs. The ea
 
 Column page (50 cards): p50 51 µs, p95 58 µs (FULL). Single update: p50 120 µs / p95 197 µs (FULL), 64 µs / 120 µs (NORMAL). Decision: ADR-0003.
 
+## Baseline 3 (KAN, 2026-10-27): board over HTTP
+
+Same machine (Apple Silicon Mac, local loopback, so no network latency), native binary, 10.000 items in one project (about 2.000 per status column). Numbers include the `curl` process start, so the server is faster than shown.
+
+| Request (200 runs) | p50 | p95 |
+|---|---|---|
+| `GET /projects/P01/board?limit=50` (5 columns x 50 cards, 45 KB) | 7.5 ms | 10.1 ms |
+| `GET /projects/P01/board/columns/{id}?limit=50` | 2.6 ms | 4.3 ms |
+| `POST /items/{key}/move` (status change, 100 runs) | 1.9 ms | 2.8 ms |
+
+Targets: board p95 <= 150 ms, update p95 <= 100 ms: met on this machine, not yet on low-end hardware.
+
+Memory: 50 concurrent SSE streams did not raise RSS measurably (25 MB after the streams, 23 MB after closing them).
+
+Browser (built-in browser, same data): the board with ~2.000 cards per column renders 55 cards in the DOM; the list view 19 rows; the hierarchy view 9.970 rows with 24 in the DOM. No render timings were taken.
+
 ## Not measured yet
 
-Board API p95 over HTTP, concurrent clients, SSE, uploads, reparenting large subtrees, large-subtree comparison, MCP metrics.
+Low-end hardware, concurrent writers under load, uploads, reparenting large subtrees, large-subtree comparison, MCP metrics.

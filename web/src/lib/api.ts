@@ -71,3 +71,190 @@ export async function logout(): Promise<void> {
   await request<undefined>("POST", "/auth/logout");
   csrfToken = "";
 }
+
+// ---- projects and workflow ----
+
+export interface Project {
+  key: string;
+  name: string;
+  role?: string;
+}
+
+export interface StatusInfo {
+  id: number;
+  name: string;
+  position: number;
+  category: string;
+  wip_limit: number | null;
+}
+
+export interface Workflow {
+  types: string[];
+  hierarchy: Record<string, string[]>;
+  statuses: StatusInfo[];
+  labels: string[];
+}
+
+export async function listProjects(): Promise<Project[]> {
+  return (await request<{ items: Project[] }>("GET", "/projects")).items;
+}
+
+export function createProject(key: string, name: string): Promise<Project> {
+  return request<Project>("POST", "/projects", { key, name });
+}
+
+export function getWorkflow(project: string): Promise<Workflow> {
+  return request<Workflow>("GET", `/projects/${project}/workflow`);
+}
+
+export async function listUsers(): Promise<User[]> {
+  return (await request<{ items: User[] }>("GET", "/users")).items;
+}
+
+// ---- items, board ----
+
+export interface Card {
+  key: string;
+  type: string;
+  title: string;
+  priority: string;
+  assignee: number | null;
+  due_at: number | null;
+  parent: string | null;
+  root: string;
+  blocked: boolean;
+  version: number;
+  labels: string[];
+  project?: string;
+  status?: string;
+  archived_at?: number | null;
+  updated_at?: number;
+}
+
+export interface Column {
+  status: StatusInfo;
+  count: number;
+  over_wip: boolean;
+  items: Card[];
+  next_cursor: string | null;
+}
+
+export interface Board {
+  seq: number;
+  columns: Column[];
+}
+
+export interface Filters {
+  q: string;
+  type: string;
+  priority: string;
+  label: string;
+  assignee: string;
+  archived: boolean;
+}
+
+export const emptyFilters: Filters = {
+  q: "",
+  type: "",
+  priority: "",
+  label: "",
+  assignee: "",
+  archived: false,
+};
+
+function query(
+  params: Record<string, string | number | boolean | undefined>,
+): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "" && v !== false) q.set(k, String(v));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+function filterParams(f: Filters): Record<string, string | boolean> {
+  return {
+    q: f.q,
+    type: f.type,
+    priority: f.priority,
+    label: f.label,
+    assignee: f.assignee,
+    archived: f.archived,
+  };
+}
+
+export function getBoard(
+  project: string,
+  f: Filters,
+  limit: number,
+): Promise<Board> {
+  return request<Board>(
+    "GET",
+    `/projects/${project}/board${query({ ...filterParams(f), limit })}`,
+  );
+}
+
+export function getBoardColumn(
+  project: string,
+  statusId: number,
+  f: Filters,
+  cursor: string,
+): Promise<Column> {
+  return request<Column>(
+    "GET",
+    `/projects/${project}/board/columns/${String(statusId)}${query({ ...filterParams(f), cursor })}`,
+  );
+}
+
+export function getCrossBoard(projects: string[], f: Filters): Promise<Board> {
+  return request<Board>(
+    "GET",
+    `/board${query({ ...filterParams(f), projects: projects.join(",") })}`,
+  );
+}
+
+export interface Page {
+  items: Card[];
+  next_cursor: string | null;
+}
+
+export function getItems(
+  params: Record<string, string | number | boolean | undefined>,
+): Promise<Page> {
+  return request<Page>("GET", `/items${query(params)}`);
+}
+
+export function getCard(key: string, fields: string): Promise<Card> {
+  return request<Card>("GET", `/items/${key}${query({ fields })}`);
+}
+
+export function filterQuery(f: Filters): Record<string, string | boolean> {
+  return filterParams(f);
+}
+
+export function createItem(body: {
+  project: string;
+  type: string;
+  title: string;
+  parent?: string;
+  status?: string;
+}): Promise<Card> {
+  return request<Card>("POST", "/items", body);
+}
+
+export function moveItem(
+  key: string,
+  version: number,
+  to: { status?: string; after?: string; before?: string },
+): Promise<Card> {
+  return request<Card>("POST", `/items/${key}/move`, { version, ...to });
+}
+
+export function archiveItem(
+  key: string,
+  version: number,
+  archived: boolean,
+): Promise<Card> {
+  return request<Card>("PATCH", `/items/${key}`, { version, archived });
+}

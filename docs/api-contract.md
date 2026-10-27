@@ -25,10 +25,12 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | POST/DELETE | `/projects/{key}/custom-fields[/{name}]` | Custom field definitions (project admin) |
 | GET | `/projects/{key}/members`, PUT/DELETE `/projects/{key}/members/{user}` | Roles: admin, member, viewer |
 | GET/POST | `/users` | List users; create (global admin) |
-| GET | `/projects/{key}/board` | Compact board, paginated per column (KAN) |
-| GET/POST | `/items` | Search/list, create. List filters also: `under` (subtree), `q` (title), `archived=1` |
+| GET | `/projects/{key}/board` | Every status column with `count`, `over_wip` and the first `limit` cards (default 50, max 200), plus `seq` (journal position to subscribe from). Filters: `type`, `priority`, `label`, `assignee`, `q`, `archived=1`; `fields` selects card fields |
+| GET | `/projects/{key}/board/columns/{statusId}?cursor=` | Further cards of one column |
+| GET | `/board?projects=A,B` | Cross-project overview: three columns by status category (todo, active, completed), no WIP limits, read-only. Same filters |
+| GET/POST | `/items` | Search/list, create. Filters also: `under` (subtree), `q` (title), `category`, `projects=A,B`, `archived=1`. `sort`: `key` (default, keyset paging), `updated`, `priority`, `due`, `rank` (offset paging). `fields` may include `root` (top-level ancestor) |
 | GET/PATCH | `/items/{key}` | Read; update (needs `version` in body or `If-Match`). Archive via `{"archived": true}`; there is no hard delete |
-| POST | `/items/{key}/move` | Status and/or position (neighbour keys) |
+| POST | `/items/{key}/move` | `{"version","status"?,"after"?,"before"?}`: status and/or position between neighbour keys (same project and target column, else 422). Omitting both neighbours appends. Conflicts return 409 |
 | POST | `/items/batch` | Up to 25 mutations |
 | GET/POST | `/items/{key}/comments` | Comments |
 | GET/POST/PATCH | `/items/{key}/checklist` | Checklist items |
@@ -59,11 +61,12 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 
 ## SSE `/events`
 
-- Event: `{"seq":1842,"type":"item.updated","project":"EXO","key":"EXO-42"}`.
-- Types: `item.created`, `item.updated`, `item.moved`, `item.archived`, `item.deleted`, `comment.added`, `notification.created`, `resync_required`.
-- `Last-Event-ID` resumes from `change_events`. Too far behind or new database generation: `resync_required`.
-- Keepalive comment every 20 s. Events filtered by the caller's permissions.
-- Clients fetch only changed items after an event.
+- Frame: `id: 1842` + `data: {"seq":1842,"type":"item.updated","project":"EXO","key":"EXO-42"}` (default message event).
+- Types now: `item.created`, `item.updated`, `item.moved`, `item.archived`, `project.created`, `project.updated`, `board.rebalanced` (clients refetch the board). Planned: `item.deleted`, `comment.added`, `notification.created`.
+- Control events: `hello` (`{"generation","seq"}`, first frame; a changed `generation` means the database was replaced, so reload), `resync_required` (`{"seq"}`).
+- `Last-Event-ID` (or `?since=`) resumes from `change_events`. A cursor ahead of the journal or behind its oldest entry gives `resync_required`. Retention: `ATLAS_EVENT_RETENTION_DAYS` (default 7), always keeping the newest 1000.
+- Keepalive comment every 20 s. Events are filtered by the caller's project access. A stream ends after 10 minutes so credentials are re-checked on reconnect.
+- Clients fetch only changed items after an event. `GET /changes?since=<seq>&limit=` returns the same events as JSON: `{"events":[…],"seq","resync_required","more"}`.
 
 ## Limits (configurable)
 

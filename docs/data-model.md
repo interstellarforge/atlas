@@ -10,8 +10,7 @@ Project > Epic > Story > Task (bug allowed per rules)
 
 All item types live in `work_items`. `type` plus hierarchy rules decide valid parent/child combinations. Implemented rules (a constant in `internal/core`, not yet per-project): an item may have no parent; epic has no parent type; story under epic; task under story; bug under epic or story. Max depth 5.
 
-Subtree reads use a range scan on `path`, see ADR-0003. Until the board lands (KAN), `rank` is the item number zero-padded; fractional keys replace it then.
-
+Subtree reads use a range scan on `path`, see ADR-0003. 
 ## Tables
 
 | Table | Purpose |
@@ -55,10 +54,10 @@ Status category enum: `todo`, `active`, `completed`.
 
 ## Fractional ordering
 
-- `rank` is a lexicographic string key, unique per (project, status) in practice; ties broken by `id`.
-- Move = update one item's `rank` to a key between its neighbours.
-- If keys exceed a length limit (default 64 chars), rebalance the affected column in one short transaction.
-- Required tests: concurrent moves, equal ranks, cross-project moves.
+- `rank` is a lexicographic string key (digits `0-9A-Za-z`, never ending in `0`); the order of a column is `ORDER BY rank, id` among non-archived items of one (project, status). The board index is `(project_id, status_id, rank)`.
+- A move writes one new key between its neighbours (`internal/core/rank.go`). New items and status changes append to the column end.
+- Keys grow slowly when appending or prepending; past 24 characters, or when a move meets equal keys, the column is rebalanced to short, evenly spaced keys in the same transaction (`board.rebalanced` event). See ADR-0004.
+- Tested: concurrent moves, equal ranks, neighbours from another project or column, long append runs.
 
 ## Custom fields
 

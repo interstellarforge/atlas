@@ -292,8 +292,12 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 	f := core.ItemFilter{
 		Project: q.Get("project"), Type: q.Get("type"), Status: q.Get("status"), Priority: q.Get("priority"),
 		Label: q.Get("label"), Parent: q.Get("parent"), Under: q.Get("under"), Q: q.Get("q"),
+		Category: q.Get("category"), Sort: q.Get("sort"),
 		IncludeArchived: q.Get("archived") == "1" || q.Get("archived") == "true",
 		Cursor:          q.Get("cursor"), Fields: fieldsParam(r),
+	}
+	if v := q.Get("projects"); v != "" {
+		f.Projects = strings.Split(v, ",")
 	}
 	num := func(name string) (*int64, bool) {
 		v := q.Get(name)

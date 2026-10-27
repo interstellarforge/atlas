@@ -18,6 +18,9 @@ Tools are thin adapters over `core` services (same as REST). Tool names, descrip
 | `changes_since` | Delta since a cursor |
 | `attachments` | List metadata, link attachments |
 
+Implemented: `projects_list`, `workflow_get`, `board_get` (10 cards per column by default), `items_search`, `item_get`, `items_write` (ops `create`/`update`/`move`, `clear` nulls assignee/due_at/parent), `changes_since`, `comment_add`. Limits: 120 requests/minute per token (HTTP 429 + `Retry-After`), 500 mutations/hour per token (tool error `rate_limited`), 16 KiB per result (tool error `too_large`). Counters are in memory and reset on restart. Not yet: `projects_write`, attachments tool, resources, mass-delete guard (nothing is deletable yet), metrics.
+`items_write` failures are tool errors (`isError`) with `{"error":{"code","message","current"?},"operation":N,"applied":false}`; partial mode returns per-operation `error` entries instead. Idempotency records live 24 h per actor+key (`idempotency_records`).
+
 ## Response rules
 
 - Compact by default; human-readable keys (`EXO-42`) and status names.

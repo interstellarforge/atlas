@@ -40,9 +40,29 @@ func invalid(format string, a ...any) error { return &InvalidError{fmt.Sprintf(f
 func rule(format string, a ...any) error    { return &RuleError{fmt.Sprintf(format, a...)} }
 
 type Service struct {
-	db    *db.DB
-	users *auth.Service
-	now   func() time.Time
+	db     *db.DB
+	users  *auth.Service
+	now    func() time.Time
+	notify func()
+	// outer is set on the per-batch copy of the service: tx() then joins the batch transaction.
+	outer *sql.Tx
+}
+
+// SetNotifier registers a callback that runs after every committed mutation, so realtime
+// subscribers can look for new change events. It must not block.
+func (s *Service) SetNotifier(f func()) { s.notify = f }
+
+// ReadableProjectKeys lists the project keys the actor may read.
+func (s *Service) ReadableProjectKeys(a auth.Actor) (map[string]bool, error) {
+	byID, err := s.readableProjects(s.db.R, a)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(byID))
+	for _, k := range byID {
+		out[k] = true
+	}
+	return out, nil
 }
 
 func New(d *db.DB, users *auth.Service) *Service { return &Service{db: d, users: users, now: time.Now} }
@@ -56,6 +76,9 @@ type queryer interface {
 
 // tx runs f in a write transaction (BEGIN IMMEDIATE on the single writer connection).
 func (s *Service) tx(f func(tx *sql.Tx) error) error {
+	if s.outer != nil {
+		return f(s.outer) // Batch commits, rolls back and notifies
+	}
 	tx, err := s.db.W.Begin()
 	if err != nil {
 		return err
@@ -64,7 +87,14 @@ func (s *Service) tx(f func(tx *sql.Tx) error) error {
 	if err := f(tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// Events are only announced after the commit, never from inside the transaction.
+	if s.notify != nil {
+		s.notify()
+	}
+	return nil
 }
 
 type ctxKey int

@@ -5,12 +5,16 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/core"
+	"github.com/kees/atlas/internal/events"
 )
 
 const (
@@ -19,19 +23,24 @@ const (
 	// searchLimit keeps default results small; agents page with next_cursor.
 	searchLimit    = 25
 	searchLimitMax = 100
+	boardLimit     = 10
+	boardLimitMax  = 50
+	changesLimit   = 50
 )
 
 // Handler serves /mcp. Each request gets its own stateless server bound to the actor the
 // auth middleware resolved, so a revoked token stops working immediately and no actor
 // outlives the request that authenticated it.
-func Handler(svc *core.Service) http.Handler {
-	return sdk.NewStreamableHTTPHandler(func(r *http.Request) *sdk.Server {
+func Handler(svc *core.Service, feed *events.Feed) http.Handler {
+	writes := newLimiter(writesPerHour, time.Hour)
+	h := sdk.NewStreamableHTTPHandler(func(r *http.Request) *sdk.Server {
 		a, _ := auth.ActorFrom(r.Context())
-		return newServer(svc, a)
+		return newServer(svc, feed, writes, a)
 	}, &sdk.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	return rateLimit(newLimiter(requestsPerMinute, time.Minute), h)
 }
 
-func newServer(svc *core.Service, a auth.Actor) *sdk.Server {
+func newServer(svc *core.Service, feed *events.Feed, writes *limiter, a auth.Actor) *sdk.Server {
 	s := sdk.NewServer(&sdk.Implementation{Name: serverName, Version: serverVersion}, nil)
 	readOnly := &sdk.ToolAnnotations{ReadOnlyHint: true}
 
@@ -140,7 +149,106 @@ func newServer(svc *core.Service, a auth.Actor) *sdk.Server {
 		return result(map[string]any{"item": it, "links": links})
 	})
 
+	type boardIn struct {
+		Project string `json:"project" jsonschema:"project key"`
+		Limit   int    `json:"limit,omitempty" jsonschema:"cards per column, default 10, max 50"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "board_get",
+		Description: "Compact board overview: every status column with its count and first cards, plus seq for changes_since.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in boardIn) (*sdk.CallToolResult, any, error) {
+		limit := in.Limit
+		if limit <= 0 {
+			limit = boardLimit
+		}
+		b, err := svc.Board(ctx, a, in.Project, core.BoardFilter{Limit: min(limit, boardLimitMax), Fields: boardFields})
+		if err != nil {
+			return nil, nil, err
+		}
+		return result(b)
+	})
+
+	type changesIn struct {
+		Since int64 `json:"since" jsonschema:"seq from a previous result (board_get or changes_since); 0 starts at the oldest change"`
+		Limit int   `json:"limit,omitempty" jsonschema:"max events, default 50, max 200"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "changes_since",
+		Description: "Changes you may see after a cursor. Continue from seq while more is true; resync_required means re-read via board_get or items_search.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in changesIn) (*sdk.CallToolResult, any, error) {
+		if in.Since < 0 {
+			return nil, nil, errors.New("since must be >= 0")
+		}
+		limit := in.Limit
+		if limit <= 0 {
+			limit = changesLimit
+		}
+		b, err := feed.Since(a, in.Since, min(limit, 200))
+		if err != nil {
+			return nil, nil, err
+		}
+		return result(b)
+	})
+
+	sdk.AddTool(s, &sdk.Tool{
+		Name: "items_write",
+		Description: "Create, update or move work items, 1-25 operations per call. Updates and moves need the item's version. " +
+			"Atomic by default (first failure applies nothing); partial=true applies what it can and reports each result. " +
+			"Set idempotency_key so a retry returns the first result instead of repeating the writes.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in writeIn) (*sdk.CallToolResult, any, error) {
+		if r, ok := quota(writes, a, len(in.Operations)); !ok {
+			return r, nil, nil
+		}
+		ops := make([]core.BatchOp, len(in.Operations))
+		for i, o := range in.Operations {
+			ops[i] = o.toCore()
+		}
+		out, err := svc.Batch(ctx, a, ops, in.Partial, in.IdempotencyKey)
+		var oe *core.OpError
+		if errors.As(err, &oe) {
+			info := core.ErrorInfo(oe.Err)
+			return errorResult(map[string]any{"error": info, "operation": oe.Index, "applied": false})
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		return result(out)
+	})
+
+	type commentIn struct {
+		Key  string `json:"key" jsonschema:"item key, e.g. EXO-42"`
+		Body string `json:"body"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "comment_add",
+		Description: "Add a comment to a work item (recorded under your token). Use it for progress updates and questions.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in commentIn) (*sdk.CallToolResult, any, error) {
+		if r, ok := quota(writes, a, 1); !ok {
+			return r, nil, nil
+		}
+		c, err := svc.AddComment(ctx, a, in.Key, in.Body)
+		if err != nil {
+			return nil, nil, err
+		}
+		return result(c)
+	})
+
 	return s
+}
+
+// quota charges n mutations to the actor's hourly budget; when it is spent the agent gets a readable error.
+func quota(l *limiter, a auth.Actor, n int) (*sdk.CallToolResult, bool) {
+	wait, ok := l.take(a.String(), n)
+	if ok {
+		return nil, true
+	}
+	r, _, _ := errorResult(map[string]any{"error": core.BatchError{Code: "rate_limited",
+		Message: "write quota used up; retry in " + wait.Round(time.Second).String()}, "applied": false})
+	return r, false
 }
 
 // result returns v as one compact JSON text block. Structured output is not set: it would
@@ -150,5 +258,106 @@ func result(v any) (*sdk.CallToolResult, any, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if len(b) > maxResponse {
+		// Never cut JSON in half: tell the agent how to ask for less.
+		b, _ = json.Marshal(map[string]any{"error": map[string]any{"code": "too_large",
+			"message": "result is " + strconv.Itoa(len(b)) + " bytes (max " + strconv.Itoa(maxResponse) + "); use fields, a smaller limit or cursor"}})
+		return &sdk.CallToolResult{IsError: true, Content: []sdk.Content{&sdk.TextContent{Text: string(b)}}}, nil, nil
+	}
 	return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(b)}}}, nil, nil
+}
+
+// errorResult is a tool-level error the agent can read and act on (e.g. a 409 with the current state).
+func errorResult(v any) (*sdk.CallToolResult, any, error) {
+	r, _, err := result(v)
+	if r != nil {
+		r.IsError = true
+	}
+	return r, nil, err
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// boardFields keeps board cards small; agents fetch more with item_get.
+var boardFields = []string{"key", "type", "title", "priority", "assignee", "version"}
+
+type writeIn struct {
+	Operations     []opIn `json:"operations" jsonschema:"1-25 operations"`
+	Partial        bool   `json:"partial,omitempty" jsonschema:"apply operations independently instead of all-or-nothing"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+type opIn struct {
+	Op          string         `json:"op" jsonschema:"create, update or move"`
+	Key         string         `json:"key,omitempty" jsonschema:"item key (update, move)"`
+	Version     int64          `json:"version,omitempty" jsonschema:"current item version (update, move)"`
+	Project     string         `json:"project,omitempty" jsonschema:"project key (create)"`
+	Type        string         `json:"type,omitempty" jsonschema:"epic, story, task or bug (create)"`
+	Title       string         `json:"title,omitempty"`
+	Description *string        `json:"description,omitempty"`
+	Parent      string         `json:"parent,omitempty" jsonschema:"parent item key"`
+	Status      string         `json:"status,omitempty" jsonschema:"status name; for move, the target column"`
+	Priority    string         `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
+	Assignee    *int64         `json:"assignee,omitempty" jsonschema:"user id"`
+	DueAt       *int64         `json:"due_at,omitempty" jsonschema:"unix milliseconds"`
+	Labels      []string       `json:"labels,omitempty" jsonschema:"replaces the item's labels"`
+	CustomData  map[string]any `json:"custom_data,omitempty" jsonschema:"custom field values (update merges; null removes a key)"`
+	Archived    *bool          `json:"archived,omitempty" jsonschema:"update: archive or restore"`
+	Clear       []string       `json:"clear,omitempty" jsonschema:"update: fields to set to null: assignee, due_at, parent"`
+	After       string         `json:"after,omitempty" jsonschema:"move: place after this item key"`
+	Before      string         `json:"before,omitempty" jsonschema:"move: place before this item key"`
+}
+
+func (o opIn) toCore() core.BatchOp {
+	op := core.BatchOp{Op: o.Op, Key: o.Key, Version: o.Version,
+		Move: core.MoveSpec{Status: o.Status, After: o.After, Before: o.Before}}
+	switch o.Op {
+	case "create":
+		desc := ""
+		if o.Description != nil {
+			desc = *o.Description
+		}
+		op.Create = core.CreateItem{Project: o.Project, Type: o.Type, Title: o.Title, Description: desc, Parent: o.Parent,
+			Status: o.Status, Priority: o.Priority, Assignee: o.Assignee, DueAt: o.DueAt, Labels: o.Labels, CustomData: o.CustomData}
+	case "update":
+		p := map[string]any{}
+		if o.Title != "" {
+			p["title"] = o.Title
+		}
+		if o.Description != nil {
+			p["description"] = *o.Description
+		}
+		if o.Status != "" {
+			p["status"] = o.Status
+		}
+		if o.Priority != "" {
+			p["priority"] = o.Priority
+		}
+		if o.Assignee != nil {
+			p["assignee"] = *o.Assignee
+		}
+		if o.DueAt != nil {
+			p["due_at"] = *o.DueAt
+		}
+		if o.Labels != nil {
+			p["labels"] = o.Labels
+		}
+		if o.Parent != "" {
+			p["parent"] = o.Parent
+		}
+		if o.CustomData != nil {
+			p["custom_data"] = o.CustomData
+		}
+		if o.Archived != nil {
+			p["archived"] = *o.Archived
+		}
+		for _, f := range o.Clear {
+			p[f] = nil
+		}
+		// UpdateItem expects decoded JSON (float64, []any); normalise typed values the same way REST gets them.
+		raw, _ := json.Marshal(p)
+		_ = json.Unmarshal(raw, &p)
+		op.Patch = p
+	}
+	return op
 }

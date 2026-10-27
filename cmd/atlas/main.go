@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"github.com/kees/atlas/internal/config"
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
+	"github.com/kees/atlas/internal/events"
 	"github.com/kees/atlas/internal/mcp"
 	"github.com/kees/atlas/migrations"
 	"github.com/kees/atlas/web"
@@ -25,6 +27,23 @@ func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
 		os.Exit(1)
+	}
+}
+
+// pruneJournal trims old change events at startup and then daily; the newest entries are always kept.
+func pruneJournal(ctx context.Context, feed *events.Feed, retention time.Duration) {
+	const keepLast = 1000
+	for {
+		if n, err := feed.Prune(retention, keepLast); err != nil {
+			slog.Error("prune change events", "error", err)
+		} else if n > 0 {
+			slog.Info("pruned change events", "deleted", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(24 * time.Hour):
+		}
 	}
 }
 
@@ -67,16 +86,23 @@ func run() error {
 	if len(os.Args) > 1 {
 		return runCommand(svc, os.Args[1:])
 	}
-
-	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           api.New(database, authSvc, svc, cfg.CookieSecure, web.Dist(), mcp.Handler(svc)).Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
+	feed := events.New(database, svc)
+	svc.SetNotifier(feed.Hub().Notify)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go pruneJournal(ctx, feed, cfg.EventRetention)
+
+	srv := &http.Server{
+		Addr: cfg.Addr,
+		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, CookieSecure: cfg.CookieSecure,
+			SPA: web.Dist(), MCP: mcp.Handler(svc, feed)}).Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// Open event streams watch their request context; cancelling it on SIGTERM lets Shutdown finish promptly.
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
+
 	errc := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", cfg.Addr, "synchronous", cfg.Synchronous)

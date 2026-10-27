@@ -1,11 +1,14 @@
 {
   "app": { "name": "Atlas", "loading": "Loading…" },
   "nav": {
-    "boards": "Boards",
+    "projects": "Projects",
+    "overview": "All projects",
     "tokens": "API tokens",
     "toggleTheme": "Toggle theme",
     "signOut": "Sign out",
-    "main": "Main navigation"
+    "main": "Main navigation",
+    "live": "Live updates connected",
+    "offline": "Reconnecting…"
   },
   "auth": {
     "login": {
@@ -19,9 +22,105 @@
     }
   },
   "home": {
-    "title": "Welcome, {name}",
-    "empty": "Projects and boards will appear here."
+    "title": "Projects",
+    "empty": "No projects yet. Create one below.",
+    "role": "Your role: {role}"
   },
+  "projects": {
+    "create": "New project",
+    "key": "Key (e.g. EXO)",
+    "name": "Name",
+    "submit": "Create project",
+    "failed": "Could not create the project: {message}"
+  },
+  "project": {
+    "back": "All projects",
+    "views": "Project views",
+    "board": "Board",
+    "list": "List",
+    "backlog": "Backlog",
+    "tree": "Hierarchy",
+    "loadFailed": "Could not load this project."
+  },
+  "filters": {
+    "label": "Filters",
+    "search": "Search titles",
+    "type": "Type",
+    "anyType": "Any type",
+    "priority": "Priority",
+    "anyPriority": "Any priority",
+    "assignee": "Assignee",
+    "anyone": "Anyone",
+    "tag": "Label",
+    "anyTag": "Any label",
+    "archived": "Show archived",
+    "clear": "Clear filters",
+    "fields": "Card fields",
+    "showPriority": "Priority",
+    "showAssignee": "Assignee",
+    "showDue": "Due date",
+    "showLabels": "Labels"
+  },
+  "board": {
+    "tools": "Filters and add item",
+    "add": "Add item",
+    "type": "Type",
+    "itemTitle": "Title",
+    "status": "Status",
+    "submit": "Add",
+    "wip": "{count} / {limit}",
+    "overWip": "Over the WIP limit",
+    "count": "{count} cards",
+    "empty": "No cards",
+    "loadMore": "Load more",
+    "moveHandle": "Drag {key}",
+    "moved": "{key} moved to {status}.",
+    "reordered": "{key} is now at position {position} in {status}.",
+    "archive": "Archive",
+    "restore": "Restore",
+    "archived": "archived",
+    "blocked": "Blocked",
+    "unassigned": "Unassigned",
+    "conflict": "Someone else changed this card. The board was reloaded.",
+    "saveFailed": "Could not save: {message}",
+    "loadFailed": "Could not load the board.",
+    "help": "Drag a card by its handle, or focus it and use Alt + arrow keys to move it."
+  },
+  "list": {
+    "key": "Key",
+    "title": "Title",
+    "type": "Type",
+    "status": "Status",
+    "priority": "Priority",
+    "assignee": "Assignee",
+    "due": "Due",
+    "updated": "Updated",
+    "empty": "No items match.",
+    "sortedBy": "Sorted by {column}",
+    "loadMore": "Load more"
+  },
+  "backlog": {
+    "noEpic": "No epic",
+    "empty": "The backlog is empty.",
+    "loadMore": "Load more"
+  },
+  "tree": {
+    "expand": "Expand {key}",
+    "collapse": "Collapse {key}",
+    "empty": "No items yet."
+  },
+  "cross": {
+    "title": "All projects",
+    "projects": "Projects",
+    "readOnly": "Overview only: columns group statuses by category. Open a project to move cards."
+  },
+  "priority": {
+    "low": "low",
+    "normal": "normal",
+    "high": "high",
+    "urgent": "urgent"
+  },
+  "types": { "epic": "epic", "story": "story", "task": "task", "bug": "bug" },
   "tokens": { "title": "API tokens", "empty": "No API tokens yet." },
   "notFound": { "title": "Page not found", "back": "Back to start" }
 }

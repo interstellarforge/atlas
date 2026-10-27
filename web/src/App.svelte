@@ -1,8 +1,20 @@
 <script lang="ts">
-  import { login, logout, me, type User } from "./lib/api";
-  import { ApiError } from "./lib/api";
+  import {
+    ApiError,
+    listProjects,
+    login,
+    logout,
+    me,
+    type User,
+  } from "./lib/api";
+  import Board from "./lib/Board.svelte";
+  import { connect, disconnect, realtime } from "./lib/events.svelte";
   import { t } from "./lib/i18n";
+  import { loadPeople } from "./lib/people.svelte";
+  import Projects from "./lib/Projects.svelte";
+  import ProjectView from "./lib/ProjectView.svelte";
   import { navigate, route } from "./lib/router.svelte";
+  import { matchProject } from "./lib/routes";
   import { theme, toggleTheme } from "./lib/theme.svelte";
 
   let user = $state<User | undefined>();
@@ -10,10 +22,24 @@
   let email = $state("");
   let password = $state("");
   let error = $state("");
+  let allProjects = $state<string[]>([]);
+
+  const current = $derived(matchProject(route.path));
 
   void me()
     .then((u) => (user = u))
     .finally(() => (ready = true));
+
+  // Live updates and the people list only make sense while signed in.
+  $effect(() => {
+    if (user) {
+      connect();
+      void loadPeople();
+      void listProjects().then((ps) => (allProjects = ps.map((p) => p.key)));
+    } else {
+      disconnect();
+    }
+  });
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -70,8 +96,15 @@
     <header>
       <strong>{t("app.name")}</strong>
       <nav aria-label={t("nav.main")}>
-        <a href="#/" aria-current={route.path === "/" ? "page" : undefined}
-          >{t("nav.boards")}</a
+        <a
+          href="#/"
+          aria-current={route.path === "/" || current ? "page" : undefined}
+          >{t("nav.projects")}</a
+        >
+        <a
+          href="#/board"
+          aria-current={route.path === "/board" ? "page" : undefined}
+          >{t("nav.overview")}</a
         >
         <a
           href="#/tokens"
@@ -80,22 +113,34 @@
         >
       </nav>
       <span class="spacer"></span>
+      <span class="live" class:off={!realtime.connected} role="status">
+        <span aria-hidden="true">●</span>
+        <span class="sr-only"
+          >{realtime.connected ? t("nav.live") : t("nav.offline")}</span
+        >
+      </span>
       <button onclick={toggleTheme} aria-pressed={theme.current === "dark"}
         >{t("nav.toggleTheme")}</button
       >
       <button onclick={signOut}>{t("nav.signOut")}</button>
     </header>
     <main>
-      {#if route.path === "/"}
-        <h1>{t("home.title", { name: user.name })}</h1>
-        <p class="muted">{t("home.empty")}</p>
-      {:else if route.path === "/tokens"}
-        <h1>{t("tokens.title")}</h1>
-        <p class="muted">{t("tokens.empty")}</p>
-      {:else}
-        <h1>{t("notFound.title")}</h1>
-        <p><a href="#/">{t("notFound.back")}</a></p>
-      {/if}
+      <div class="page">
+        {#if route.path === "/"}
+          <Projects />
+        {:else if current}
+          <ProjectView project={current.key} view={current.view} />
+        {:else if route.path === "/board"}
+          <h1>{t("cross.title")}</h1>
+          <Board projects={allProjects} />
+        {:else if route.path === "/tokens"}
+          <h1>{t("tokens.title")}</h1>
+          <p class="muted">{t("tokens.empty")}</p>
+        {:else}
+          <h1>{t("notFound.title")}</h1>
+          <p><a href="#/">{t("notFound.back")}</a></p>
+        {/if}
+      </div>
     </main>
   </div>
 {/if}
@@ -116,42 +161,19 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
   }
-  h1 {
-    margin: 0;
-    font-size: 1.25rem;
-  }
   label {
     display: grid;
     gap: var(--space-1);
     font-size: 0.875rem;
     color: var(--color-muted);
   }
-  input {
-    padding: var(--space-2) var(--space-3);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-  }
-  button {
-    padding: var(--space-2) var(--space-3);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    cursor: pointer;
-  }
-  button.primary {
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border-color: var(--color-accent);
-  }
   .error {
     margin: 0;
-    color: var(--color-danger);
   }
-  .muted {
-    color: var(--color-muted);
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
   }
   header {
     display: flex;
@@ -164,6 +186,7 @@
   }
   nav {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-3);
   }
   nav a {
@@ -177,7 +200,29 @@
   .spacer {
     flex: 1;
   }
+  .live {
+    color: #2e9e5b;
+    font-size: 0.8rem;
+  }
+  .live.off {
+    color: var(--color-muted);
+  }
   main {
+    flex: 1;
+    min-height: 0;
     padding: var(--space-4);
+  }
+  .page {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    overflow-y: auto;
+  }
+  .page > :global(.board),
+  .page > :global(.project) {
+    flex: 1;
+    min-height: 0;
   }
 </style>

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -15,6 +17,8 @@ type Config struct {
 	CookieSecure  bool
 	AdminEmail    string
 	AdminPassword string
+	// EventRetention is how long change events are kept for reconnecting clients.
+	EventRetention time.Duration
 }
 
 func Load() (Config, error) {
@@ -29,6 +33,11 @@ func Load() (Config, error) {
 	if c.Synchronous != "FULL" && c.Synchronous != "NORMAL" {
 		return c, fmt.Errorf("ATLAS_SYNCHRONOUS must be FULL or NORMAL, got %q", c.Synchronous)
 	}
+	days, err := strconv.Atoi(env("ATLAS_EVENT_RETENTION_DAYS", "7"))
+	if err != nil || days < 1 {
+		return c, fmt.Errorf("ATLAS_EVENT_RETENTION_DAYS must be a positive number of days")
+	}
+	c.EventRetention = time.Duration(days) * 24 * time.Hour
 	if err := c.LogLevel.UnmarshalText([]byte(env("ATLAS_LOG_LEVEL", "info"))); err != nil {
 		return c, fmt.Errorf("ATLAS_LOG_LEVEL: %w", err)
 	}

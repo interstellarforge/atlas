@@ -145,3 +145,88 @@ func TestMCPReadToolsAreScopedAndCompact(t *testing.T) {
 		t.Fatalf("field selection: %s", res.Result.Content[0].Text)
 	}
 }
+
+func TestMCPWritesAreAtomicIdempotentAndVersioned(t *testing.T) {
+	e := setup(t)
+	cookie, csrf := e.login(t)
+	asUser := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, asUser)
+	_, read, _ := e.auth.CreateToken(1, "ro", []string{auth.ScopeRead}, nil, nil)
+	_, write, _ := e.auth.CreateToken(1, "rw", []string{auth.ScopeRead, auth.ScopeWrite}, nil, nil)
+
+	call := func(token string, args map[string]any) (rpcResult, string) {
+		r := decodeBody[rpcResult](t, mcpCall(e, token, "items_write", args))
+		text := ""
+		if len(r.Result.Content) > 0 {
+			text = r.Result.Content[0].Text
+		}
+		return r, text
+	}
+	create := func(title string) map[string]any {
+		return map[string]any{"op": "create", "project": "EXO", "type": "task", "title": title}
+	}
+	count := func() int {
+		page := decodeBody[struct{ Items []map[string]any }](t, e.do("GET", "/api/v1/items?project=EXO", nil, asUser))
+		return len(page.Items)
+	}
+
+	if r, _ := call(read, map[string]any{"operations": []any{create("x")}}); !r.Result.IsError || count() != 0 {
+		t.Fatalf("read-only token wrote (items=%d)", count())
+	}
+
+	// Atomic: the second operation is invalid, so the first must not persist.
+	r, text := call(write, map[string]any{"operations": []any{create("a"), map[string]any{"op": "update", "key": "EXO-99", "version": 1, "title": "z"}}})
+	if !r.Result.IsError || !strings.Contains(text, `"operation":1`) || count() != 0 {
+		t.Fatalf("atomic batch: %s items=%d", text, count())
+	}
+
+	// Idempotent: the same key and request creates once; a different request with the key is refused.
+	args := map[string]any{"idempotency_key": "k1", "operations": []any{create("a")}}
+	if r, text = call(write, args); r.Result.IsError || count() != 1 {
+		t.Fatalf("first write: %s", text)
+	}
+	if r, text = call(write, args); r.Result.IsError || !strings.Contains(text, `"replayed":true`) || count() != 1 {
+		t.Fatalf("replay: %s items=%d", text, count())
+	}
+	if r, _ = call(write, map[string]any{"idempotency_key": "k1", "operations": []any{create("b")}}); !r.Result.IsError || count() != 1 {
+		t.Fatal("key reuse with a different request was accepted")
+	}
+
+	// Stale version: conflict carries the current state; partial mode reports it per operation.
+	upd := func(v int, title string) map[string]any {
+		return map[string]any{"op": "update", "key": "EXO-1", "version": v, "title": title}
+	}
+	if r, text = call(write, map[string]any{"operations": []any{upd(1, "new")}}); r.Result.IsError {
+		t.Fatalf("update: %s", text)
+	}
+	r, text = call(write, map[string]any{"partial": true, "operations": []any{upd(1, "stale"), create("c")}})
+	if r.Result.IsError || !strings.Contains(text, `"code":"conflict"`) || !strings.Contains(text, `"version":2`) || count() != 2 {
+		t.Fatalf("partial: %s items=%d", text, count())
+	}
+}
+
+func TestMCPCommentsAndResponseCap(t *testing.T) {
+	e := setup(t)
+	cookie, csrf := e.login(t)
+	asUser := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, asUser)
+	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "t", "description": strings.Repeat("x", 20000)}, asUser)
+	_, read, _ := e.auth.CreateToken(1, "ro", []string{auth.ScopeRead}, nil, nil)
+	_, write, _ := e.auth.CreateToken(1, "rw", []string{auth.ScopeRead, auth.ScopeWrite}, nil, nil)
+
+	args := map[string]any{"key": "EXO-1", "body": "done"}
+	if r := decodeBody[rpcResult](t, mcpCall(e, read, "comment_add", args)); !r.Result.IsError {
+		t.Fatal("read-only token added a comment")
+	}
+	r := decodeBody[rpcResult](t, mcpCall(e, write, "comment_add", args))
+	if r.Result.IsError || !strings.Contains(r.Result.Content[0].Text, `"actor":"token:pat-`) {
+		t.Fatalf("comment: %+v", r)
+	}
+
+	// An oversized result is an explicit error, never cut-off JSON.
+	r = decodeBody[rpcResult](t, mcpCall(e, write, "item_get", map[string]any{"key": "EXO-1"}))
+	var got struct{ Error struct{ Code string } }
+	if err := json.Unmarshal([]byte(r.Result.Content[0].Text), &got); err != nil || !r.Result.IsError || got.Error.Code != "too_large" {
+		t.Fatalf("cap: %v %s", err, r.Result.Content[0].Text)
+	}
+}

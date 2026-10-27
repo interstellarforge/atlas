@@ -13,6 +13,7 @@ import (
 	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
+	"github.com/kees/atlas/internal/events"
 	"github.com/kees/atlas/internal/mcp"
 	"github.com/kees/atlas/migrations"
 )
@@ -38,7 +39,10 @@ func setup(t *testing.T) env {
 	}
 	spa := fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}
 	svc := core.New(d, a)
-	return env{h: api.New(d, a, svc, false, spa, mcp.Handler(svc)).Handler(), auth: a}
+	feed := events.New(d, svc)
+	svc.SetNotifier(feed.Hub().Notify)
+	h := api.New(api.Deps{DB: d, Auth: a, Core: svc, Feed: feed, SPA: spa, MCP: mcp.Handler(svc, feed)}).Handler()
+	return env{h: h, auth: a}
 }
 
 func (e env) do(method, path string, body any, mut func(*http.Request)) *httptest.ResponseRecorder {

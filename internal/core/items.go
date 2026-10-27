@@ -3,13 +3,11 @@ package core
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/kees/atlas/internal/auth"
@@ -25,7 +23,7 @@ const (
 	maxLabelLen    = 50
 	defaultPage    = 50
 	maxPage        = 200
-	itemSelectBase = `SELECT i.id, i.key, p.key, i.type, i.title, %s, par.key, st.name, st.category, i.priority,
+	itemSelectBase = `SELECT i.id, i.key, p.key, i.type, i.title, %s, par.key, rt.key, st.name, st.category, i.priority,
 		i.assignee_id, i.due_at, i.custom_data, i.version, i.archived_at, i.created_at, i.updated_at,
 		i.project_id, i.status_id, i.parent_id, i.path,
 		EXISTS (SELECT 1 FROM item_links l
@@ -35,7 +33,8 @@ const (
 		FROM work_items i
 		JOIN projects p ON p.id = i.project_id
 		JOIN project_statuses st ON st.id = i.status_id
-		LEFT JOIN work_items par ON par.id = i.parent_id`
+		LEFT JOIN work_items par ON par.id = i.parent_id
+		LEFT JOIN work_items rt ON rt.id = CAST(substr(i.path, 2, instr(substr(i.path, 2), '/') - 1) AS INTEGER)`
 )
 
 type Item struct {
@@ -45,6 +44,7 @@ type Item struct {
 	Title          string         `json:"title"`
 	Description    string         `json:"description"`
 	Parent         *string        `json:"parent"`
+	Root           string         `json:"root"` // key of the top-level ancestor (the item itself for a root)
 	Status         string         `json:"status"`
 	StatusCategory string         `json:"status_category"`
 	Priority       string         `json:"priority"`
@@ -105,10 +105,10 @@ func Select(it Item, fields []string) (map[string]any, error) {
 
 func scanItem(rows *sql.Rows) (itemRow, error) {
 	var r itemRow
-	var parent sql.NullString
+	var parent, root sql.NullString
 	var assignee, due, archived sql.NullInt64
 	var custom string
-	err := rows.Scan(&r.id, &r.Key, &r.Project, &r.Type, &r.Title, &r.Description, &parent, &r.Status, &r.StatusCategory,
+	err := rows.Scan(&r.id, &r.Key, &r.Project, &r.Type, &r.Title, &r.Description, &parent, &root, &r.Status, &r.StatusCategory,
 		&r.Priority, &assignee, &due, &custom, &r.Version, &archived, &r.CreatedAt, &r.UpdatedAt,
 		&r.projectID, &r.statusID, &r.parentID, &r.path, &r.Blocked)
 	if err != nil {
@@ -117,6 +117,7 @@ func scanItem(rows *sql.Rows) (itemRow, error) {
 	if parent.Valid {
 		r.Parent = &parent.String
 	}
+	r.Root = root.String
 	if assignee.Valid {
 		r.Assignee = &assignee.Int64
 	}
@@ -301,12 +302,15 @@ func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (
 		}
 		key := fmt.Sprintf("%s-%d", p.Key, number)
 		now := s.nowMs()
-		// shortcut: rank is the item number (append to column end); fractional keys arrive with the board (KAN epic).
+		rank, err := appendRank(tx, p.ID, statusID, 0)
+		if err != nil {
+			return err
+		}
 		res, err := tx.Exec(`INSERT INTO work_items (key, project_id, parent_id, path, type, title, description, status_id, priority,
 			assignee_id, due_at, rank, custom_data, version, created_at, updated_at)
 			VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 			key, p.ID, parentID, in.Type, in.Title, in.Description, statusID, in.Priority,
-			in.Assignee, in.DueAt, fmt.Sprintf("%010d", number), string(customJSON), now, now)
+			in.Assignee, in.DueAt, rank, string(customJSON), now, now)
 		if err != nil {
 			return err
 		}
@@ -316,6 +320,11 @@ func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (
 		}
 		if err := setLabels(tx, p.ID, id, in.Labels); err != nil {
 			return err
+		}
+		if len(rank) > maxRankLen {
+			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, statusID); err != nil {
+				return err
+			}
 		}
 		if err := s.journal(ctx, tx, a, change{Operation: "item.create", Target: key, Event: "item.created",
 			Project: p.Key, ItemKey: key, Changes: map[string]any{"type": in.Type, "title": in.Title}}); err != nil {
@@ -421,6 +430,7 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 		}
 		event := "item.updated"
 		var labels *[]string
+		var rebalanceTo int64 // status whose column needs new keys after this update
 
 		for k, v := range patch {
 			switch k {
@@ -454,6 +464,16 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 				}
 				set("status_id", k, cur.Status, name)
 				args[len(args)-1] = id
+				if id != cur.statusID { // a changed status puts the item at the end of its new column
+					rk, err := appendRank(tx, p.ID, id, cur.id)
+					if err != nil {
+						return err
+					}
+					sets, args = append(sets, "rank = ?"), append(args, rk)
+					if len(rk) > maxRankLen {
+						rebalanceTo = id
+					}
+				}
 			case "priority":
 				pr, ok := v.(string)
 				if !ok || !slices.Contains(priorities, pr) {
@@ -551,6 +571,11 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 				return err
 			}
 		}
+		if rebalanceTo != 0 {
+			if err := s.rebalance(ctx, tx, a, p.Key, p.ID, rebalanceTo); err != nil {
+				return err
+			}
+		}
 		if err := s.journal(ctx, tx, a, change{Operation: "item.update", Target: key, Event: event,
 			Project: p.Key, ItemKey: key, Changes: diff}); err != nil {
 			return err
@@ -566,6 +591,7 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 
 type ItemFilter struct {
 	Project         string
+	Projects        []string // several projects; ignored when Project is set
 	Type            string
 	Status          string
 	Priority        string
@@ -573,6 +599,8 @@ type ItemFilter struct {
 	Parent          string
 	Under           string // item key: that item and all its descendants
 	Q               string // case-insensitive title substring
+	Category        string // status category: todo, active or completed
+	Sort            string // key (default), updated, priority, due or rank
 	Assignee        *int64
 	UpdatedSince    *int64
 	IncludeArchived bool
@@ -599,90 +627,47 @@ func (s *Service) ListItems(ctx context.Context, a auth.Actor, f ItemFilter) (It
 	}
 	limit = min(limit, maxPage)
 
-	var projectIDs []int64
-	if f.Project != "" {
-		p, _, err := s.access(s.db.R, a, f.Project, roleViewer)
-		if err != nil {
-			return page, err
-		}
-		projectIDs = []int64{p.ID}
-	} else {
-		readable, err := s.readableProjects(s.db.R, a)
-		if err != nil {
-			return page, err
-		}
-		for id := range readable {
-			projectIDs = append(projectIDs, id)
-		}
+	projectIDs, err := s.filterProjects(a, f)
+	if err != nil {
+		return page, err
 	}
 	if len(projectIDs) == 0 {
 		return page, nil
 	}
 
-	conds := []string{"i.project_id IN (" + placeholders(len(projectIDs)) + ")"}
-	args := make([]any, 0, len(projectIDs)+8)
-	for _, id := range projectIDs {
-		args = append(args, id)
+	conds, args, err := s.filterConds(f, projectIDs)
+	if err != nil {
+		return page, err
 	}
-	add := func(cond string, a ...any) { conds = append(conds, cond); args = append(args, a...) }
-
-	if f.Type != "" {
-		add("i.type = ?", f.Type)
+	order, keyset, err := sortClause(f.Sort)
+	if err != nil {
+		return page, err
 	}
-	if f.Status != "" {
-		add("st.name = ? COLLATE NOCASE", f.Status)
-	}
-	if f.Priority != "" {
-		add("i.priority = ?", f.Priority)
-	}
-	if f.Assignee != nil {
-		add("i.assignee_id = ?", *f.Assignee)
-	}
-	if f.Label != "" {
-		add(`EXISTS (SELECT 1 FROM item_labels il JOIN labels l ON l.id = il.label_id WHERE il.item_id = i.id AND l.name = ?)`, f.Label)
-	}
-	if f.Parent != "" {
-		add("i.parent_id = (SELECT id FROM work_items WHERE key = ?)", f.Parent)
-	}
-	if f.Under != "" {
-		var path string
-		err := s.db.R.QueryRow(`SELECT path FROM work_items WHERE key = ?`, f.Under).Scan(&path)
-		if errors.Is(err, sql.ErrNoRows) {
-			return page, invalid("unknown item %q", f.Under)
-		}
-		if err != nil {
+	offset := 0
+	if f.Cursor != "" {
+		if keyset {
+			id, err := decodeIDCursor(f.Cursor)
+			if err != nil {
+				return page, err
+			}
+			conds, args = append(conds, "i.id > ?"), append(args, id)
+		} else if offset, err = decodeOffsetCursor(f.Cursor); err != nil {
 			return page, err
 		}
-		lo, hi := subtreeRange(path)
-		add("i.path >= ? AND i.path < ?", lo, hi)
-	}
-	if f.UpdatedSince != nil {
-		add("i.updated_at >= ?", *f.UpdatedSince)
-	}
-	if f.Q != "" {
-		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(f.Q)
-		add(`i.title LIKE ? ESCAPE '\'`, "%"+esc+"%")
-	}
-	if !f.IncludeArchived {
-		conds = append(conds, "i.archived_at IS NULL")
-	}
-	if f.Cursor != "" {
-		raw, err := base64.RawURLEncoding.DecodeString(f.Cursor)
-		id, perr := strconv.ParseInt(string(raw), 10, 64)
-		if err != nil || perr != nil {
-			return page, invalid("invalid cursor")
-		}
-		add("i.id > ?", id)
 	}
 
 	withDesc := slices.Contains(f.Fields, "description")
-	rows, err := queryItems(s.db.R, withDesc, "WHERE "+strings.Join(conds, " AND ")+" ORDER BY i.id LIMIT ?", append(args, limit+1)...)
+	rows, err := queryItems(s.db.R, withDesc, "WHERE "+strings.Join(conds, " AND ")+" ORDER BY "+order+" LIMIT ? OFFSET ?",
+		append(args, limit+1, offset)...)
 	if err != nil {
 		return page, err
 	}
 	if len(rows) > limit {
 		rows = rows[:limit]
-		c := base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(rows[limit-1].id, 10)))
+		c := encodeOffsetCursor(offset + limit)
+		if keyset {
+			c = encodeIDCursor(rows[limit-1].id)
+		}
 		page.NextCursor = &c
 	}
 	if slices.Contains(f.Fields, "labels") {
