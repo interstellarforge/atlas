@@ -52,8 +52,8 @@ func (s *Service) ChangePassword(ctx context.Context, a auth.Actor, current, nex
 	if err := selfOnly(a); err != nil {
 		return err
 	}
-	if len(next) < 8 {
-		return invalid("the new password needs at least 8 characters")
+	if err := checkPassword(s.Policy(), next); err != nil {
+		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
 		var hash string

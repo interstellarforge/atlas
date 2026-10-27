@@ -18,5 +18,5 @@ Epic SET adds personal settings, project settings, project tokens, administratio
 
 ## Consequences
 
-- Not built: configurable rights, custom roles, registration policy, instance-wide item templates, subitems in templates, avatar upload, e-mail change, account deletion, 2FA. Each is a candidate for a follow-up ADR.
+- Not built: configurable rights and custom roles (see decision 1). Registration policy, invites, instance-wide item templates, subitems in templates, profile pictures, email change, account deletion and TOTP 2FA were built afterwards; see ADR-0009.
 - Deactivated users keep their rows; re-activating restores access but not their old sessions.

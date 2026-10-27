@@ -28,6 +28,8 @@ var (
 	ErrRateLimited        = errors.New("too many login attempts")
 	ErrUnauthenticated    = errors.New("unauthenticated")
 	ErrInvalid            = errors.New("invalid input")
+	// ErrTOTPRequired means the password was right but the account has two-factor authentication on.
+	ErrTOTPRequired = errors.New("two-factor code required")
 )
 
 type User struct {
@@ -35,6 +37,9 @@ type User struct {
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	IsAdmin bool   `json:"is_admin"`
+	Avatar  bool   `json:"avatar"`
+	// TOTP is true when two-factor authentication is on (shown to the user themselves only).
+	TOTP bool `json:"totp,omitempty"`
 }
 
 type Token struct {
@@ -57,10 +62,28 @@ type Service struct {
 	fails map[string][]time.Time
 	// seen throttles last_used_at writes: token id -> when it was last written.
 	seen map[int64]time.Time
+	ttl  time.Duration
 }
 
+// SessionTTL is how long a new session lasts; the instance policy can change it.
+func (s *Service) SessionTTL() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ttl
+}
+
+func (s *Service) SetSessionTTL(d time.Duration) {
+	s.mu.Lock()
+	s.ttl = d
+	s.mu.Unlock()
+}
+
+// Throttled and Failed let other unauthenticated endpoints (registration) share the login failure limiter.
+func (s *Service) Throttled(key string) bool { return s.limited(key) }
+func (s *Service) Failed(key string)         { s.recordFail(key) }
+
 func NewService(d *db.DB) *Service {
-	return &Service{db: d, fails: map[string][]time.Time{}, seen: map[int64]time.Time{}}
+	return &Service{db: d, fails: map[string][]time.Time{}, seen: map[int64]time.Time{}, ttl: SessionTTL}
 }
 
 // EnsureAdmin creates the first admin when the database has no users.
@@ -97,15 +120,19 @@ func (s *Service) CreateUser(email, name, password string, admin bool) (User, er
 }
 
 // Login verifies credentials and returns a new session token (cookie value) and CSRF token.
-func (s *Service) Login(email, password, clientKey string) (user User, session, csrf string, err error) {
+func (s *Service) Login(email, password, code, clientKey string) (user User, session, csrf string, err error) {
 	key := strings.ToLower(email) + "|" + clientKey
 	if s.limited(key) {
 		return User{}, "", "", ErrRateLimited
 	}
 
 	var hash string
-	err = s.db.R.QueryRow(`SELECT id, email, name, is_admin, password_hash FROM users WHERE email = ? AND deactivated_at IS NULL`, email).
-		Scan(&user.ID, &user.Email, &user.Name, &user.IsAdmin, &hash)
+	var totpOn bool
+	var totpSecret sql.NullString
+	var lastStep int64
+	err = s.db.R.QueryRow(`SELECT id, email, name, is_admin, password_hash, avatar_path IS NOT NULL, totp_enabled, totp_secret, totp_last_step
+		FROM users WHERE email = ? AND deactivated_at IS NULL`, email).
+		Scan(&user.ID, &user.Email, &user.Name, &user.IsAdmin, &hash, &user.Avatar, &totpOn, &totpSecret, &lastStep)
 	ok := false
 	if err == nil {
 		ok, _ = VerifyPassword(password, hash)
@@ -120,15 +147,45 @@ func (s *Service) Login(email, password, clientKey string) (user User, session, 
 		return User{}, "", "", ErrInvalidCredentials
 	}
 
+	if totpOn {
+		if strings.TrimSpace(code) == "" {
+			return User{}, "", "", ErrTOTPRequired // the password was right: do not count this as a failure
+		}
+		if !s.secondFactor(user.ID, totpSecret.String, code, lastStep) {
+			s.recordFail(key)
+			return User{}, "", "", ErrInvalidCredentials
+		}
+		user.TOTP = true
+	}
+
 	session = randomToken(32)
 	csrf = randomToken(16)
 	now := time.Now()
 	if _, err := s.db.W.Exec(`INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?)`, hashToken(session), user.ID, csrf, now.UnixMilli(), now.Add(SessionTTL).UnixMilli()); err != nil {
+		VALUES (?, ?, ?, ?, ?)`, hashToken(session), user.ID, csrf, now.UnixMilli(), now.Add(s.SessionTTL()).UnixMilli()); err != nil {
 		return User{}, "", "", err
 	}
 	s.clearFails(key)
 	return user, session, csrf, nil
+}
+
+// secondFactor accepts a current authenticator code (once per step) or an unused recovery code.
+func (s *Service) secondFactor(userID int64, secret, code string, lastStep int64) bool {
+	if step, ok := VerifyTOTP(secret, code, time.Now(), lastStep); ok {
+		res, err := s.db.W.Exec(`UPDATE users SET totp_last_step = ? WHERE id = ? AND totp_last_step < ?`, step, userID, step)
+		if err != nil {
+			return false
+		}
+		n, _ := res.RowsAffected()
+		return n == 1 // two logins racing with the same code: only one wins
+	}
+	res, err := s.db.W.Exec(`UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL`,
+		time.Now().UnixMilli(), userID, HashRecoveryCode(code))
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n == 1
 }
 
 func (s *Service) Logout(session string) error {
@@ -155,8 +212,8 @@ func (s *Service) SessionActor(session string) (Actor, error) {
 
 func (s *Service) User(id int64) (User, error) {
 	var u User
-	err := s.db.R.QueryRow(`SELECT id, email, name, is_admin FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin)
+	err := s.db.R.QueryRow(`SELECT id, email, name, is_admin, avatar_path IS NOT NULL, totp_enabled FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Avatar, &u.TOTP)
 	return u, err
 }
 

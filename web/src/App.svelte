@@ -3,11 +3,14 @@
   import {
     ApiError,
     getPreferences,
+    getPublicPolicy,
     listProjects,
     login,
     logout,
     me,
     type Project,
+    type PublicPolicy,
+    register,
     type User,
   } from "./lib/api";
   import Board from "./lib/Board.svelte";
@@ -33,6 +36,13 @@
   let email = $state("");
   let password = $state("");
   let error = $state("");
+  let code = $state("");
+  let needCode = $state(false);
+  let policy = $state<PublicPolicy | undefined>();
+  let regName = $state("");
+  let regInvite = $state("");
+  let notice = $state("");
+  const registering = $derived(route.path.startsWith("/register"));
   let projects = $state<Project[]>([]);
 
   const current = $derived(matchProject(route.path));
@@ -73,19 +83,62 @@
       : undefined,
   );
 
+  // Signed-in users have no use for the registration page.
+  $effect(() => {
+    if (user && route.path.startsWith("/register")) navigate("/");
+  });
+
   // The token page moved into the personal settings.
   $effect(() => {
     if (route.path === "/tokens") navigate("/settings/tokens");
   });
 
+  // The sign-in page offers registration only when the instance allows it.
+  $effect(() => {
+    if (ready && !user) void getPublicPolicy().then((p) => (policy = p));
+  });
+
+  // /register?invite=CODE pre-fills the invite code.
+  $effect(() => {
+    if (registering) {
+      const q = route.path.split("?")[1] ?? "";
+      regInvite = new URLSearchParams(q).get("invite") ?? regInvite;
+    }
+  });
+
+  async function submitRegister(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    error = "";
+    try {
+      await register({
+        email,
+        name: regName,
+        password,
+        ...(regInvite && { invite: regInvite }),
+      });
+      user = await login(email, password);
+      password = "";
+      navigate("/");
+    } catch (e) {
+      error = t("auth.register.failed", {
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
+
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     error = "";
     try {
-      user = await login(email, password);
+      user = await login(email, password, code);
       password = "";
+      code = "";
+      needCode = false;
     } catch (e) {
-      if (e instanceof ApiError && e.status === 429)
+      if (e instanceof ApiError && e.code === "totp_required") {
+        needCode = true;
+        notice = t("auth.login.codeNeeded");
+      } else if (e instanceof ApiError && e.status === 429)
         error = t("auth.login.rateLimited");
       else if (e instanceof ApiError && e.status === 401)
         error = t("auth.login.invalid");
@@ -113,33 +166,112 @@
       </blockquote>
     </aside>
     <main class="formside">
-      <form onsubmit={submit}>
-        <div class="header">
-          <Brand />
-          <h1>{t("auth.login.title")}</h1>
-          <p class="muted">{t("auth.login.subtitle")}</p>
-        </div>
-        <label>
-          {t("auth.login.email")}
-          <input
-            type="email"
-            bind:value={email}
-            autocomplete="username"
-            required
-          />
-        </label>
-        <label>
-          {t("auth.login.password")}
-          <input
-            type="password"
-            bind:value={password}
-            autocomplete="current-password"
-            required
-          />
-        </label>
-        {#if error}<p class="banner error" role="alert">{error}</p>{/if}
-        <button class="primary" type="submit">{t("auth.login.submit")}</button>
-      </form>
+      {#if registering}
+        <form onsubmit={submitRegister}>
+          <div class="header">
+            <Brand />
+            <h1>{t("auth.register.title")}</h1>
+            <p class="muted">
+              {policy?.registration === "open"
+                ? t("auth.register.open", {
+                    domain: policy.allowed_domain || "*",
+                  })
+                : t("auth.register.invite")}
+            </p>
+          </div>
+          <label
+            >{t("settings.name")}<input
+              bind:value={regName}
+              required
+              maxlength="100"
+            /></label
+          >
+          <label>
+            {t("auth.login.email")}
+            <input
+              type="email"
+              bind:value={email}
+              autocomplete="username"
+              required
+            />
+          </label>
+          <label>
+            {t("auth.login.password")}
+            <input
+              type="password"
+              bind:value={password}
+              autocomplete="new-password"
+              minlength={policy?.min_password_length ?? 8}
+              required
+            />
+            <small class="muted"
+              >{t("auth.register.minLength", {
+                count: policy?.min_password_length ?? 8,
+              })}</small
+            >
+          </label>
+          {#if policy?.registration !== "open" || regInvite}
+            <label
+              >{t("auth.register.invitecode")}<input
+                bind:value={regInvite}
+                autocomplete="off"
+              /></label
+            >
+          {/if}
+          {#if error}<p class="banner error" role="alert">{error}</p>{/if}
+          <button class="primary" type="submit"
+            >{t("auth.register.submit")}</button
+          >
+          <a class="switch" href="#/">{t("auth.register.haveAccount")}</a>
+        </form>
+      {:else}
+        <form onsubmit={submit}>
+          <div class="header">
+            <Brand />
+            <h1>{t("auth.login.title")}</h1>
+            <p class="muted">{t("auth.login.subtitle")}</p>
+          </div>
+          <label>
+            {t("auth.login.email")}
+            <input
+              type="email"
+              bind:value={email}
+              autocomplete="username"
+              required
+            />
+          </label>
+          <label>
+            {t("auth.login.password")}
+            <input
+              type="password"
+              bind:value={password}
+              autocomplete="current-password"
+              required
+            />
+          </label>
+          {#if needCode}
+            <label>
+              {t("auth.login.code")}
+              <input
+                bind:value={code}
+                autocomplete="one-time-code"
+                inputmode="numeric"
+                required
+              />
+              <small class="muted">{t("auth.login.codeHint")}</small>
+            </label>
+            {#if notice && !error}<p class="banner" role="status">
+                {notice}
+              </p>{/if}
+          {/if}
+          {#if error}<p class="banner error" role="alert">{error}</p>{/if}
+          <button class="primary" type="submit">{t("auth.login.submit")}</button
+          >
+          {#if policy && policy.registration !== "closed"}
+            <a class="switch" href="#/register">{t("auth.register.create")}</a>
+          {/if}
+        </form>
+      {/if}
     </main>
   </div>
 {:else}
@@ -175,6 +307,10 @@
         {user}
         section={route.path.split("/")[2] ?? "profile"}
         onuser={(u: User) => (user = u)}
+        ondeleted={() => {
+          user = undefined;
+          navigate("/");
+        }}
       />
     {:else}
       <h1>{t("notFound.title")}</h1>
@@ -261,6 +397,10 @@
   }
   form input {
     min-height: 44px;
+  }
+  .switch {
+    text-align: center;
+    font-size: var(--atlas-fs-sm);
   }
   label {
     display: grid;

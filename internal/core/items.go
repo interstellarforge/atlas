@@ -62,6 +62,8 @@ type Item struct {
 	UpdatedAt      int64          `json:"updated_at"`
 	// Warnings are set on a freshly created item when its template no longer fitted (not stored).
 	Warnings []string `json:"warnings,omitempty"`
+	// Subitems are the keys created from a template's subitem tree (not stored on the item).
+	Subitems []string `json:"subitems,omitempty"`
 }
 
 // itemRow is an Item plus the internal ids the services need.
@@ -244,18 +246,51 @@ type CreateItem struct {
 	Template string
 }
 
-// CreateItem creates one item, applying its template first when one is named.
+// CreateItem creates one item, applying its template first when one is named. A template with subitems
+// creates the whole tree in one transaction: it all exists or none of it does.
 func (s *Service) CreateItem(ctx context.Context, a auth.Actor, in CreateItem) (Item, error) {
-	var checklist, warnings []string
-	if in.Template != "" {
+	if in.Template == "" {
+		return s.createItem(ctx, a, in, nil)
+	}
+	t, err := s.applyItemTemplate(a, in)
+	if err != nil {
+		return Item{}, err
+	}
+	if len(t.subitems) == 0 {
+		it, err := s.createItem(ctx, a, t.in, t.checklist)
+		it.Warnings = t.warnings
+		return it, err
+	}
+	var it Item
+	var keys []string
+	create := func(bs *Service) error {
 		var err error
-		if in, checklist, warnings, err = s.applyItemTemplate(a, in); err != nil {
-			return Item{}, err
+		if it, err = bs.createItem(ctx, a, t.in, t.checklist); err != nil {
+			return err
+		}
+		return bs.createSubitems(ctx, a, t.in.Project, it.Key, t.subitems, t.expand, &keys)
+	}
+	if s.outer != nil { // already inside a batch or import transaction
+		err = create(s)
+	} else {
+		tx, berr := s.db.W.Begin()
+		if berr != nil {
+			return Item{}, berr
+		}
+		defer tx.Rollback()
+		bs := *s
+		bs.outer = tx
+		if err = create(&bs); err == nil {
+			if err = tx.Commit(); err == nil && s.notify != nil {
+				s.notify()
+			}
 		}
 	}
-	it, err := s.createItem(ctx, a, in, checklist)
-	it.Warnings = warnings
-	return it, err
+	if err != nil {
+		return Item{}, err
+	}
+	it.Warnings, it.Subitems = t.warnings, keys
+	return it, nil
 }
 
 func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, checklist []string) (Item, error) {

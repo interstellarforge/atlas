@@ -73,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerProjectTokens(mux, protect)
 	s.registerAdmin(mux, protect)
 	s.registerTemplates(mux, protect)
+	s.registerIdentity(mux, protect)
 	mux.Handle("GET /api/v1/events", protect(s.events))
 	mux.Handle("GET /api/v1/changes", protect(s.changes))
 	if s.mcpStats != nil {

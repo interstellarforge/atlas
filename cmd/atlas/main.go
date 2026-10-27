@@ -96,6 +96,7 @@ func run() error {
 	svc := core.New(database, authSvc)
 	uploads := media.NewStore(filepath.Join(cfg.DataDir, "uploads"), media.Limits{MaxBytes: cfg.UploadMaxBytes, MaxPixels: cfg.UploadMaxMegapixels})
 	svc.SetMedia(uploads)
+	svc.ApplyPolicy()
 	if len(os.Args) > 1 {
 		return runCommand(svc, database, cfg.DataDir, os.Args[1:])
 	}

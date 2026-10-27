@@ -3,25 +3,38 @@
     type AdminUser,
     ApiError,
     type AuditEntry,
+    createInvite,
     createUser,
+    deleteInstanceItemTemplate,
     deleteProjectTemplate,
     getAudit,
     getInstance,
+    getPolicy,
+    type Invite,
+    type ItemTemplate,
     listAdminUsers,
+    listInstanceItemTemplates,
+    listInvites,
     listProjectTemplates,
     patchAdminUser,
+    type Policy,
     type ProjectTemplate,
+    revokeInvite,
     type RightRow,
+    saveInstanceItemTemplate,
     saveProjectTemplate,
+    setPolicy,
     type User,
   } from "./api";
   import { t } from "./i18n";
   import PageHero from "./PageHero.svelte";
+  import { formatSubitems, parseSubitems } from "./subitems";
 
   let { user, section }: { user: User; section: string } = $props();
 
   const sections = [
     "users",
+    "access",
     "templates",
     "rights",
     "audit",
@@ -35,6 +48,20 @@
     timeStyle: "short",
   });
 
+  let policy = $state<Policy | undefined>();
+  let invites = $state<Invite[]>([]);
+  let inviteEmail = $state("");
+  let inviteAdmin = $state(false);
+  let inviteDays = $state(7);
+  let inviteLink = $state("");
+  let itemTemplates = $state<ItemTemplate[]>([]);
+  let it = $state({
+    name: "",
+    type: "task",
+    prefix: "",
+    description: "",
+    subitems: "",
+  });
   let templates = $state<ProjectTemplate[]>([]);
   let importText = $state("");
   let importName = $state("");
@@ -72,6 +99,17 @@
     users = await listAdminUsers();
   }
 
+  function exportHref(format: string): string {
+    const parts = [`format=${format}`];
+    for (const [k, v] of [
+      ["actor", fActor],
+      ["operation", fOperation],
+      ["target", fTarget],
+    ] as const)
+      if (v.trim()) parts.push(`${k}=${encodeURIComponent(v.trim())}`);
+    return `/api/v1/admin/audit/export?${parts.join("&")}`;
+  }
+
   async function loadAudit(more = false): Promise<void> {
     const before = more ? audit[audit.length - 1]?.id : undefined;
     const page = await getAudit({
@@ -86,9 +124,16 @@
   $effect(() => {
     if (active === "users")
       void loadUsers().catch(() => (error = t("admin.loadFailed")));
+    if (active === "access") {
+      void getPolicy().then((p) => (policy = p));
+      void listInvites().then((l) => (invites = l));
+    }
     if (active === "templates")
-      void listProjectTemplates()
-        .then((list) => (templates = list))
+      void Promise.all([listProjectTemplates(), listInstanceItemTemplates()])
+        .then(([list, items]) => {
+          templates = list;
+          itemTemplates = items;
+        })
         .catch(() => (error = t("admin.loadFailed")));
     if (active === "audit")
       void loadAudit().catch(() => (error = t("admin.loadFailed")));
@@ -139,6 +184,13 @@
             >{u.is_admin
               ? t("admin.removeAdmin")
               : t("admin.makeAdmin")}</button
+          >
+          <button
+            type="button"
+            onclick={() =>
+              void run(t("admin.totpReset"), async () => {
+                await patchAdminUser(u.id, { reset_totp: true });
+              })}>{t("admin.resetTotp")}</button
           >
           <button
             type="button"
@@ -203,6 +255,135 @@
       <button class="primary" type="submit">{t("admin.createUser")}</button>
     </div>
   </form>
+{:else if active === "access"}
+  {#if policy}
+    <form
+      class="panel"
+      onsubmit={(e) => {
+        e.preventDefault();
+        if (!policy) return;
+        const next = policy;
+        void run(t("settings.saved"), async () => {
+          policy = await setPolicy(next);
+        });
+      }}
+    >
+      <h2>{t("admin.policy")}</h2>
+      <p class="muted hint">{t("admin.policyIntro")}</p>
+      <label>
+        {t("admin.registration")}
+        <select bind:value={policy.registration}>
+          <option value="closed">{t("admin.regClosed")}</option>
+          <option value="invite">{t("admin.regInvite")}</option>
+          <option value="open">{t("admin.regOpen")}</option>
+        </select>
+      </label>
+      {#if policy.registration === "open"}
+        <label>
+          {t("admin.allowedDomain")}
+          <input bind:value={policy.allowed_domain} placeholder="example.com" />
+        </label>
+      {/if}
+      <label>
+        {t("admin.minPassword")}
+        <input
+          type="number"
+          min="8"
+          max="128"
+          bind:value={policy.min_password_length}
+          required
+        />
+      </label>
+      <label>
+        {t("admin.sessionDays")}
+        <input
+          type="number"
+          min="1"
+          max="90"
+          bind:value={policy.session_days}
+          required
+        />
+      </label>
+      <div>
+        <button class="primary" type="submit">{t("settings.save")}</button>
+      </div>
+    </form>
+  {/if}
+  <section class="panel" aria-labelledby="inv-title">
+    <h2 id="inv-title">{t("admin.invites")}</h2>
+    <p class="muted hint">{t("admin.invitesIntro")}</p>
+    {#if inviteLink}
+      <div class="banner ok" role="status">
+        <p>{t("admin.inviteOnce")}</p>
+        <code class="secret">{inviteLink}</code>
+      </div>
+    {/if}
+    <ul class="list">
+      {#each invites as inv (inv.id)}
+        <li class:off={Boolean(inv.used_at)}>
+          <div>
+            <strong>{inv.email || t("admin.anyEmail")}</strong>
+            <span class="muted"
+              >{inv.used_at
+                ? t("admin.inviteUsed", { date: dateTime.format(inv.used_at) })
+                : t("admin.inviteExpires", {
+                    date: dateTime.format(inv.expires_at),
+                  })}</span
+            >
+          </div>
+          {#if inv.is_admin}<span class="chip type">{t("admin.admin")}</span
+            >{/if}
+          {#if !inv.used_at}
+            <button
+              type="button"
+              onclick={() =>
+                void run(t("admin.inviteRevoked"), async () => {
+                  await revokeInvite(inv.id);
+                  invites = await listInvites();
+                })}>{t("psettings.remove")}</button
+            >
+          {/if}
+        </li>
+      {/each}
+    </ul>
+    <form
+      class="inline"
+      onsubmit={(e) => {
+        e.preventDefault();
+        void run(t("admin.inviteCreated"), async () => {
+          const made = await createInvite({
+            email: inviteEmail,
+            is_admin: inviteAdmin,
+            days: inviteDays,
+          });
+          inviteLink = `${location.origin}/#/register?invite=${made.code}`;
+          inviteEmail = "";
+          inviteAdmin = false;
+          invites = await listInvites();
+        });
+      }}
+    >
+      <input
+        type="email"
+        aria-label={t("admin.inviteEmail")}
+        placeholder={t("admin.inviteEmail")}
+        bind:value={inviteEmail}
+      />
+      <input
+        type="number"
+        min="1"
+        max="30"
+        aria-label={t("admin.inviteDays")}
+        bind:value={inviteDays}
+      />
+      <label class="check"
+        ><input type="checkbox" bind:checked={inviteAdmin} />{t(
+          "admin.admin",
+        )}</label
+      >
+      <button class="primary" type="submit">{t("admin.createInvite")}</button>
+    </form>
+  </section>
 {:else if active === "templates"}
   <section class="panel" aria-labelledby="tpls-title">
     <h2 id="tpls-title">{t("admin.nav.templates")}</h2>
@@ -264,6 +445,95 @@
       <button class="primary" type="submit">{t("admin.importTemplate")}</button>
     </div>
   </form>
+  <section class="panel" aria-labelledby="itpl-title">
+    <h2 id="itpl-title">{t("admin.instanceItemTemplates")}</h2>
+    <p class="muted hint">{t("admin.instanceItemTemplatesIntro")}</p>
+    <ul class="list">
+      {#each itemTemplates as tpl (tpl.id)}
+        <li>
+          <div>
+            <strong>{tpl.name}</strong>
+            <span class="muted"
+              >{t(`types.${tpl.type}` as "types.epic")}{tpl.subitems.length > 0
+                ? ` · ${t("psettings.subitemCount", { count: formatSubitems(tpl.subitems).split("\n").length })}`
+                : ""}</span
+            >
+          </div>
+          <button
+            type="button"
+            onclick={() =>
+              void run(t("psettings.templateDeleted"), async () => {
+                await deleteInstanceItemTemplate(tpl.id);
+                itemTemplates = await listInstanceItemTemplates();
+              })}>{t("psettings.remove")}</button
+          >
+        </li>
+      {/each}
+    </ul>
+    <form
+      class="stack"
+      onsubmit={(e) => {
+        e.preventDefault();
+        void run(t("psettings.templateSaved"), async () => {
+          await saveInstanceItemTemplate({
+            name: it.name,
+            type: it.type,
+            title_prefix: it.prefix,
+            description: it.description,
+            priority: "normal",
+            labels: [],
+            status: "",
+            checklist: [],
+            subitems: parseSubitems(it.subitems),
+          });
+          it = {
+            name: "",
+            type: "task",
+            prefix: "",
+            description: "",
+            subitems: "",
+          };
+          itemTemplates = await listInstanceItemTemplates();
+        });
+      }}
+    >
+      <label
+        >{t("psettings.templateName")}<input
+          bind:value={it.name}
+          required
+          maxlength="60"
+        /></label
+      >
+      <label>
+        {t("board.type")}
+        <select bind:value={it.type}>
+          {#each ["epic", "story", "task", "bug"] as typ (typ)}
+            <option value={typ}>{t(`types.${typ}` as "types.epic")}</option>
+          {/each}
+        </select>
+      </label>
+      <label
+        >{t("psettings.titlePrefix")}<input
+          bind:value={it.prefix}
+          maxlength="100"
+        /></label
+      >
+      <label
+        >{t("item.description")}<textarea bind:value={it.description} rows="3"
+        ></textarea></label
+      >
+      <label
+        >{t("psettings.subitems")}<textarea bind:value={it.subitems} rows="4"
+        ></textarea></label
+      >
+      <p class="muted hint">{t("psettings.subitemsHint")}</p>
+      <div>
+        <button class="primary" type="submit"
+          >{t("psettings.saveTemplate")}</button
+        >
+      </div>
+    </form>
+  </section>
 {:else if active === "rights"}
   <section class="panel" aria-labelledby="rights-title">
     <h2 id="rights-title">{t("admin.nav.rights")}</h2>
@@ -327,6 +597,12 @@
         bind:value={fTarget}
       />
       <button class="primary" type="submit">{t("admin.filter")}</button>
+      <a class="btn" href={exportHref("csv")} download="atlas-audit.csv"
+        >{t("admin.exportCsv")}</a
+      >
+      <a class="btn" href={exportHref("json")} download="atlas-audit.jsonl"
+        >{t("admin.exportJson")}</a
+      >
     </form>
     <div class="scroll">
       <table>
@@ -453,6 +729,22 @@
     flex: 1;
     min-width: 12rem;
     display: grid;
+  }
+  .stack {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .secret {
+    display: block;
+    padding: 8px 10px;
+    border-radius: var(--atlas-radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+  }
+  .banner p {
+    margin: 0 0 var(--space-2);
   }
   .inline {
     display: flex;

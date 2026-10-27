@@ -26,12 +26,25 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET, DELETE | `/me/sessions`, `/me/sessions/{id}` | Own active sessions (`current` marks this one); sign one out |
 | GET, PUT | `/me/preferences` | `{"theme": system/light/dark, "default_view": board/list/backlog/tree, "muted_notifications": [assigned, mention, blocker_done, followed]}`; muted types create no notification |
 | GET, POST, DELETE | `/projects/{key}/tokens[/{id}]` | Tokens limited to exactly this project (project admin, session only). POST `{"name","write","expires_at"?}`; secret shown once; list shows owner, scopes, `last_used_at`, expiry. Owner leaves the project: tokens are revoked |
-| GET, POST, DELETE | `/projects/{key}/item-templates[/{id}]` | Item templates (read: viewer; write: project admin). POST upserts by name: `{"name","type","title_prefix","description","priority","labels","status","checklist"}`. Placeholders `{date}`, `{user}` only |
+| GET, POST, DELETE | `/projects/{key}/item-templates[/{id}]` | Item templates (read: viewer; write: project admin). POST upserts by name: `{"name","type","title_prefix","description","priority","labels","status","checklist","subitems"}`; `subitems` is a tree `[{"type","title","description"?,"priority"?,"children"?}]` (3 levels, 50 items, hierarchy rules checked at save) created with the item in one transaction. The list includes instance-wide templates (`scope`). Placeholders `{date}`, `{user}` only |
 | GET, POST, DELETE | `/project-templates[/{id}]` | Project templates (read: any user; write: global admin). POST `{"name","description"}` plus `"from_project": "KEY"` or `"data": {version:1, statuses, transitions, labels, custom_fields, item_templates}`. `POST /projects` takes `"template": id` and applies it in one transaction |
 | GET | `/admin/users` | Global admin, session only |
 | PATCH | `/admin/users/{id}` | `{"is_admin"?, "active"?}`; no self-deactivation, the last active admin stays; deactivating ends sessions, tokens stop working |
 | GET | `/admin/audit` | Audit log newest first; filters `actor`, `operation` (prefix), `target`, `before` (id), `limit` (max 200) |
 | GET | `/admin/instance` | Effective instance settings (read-only, from the environment) and the rights matrix |
+| POST | `/auth/register` | `{"email","name","password","invite"?}`: with a valid invite, or when the instance policy is `open` (optionally one email domain). Refusals count against the login rate limiter. Closed instance without invite: 403 |
+| GET | `/auth/policy` | Public: `registration` (closed/invite/open), `min_password_length`, `allowed_domain` |
+| POST | `/auth/login` | Also accepts `code` (authenticator code or recovery code). With 2FA on and no code the answer is 401 `totp_required`; a used code cannot be reused |
+| PUT | `/me/email` | `{"email","password"}`: needs the password, shape and uniqueness checked (no confirmation mail), audited |
+| DELETE | `/me` | `{"password"}`: closes the own account for good (anonymised, sessions/tokens/memberships removed; refused for the only instance admin or the only admin of a project) |
+| PUT, DELETE | `/me/avatar` | Multipart `file`, same limits and checks as attachments; remove |
+| GET | `/users/{id}/avatar` | 320 px JPEG thumbnail for any signed-in reader (metadata such as EXIF is dropped); 404 without a picture |
+| GET | `/me/security` | `{totp, recovery_remaining}` |
+| POST | `/me/totp/setup`, `/me/totp/enable`, `/me/totp/disable` | Enrol: setup returns `secret` and `otpauth` `uri`; enable `{"code"}` returns 10 recovery codes once; disable `{"password","code"}` (a code or recovery code) |
+| GET, PUT | `/admin/policy` | `{"min_password_length": 8-128, "registration", "allowed_domain", "session_days": 1-90}` (global admin) |
+| GET, POST, DELETE | `/admin/invites[/{id}]` | POST `{"email"?,"is_admin","days"}` returns the `code` once; single use; with an email only that address may redeem it |
+| GET | `/admin/audit/export` | CSV (default) or `?format=json` (JSON lines) with the filters of `/admin/audit`; at most 50.000 entries per download (continue with `before`) |
+| GET, POST, DELETE | `/item-templates[/{id}]` | Instance-wide item templates (read: any user; write: global admin); usable in every project, a project template of the same name wins |
 | GET | `/mcp/stats` | Aggregate MCP call metrics per tool (calls, errors, bytes, p95 ms, paginated, too_large); in memory, reset on restart |
 | GET/POST/PATCH | `/projects`, `/projects/{key}` | Projects |
 | GET/POST, PATCH/DELETE `/projects/{key}/milestones[/{id}]` | Milestones with progress (`total`, `done` = active items in a completed status). Changes need a project admin; PATCH `{"name"?,"due_at"?,"released"?}`; delete refused while items use it. Items get one via `milestone` (name or null) on create/update; filter with `?milestone=` |

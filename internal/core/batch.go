@@ -154,6 +154,9 @@ func (s *Service) Batch(ctx context.Context, a auth.Actor, ops []BatchOp, partia
 			if len(it.Warnings) > 0 {
 				m["warnings"] = it.Warnings
 			}
+			if len(it.Subitems) > 0 {
+				m["subitems"] = it.Subitems
+			}
 			out.Results[i].Item = m
 			continue
 		}

@@ -26,16 +26,30 @@ type ItemTemplate struct {
 	Labels      []string `json:"labels"`
 	Status      string   `json:"status"`
 	Checklist   []string `json:"checklist"`
+	// Subitems are created under the item, in the same transaction, as a tree of up to maxSubitemDepth levels.
+	Subitems []SubItem `json:"subitems"`
+	// Scope is "project" or "instance" (an instance-wide template, managed by global admins, usable in every project).
+	Scope string `json:"scope"`
+}
+
+type SubItem struct {
+	Type        string    `json:"type"`
+	Title       string    `json:"title"`
+	Description string    `json:"description,omitempty"`
+	Priority    string    `json:"priority,omitempty"`
+	Children    []SubItem `json:"children,omitempty"`
 }
 
 const (
+	maxSubitems      = 50
+	maxSubitemDepth  = 3
 	maxTemplates     = 50
 	maxTemplateText  = 20000
 	maxTemplateLists = 100
 )
 
 func itemTemplateNames(q queryer, projectID int64) ([]string, error) {
-	rows, err := q.Query(`SELECT name FROM item_templates WHERE project_id = ? ORDER BY name`, projectID)
+	rows, err := q.Query(`SELECT DISTINCT name FROM item_templates WHERE project_id = ? OR project_id IS NULL ORDER BY name`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -53,12 +67,21 @@ func itemTemplateNames(q queryer, projectID int64) ([]string, error) {
 
 func scanItemTemplate(row interface{ Scan(...any) error }) (ItemTemplate, error) {
 	var t ItemTemplate
-	var labels, checklist string
-	if err := row.Scan(&t.ID, &t.Name, &t.Type, &t.TitlePrefix, &t.Description, &t.Priority, &labels, &t.Status, &checklist); err != nil {
+	var labels, checklist, subitems string
+	var project sql.NullInt64
+	if err := row.Scan(&t.ID, &t.Name, &t.Type, &t.TitlePrefix, &t.Description, &t.Priority, &labels, &t.Status, &checklist, &subitems, &project); err != nil {
 		return t, err
+	}
+	t.Scope = "project"
+	if !project.Valid {
+		t.Scope = "instance"
 	}
 	_ = json.Unmarshal([]byte(labels), &t.Labels)
 	_ = json.Unmarshal([]byte(checklist), &t.Checklist)
+	_ = json.Unmarshal([]byte(subitems), &t.Subitems)
+	if t.Subitems == nil {
+		t.Subitems = []SubItem{}
+	}
 	if t.Labels == nil {
 		t.Labels = []string{}
 	}
@@ -68,14 +91,14 @@ func scanItemTemplate(row interface{ Scan(...any) error }) (ItemTemplate, error)
 	return t, nil
 }
 
-const itemTemplateCols = `id, name, type, title_prefix, description, priority, labels, status, checklist`
+const itemTemplateCols = `id, name, type, title_prefix, description, priority, labels, status, checklist, subitems, project_id`
 
 func (s *Service) ListItemTemplates(ctx context.Context, a auth.Actor, key string) ([]ItemTemplate, error) {
 	p, _, err := s.access(s.db.R, a, key, roleViewer)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT `+itemTemplateCols+` FROM item_templates WHERE project_id = ? ORDER BY name`, p.ID)
+	rows, err := s.db.R.Query(`SELECT `+itemTemplateCols+` FROM item_templates WHERE project_id = ? OR project_id IS NULL ORDER BY project_id IS NULL, name`, p.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +143,13 @@ func validateItemTemplate(t *ItemTemplate) error {
 		}
 	}
 	t.Checklist = clean
+	count := 0
+	if err := validateSubitems(t.Type, t.Subitems, 1, &count); err != nil {
+		return err
+	}
+	if t.Subitems == nil {
+		t.Subitems = []SubItem{}
+	}
 	if t.Labels == nil {
 		t.Labels = []string{}
 	}
@@ -129,38 +159,131 @@ func validateItemTemplate(t *ItemTemplate) error {
 	return nil
 }
 
+func validateSubitems(parentType string, list []SubItem, depth int, count *int) error {
+	if depth > maxSubitemDepth {
+		return invalid("subitems go at most %d levels deep", maxSubitemDepth)
+	}
+	for i := range list {
+		sub := &list[i]
+		*count++
+		if *count > maxSubitems {
+			return invalid("a template holds at most %d subitems", maxSubitems)
+		}
+		sub.Title = strings.TrimSpace(sub.Title)
+		if sub.Title == "" || len(sub.Title) > maxTitleLen || len(sub.Description) > maxTemplateText {
+			return invalid("every subitem needs a title (max %d characters)", maxTitleLen)
+		}
+		if !slices.Contains(itemTypes, sub.Type) || !slices.Contains(allowedParents[sub.Type], parentType) {
+			return rule("a %s cannot be placed under a %s", sub.Type, parentType)
+		}
+		if sub.Priority != "" && !slices.Contains(priorities, sub.Priority) {
+			return invalid("priority must be one of %s", strings.Join(priorities, ", "))
+		}
+		if err := validateSubitems(sub.Type, sub.Children, depth+1, count); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SaveItemTemplate creates or replaces (by name) a template of the project; project admins only.
 func (s *Service) SaveItemTemplate(ctx context.Context, a auth.Actor, key string, t ItemTemplate) (ItemTemplate, error) {
 	if err := validateItemTemplate(&t); err != nil {
 		return ItemTemplate{}, err
 	}
-	labels, _ := json.Marshal(t.Labels)
-	checklist, _ := json.Marshal(t.Checklist)
 	err := s.tx(func(tx *sql.Tx) error {
 		p, _, err := s.access(tx, a, key, roleAdmin)
 		if err != nil {
 			return err
 		}
-		var n int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM item_templates WHERE project_id = ? AND name <> ?`, p.ID, t.Name).Scan(&n); err != nil {
+		if t.ID, err = s.upsertItemTemplate(tx, &p.ID, t); err != nil {
 			return err
 		}
-		if n >= maxTemplates {
-			return rule("a project holds at most %d item templates", maxTemplates)
-		}
-		if _, err := tx.Exec(`INSERT INTO item_templates (project_id, name, type, title_prefix, description, priority, labels, status, checklist, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (project_id, name) DO UPDATE SET type = excluded.type, title_prefix = excluded.title_prefix,
-			description = excluded.description, priority = excluded.priority, labels = excluded.labels, status = excluded.status, checklist = excluded.checklist`,
-			p.ID, t.Name, t.Type, t.TitlePrefix, t.Description, t.Priority, string(labels), t.Status, string(checklist), s.nowMs()); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(`SELECT id FROM item_templates WHERE project_id = ? AND name = ?`, p.ID, t.Name).Scan(&t.ID); err != nil {
-			return err
-		}
+		t.Scope = "project"
 		return s.journal(ctx, tx, a, change{Operation: "item_template.save", Target: key, Event: "project.updated", Project: key, Changes: map[string]any{"name": t.Name}})
 	})
 	return t, err
+}
+
+// SaveInstanceItemTemplate stores a template usable in every project; global admins only. A project
+// template with the same name takes precedence in its project.
+func (s *Service) SaveInstanceItemTemplate(ctx context.Context, a auth.Actor, t ItemTemplate) (ItemTemplate, error) {
+	if err := adminOnly(a); err != nil {
+		return ItemTemplate{}, err
+	}
+	if err := validateItemTemplate(&t); err != nil {
+		return ItemTemplate{}, err
+	}
+	err := s.tx(func(tx *sql.Tx) error {
+		var err error
+		if t.ID, err = s.upsertItemTemplate(tx, nil, t); err != nil {
+			return err
+		}
+		t.Scope = "instance"
+		return s.journal(ctx, tx, a, change{Operation: "item_template.save", Target: "instance", Event: "admin.updated", Changes: map[string]any{"name": t.Name}})
+	})
+	return t, err
+}
+
+func (s *Service) DeleteInstanceItemTemplate(ctx context.Context, a auth.Actor, id int64) error {
+	if err := adminOnly(a); err != nil {
+		return err
+	}
+	return s.tx(func(tx *sql.Tx) error {
+		res, err := tx.Exec(`DELETE FROM item_templates WHERE id = ? AND project_id IS NULL`, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return s.journal(ctx, tx, a, change{Operation: "item_template.delete", Target: "instance", Event: "admin.updated", Changes: map[string]any{"id": id}})
+	})
+}
+
+func (s *Service) ListInstanceItemTemplates(ctx context.Context, a auth.Actor) ([]ItemTemplate, error) {
+	if !a.Can(auth.ScopeRead) {
+		return nil, ErrForbidden
+	}
+	rows, err := s.db.R.Query(`SELECT ` + itemTemplateCols + ` FROM item_templates WHERE project_id IS NULL ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ItemTemplate{}
+	for rows.Next() {
+		t, err := scanItemTemplate(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// upsertItemTemplate writes a validated template for a project (nil = instance wide) and returns its id.
+func (s *Service) upsertItemTemplate(tx *sql.Tx, project *int64, t ItemTemplate) (int64, error) {
+	labels, _ := json.Marshal(t.Labels)
+	checklist, _ := json.Marshal(t.Checklist)
+	subitems, _ := json.Marshal(t.Subitems)
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM item_templates WHERE project_id IS ? AND name <> ?`, project, t.Name).Scan(&n); err != nil {
+		return 0, err
+	}
+	if n >= maxTemplates {
+		return 0, rule("at most %d item templates", maxTemplates)
+	}
+	if _, err := tx.Exec(`INSERT INTO item_templates (project_id, name, type, title_prefix, description, priority, labels, status, checklist, subitems, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (COALESCE(project_id, 0), name) DO UPDATE SET type = excluded.type, title_prefix = excluded.title_prefix,
+		description = excluded.description, priority = excluded.priority, labels = excluded.labels, status = excluded.status,
+		checklist = excluded.checklist, subitems = excluded.subitems`,
+		project, t.Name, t.Type, t.TitlePrefix, t.Description, t.Priority, string(labels), t.Status, string(checklist), string(subitems), s.nowMs()); err != nil {
+		return 0, err
+	}
+	var id int64
+	err := tx.QueryRow(`SELECT id FROM item_templates WHERE project_id IS ? AND name = ?`, project, t.Name).Scan(&id)
+	return id, err
 }
 
 func (s *Service) DeleteItemTemplate(ctx context.Context, a auth.Actor, key string, id int64) error {
@@ -180,25 +303,36 @@ func (s *Service) DeleteItemTemplate(ctx context.Context, a auth.Actor, key stri
 	})
 }
 
-// applyItemTemplate returns the input filled from its template, the checklist to add and warnings for
-// parts that no longer fit (a removed status): those are skipped, the create itself never fails on them.
-func (s *Service) applyItemTemplate(a auth.Actor, in CreateItem) (CreateItem, []string, []string, error) {
+// appliedTemplate is a template resolved against one create call.
+type appliedTemplate struct {
+	in        CreateItem
+	checklist []string
+	subitems  []SubItem
+	warnings  []string
+	expand    func(string) string
+}
+
+// applyItemTemplate fills the input from its template (project first, then instance wide) and collects
+// warnings for parts that no longer fit (a removed or blocked status): those are skipped, the create itself
+// never fails on them.
+func (s *Service) applyItemTemplate(a auth.Actor, in CreateItem) (appliedTemplate, error) {
+	out := appliedTemplate{in: in}
 	p, _, err := s.access(s.db.R, a, in.Project, roleMember)
 	if err != nil {
-		return in, nil, nil, err
+		return out, err
 	}
-	t, err := scanItemTemplate(s.db.R.QueryRow(`SELECT `+itemTemplateCols+` FROM item_templates WHERE project_id = ? AND name = ?`, p.ID, in.Template))
+	t, err := scanItemTemplate(s.db.R.QueryRow(`SELECT `+itemTemplateCols+` FROM item_templates
+		WHERE (project_id = ? OR project_id IS NULL) AND name = ? ORDER BY project_id IS NULL LIMIT 1`, p.ID, in.Template))
 	if errors.Is(err, sql.ErrNoRows) {
-		return in, nil, nil, invalid("unknown item template %q", in.Template)
+		return out, invalid("unknown item template %q", in.Template)
 	}
 	if err != nil {
-		return in, nil, nil, err
+		return out, err
 	}
 	var user string
 	_ = s.db.R.QueryRow(`SELECT name FROM users WHERE id = ?`, a.UserID).Scan(&user)
-	expand := strings.NewReplacer("{date}", s.now().Format("2006-01-02"), "{user}", user).Replace
+	out.expand = strings.NewReplacer("{date}", s.now().Format("2006-01-02"), "{user}", user).Replace
 
-	var warnings []string
 	if in.Type == "" {
 		in.Type = t.Type
 	}
@@ -206,26 +340,49 @@ func (s *Service) applyItemTemplate(a auth.Actor, in CreateItem) (CreateItem, []
 		in.Priority = t.Priority
 	}
 	if in.Description == "" {
-		in.Description = expand(t.Description)
+		in.Description = out.expand(t.Description)
 	}
-	in.Title = expand(t.TitlePrefix) + in.Title
+	in.Title = out.expand(t.TitlePrefix) + in.Title
 	in.Labels = append(slices.Clone(t.Labels), in.Labels...)
 	if in.Status == "" && t.Status != "" {
 		sts, err := statuses(s.db.R, p.ID)
 		if err != nil {
-			return in, nil, nil, err
+			return out, err
 		}
 		i := slices.IndexFunc(sts, func(st Status) bool { return strings.EqualFold(st.Name, t.Status) })
 		switch {
 		case i < 0:
-			warnings = append(warnings, fmt.Sprintf("template status %q no longer exists; the default status was used", t.Status))
+			out.warnings = append(out.warnings, fmt.Sprintf("template status %q no longer exists; the default status was used", t.Status))
 		case !sts[i].AllowCreate:
-			warnings = append(warnings, fmt.Sprintf("template status %q no longer allows creating items; the default status was used", t.Status))
+			out.warnings = append(out.warnings, fmt.Sprintf("template status %q no longer allows creating items; the default status was used", t.Status))
 		default:
 			in.Status = sts[i].Name
 		}
 	}
-	return in, t.Checklist, warnings, nil
+	// Subitems only fit when the item ends up the type the template's tree was validated for.
+	if in.Type == t.Type {
+		out.subitems = t.Subitems
+	} else if len(t.Subitems) > 0 {
+		out.warnings = append(out.warnings, "the type was changed, so the template's subitems were skipped")
+	}
+	out.in, out.checklist = in, t.Checklist
+	return out, nil
+}
+
+// createSubitems creates the template's subitem tree below parent (all inside the caller's transaction).
+func (s *Service) createSubitems(ctx context.Context, a auth.Actor, project, parent string, list []SubItem, expand func(string) string, keys *[]string) error {
+	for _, sub := range list {
+		it, err := s.createItem(ctx, a, CreateItem{Project: project, Type: sub.Type, Title: expand(sub.Title), Description: expand(sub.Description),
+			Priority: sub.Priority, Parent: parent}, nil)
+		if err != nil {
+			return err
+		}
+		*keys = append(*keys, it.Key)
+		if err := s.createSubitems(ctx, a, project, it.Key, sub.Children, expand, keys); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---- project templates (instance wide) ----

@@ -204,6 +204,7 @@
               >{#if item.assignee !== null}<Avatar
                   name={personName(item.assignee)}
                   size={22}
+                  userId={item.assignee}
                 />{personName(item.assignee)}{/if}</span
             >
             <span

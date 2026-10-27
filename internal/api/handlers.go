@@ -22,12 +22,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		Code     string `json:"code"` // two-factor code or recovery code, when the account has 2FA
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	user, session, csrf, err := s.auth.Login(in.Email, in.Password, clientKey(r))
+	user, session, csrf, err := s.auth.Login(in.Email, in.Password, in.Code, clientKey(r))
 	switch {
+	case errors.Is(err, auth.ErrTOTPRequired):
+		writeError(w, http.StatusUnauthorized, "totp_required", "enter your two-factor code")
+		return
 	case errors.Is(err, auth.ErrRateLimited):
 		w.Header().Set("Retry-After", "900")
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts")
@@ -42,7 +46,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: auth.SessionCookie, Value: session, Path: "/", HttpOnly: true,
 		Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode,
-		Expires: time.Now().Add(auth.SessionTTL),
+		Expires: time.Now().Add(s.auth.SessionTTL()),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"user": user, "csrf_token": csrf})
 }

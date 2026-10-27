@@ -49,3 +49,12 @@
 - Deactivating a user deletes their sessions and makes their tokens fail; sign-in is refused. The last active admin cannot be demoted or deactivated, and nobody deactivates themselves.
 - Project tokens never exceed their owner: access still goes through the owner's membership. When the owner leaves the project, those tokens are revoked.
 - The rights matrix shown in the admin UI is the code's own table (`core.RightsMatrix`) and a test checks it against real requests for viewer, member and admin. See ADR-0008.
+
+### Two-factor authentication, registration and deletion
+
+- TOTP (RFC 6238, SHA-1, 6 digits, 30 s, one step of drift). The secret must be readable to verify codes, so it is stored as is in `users.totp_secret`: anyone with the database file can read it. A used code cannot be replayed (`totp_last_step`), two logins racing with one code let only one win. Recovery codes (10, single use) are stored hashed. An admin can reset 2FA of a user who lost the device.
+- Wrong second factors count against the login failure limiter; "code required" does not.
+- Invite codes are random, stored hashed, single use, expiring, optionally bound to an email, and never logged. Atlas sends no email: the admin hands over the link. Registration refusals count against the same limiter.
+- Profile pictures run through the attachment pipeline; only a re-encoded thumbnail is served (EXIF dropped), the original stays on disk.
+- Account deletion anonymises instead of erasing rows: audit entries and authored items keep their references. It refuses to leave the instance without an admin or a project without an admin.
+- Audit export is admin-only and streams at most 50.000 entries per request.

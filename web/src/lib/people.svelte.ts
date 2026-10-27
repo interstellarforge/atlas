@@ -1,10 +1,15 @@
 import { listUsers, type User } from "./api";
 import { t } from "./i18n";
 
-export const people = $state<{ users: User[] }>({ users: [] });
+// version changes when someone's picture does, so browsers refetch it.
+export const people = $state<{ users: User[]; version: number }>({
+  users: [],
+  version: 0,
+});
 
 export async function loadPeople(): Promise<void> {
   people.users = await listUsers();
+  people.version = Date.now();
 }
 
 export function personName(id: number | null): string {

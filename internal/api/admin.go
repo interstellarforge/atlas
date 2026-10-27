@@ -31,17 +31,24 @@ func (s *Server) adminPatchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		IsAdmin *bool `json:"is_admin"`
-		Active  *bool `json:"active"`
+		IsAdmin   *bool `json:"is_admin"`
+		Active    *bool `json:"active"`
+		ResetTOTP bool  `json:"reset_totp"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.IsAdmin == nil && in.Active == nil {
+	if in.IsAdmin == nil && in.Active == nil && !in.ResetTOTP {
 		writeError(w, http.StatusBadRequest, "invalid", "give is_admin and/or active")
 		return
 	}
 	a := actor(r)
+	if in.ResetTOTP {
+		if err := s.core.ResetUserTOTP(r.Context(), a, id); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	if in.IsAdmin != nil {
 		if err := s.core.SetUserAdmin(r.Context(), a, id, *in.IsAdmin); err != nil {
 			s.fail(w, r, err)

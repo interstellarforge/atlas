@@ -88,3 +88,10 @@ Status category enum: `todo`, `active`, `completed`.
 - `api_tokens.last_used_at`, written at most every 5 minutes per token.
 - `project_statuses.allow_create` (default 1).
 - A project token is an `api_tokens` row whose `projects` is exactly `["KEY"]`; it is owned by the admin who created it.
+
+## Accounts, policy and templates (migration 0011)
+
+- `users`: `avatar_path`, `totp_secret`, `totp_pending`, `totp_enabled`, `totp_last_step` (replay protection). `recovery_codes` holds SHA-256 hashes, single use.
+- `instance_settings` (key/value): `min_password_length`, `registration`, `allowed_domain`, `session_days`; absent keys use the defaults in `core/policy.go`. The environment-only settings (`ATLAS_*`) are unchanged.
+- `invites`: code hash, optional email, admin flag, expiry, used_at/used_by.
+- `item_templates.project_id` is nullable (NULL = instance wide), `subitems` holds the JSON tree. A unique index on `(COALESCE(project_id, 0), name)` replaces the old unique constraint.

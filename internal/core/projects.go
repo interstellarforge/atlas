@@ -147,6 +147,7 @@ type User struct {
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	IsAdmin bool   `json:"is_admin"`
+	Avatar  bool   `json:"avatar"`
 }
 
 type Member struct {
@@ -160,7 +161,7 @@ func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 	if !a.Can(auth.ScopeRead) {
 		return nil, ErrForbidden
 	}
-	rows, err := s.db.R.Query(`SELECT id, email, name, is_admin FROM users ORDER BY name`)
+	rows, err := s.db.R.Query(`SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +169,7 @@ func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 	out := []User{}
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Avatar); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -180,9 +181,12 @@ func (s *Service) CreateUser(ctx context.Context, a auth.Actor, email, name, pas
 	if !a.IsAdmin || !a.Can(auth.ScopeWrite) {
 		return User{}, ErrForbidden
 	}
+	if err := checkPassword(s.Policy(), password); err != nil {
+		return User{}, err
+	}
 	u, err := s.users.CreateUser(email, name, password, admin)
 	if errors.Is(err, auth.ErrInvalid) {
-		return User{}, invalid("email, name and a password of at least 8 characters are required")
+		return User{}, invalid("email and name are required")
 	}
 	if err != nil {
 		if isUnique(err) {

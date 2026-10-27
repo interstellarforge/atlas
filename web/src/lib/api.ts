@@ -13,6 +13,8 @@ export interface User {
   email: string;
   name: string;
   is_admin: boolean;
+  avatar?: boolean;
+  totp?: boolean;
 }
 
 interface Session {
@@ -61,8 +63,16 @@ export async function me(): Promise<User | undefined> {
   }
 }
 
-export async function login(email: string, password: string): Promise<User> {
-  const s = await request<Session>("POST", "/auth/login", { email, password });
+export async function login(
+  email: string,
+  password: string,
+  code = "",
+): Promise<User> {
+  const s = await request<Session>("POST", "/auth/login", {
+    email,
+    password,
+    ...(code && { code }),
+  });
   csrfToken = s.csrf_token;
   return s.user;
 }
@@ -752,7 +762,7 @@ export async function listAdminUsers(): Promise<AdminUser[]> {
 
 export function patchAdminUser(
   id: number,
-  patch: { is_admin?: boolean; active?: boolean },
+  patch: { is_admin?: boolean; active?: boolean; reset_totp?: boolean },
 ): Promise<undefined> {
   return request("PATCH", `/admin/users/${String(id)}`, patch);
 }
@@ -797,6 +807,14 @@ export interface ItemTemplate {
   labels: string[];
   status: string;
   checklist: string[];
+  subitems: SubItem[];
+  scope?: string;
+}
+
+export interface SubItem {
+  type: string;
+  title: string;
+  children?: SubItem[];
 }
 
 export interface ProjectTemplate {
@@ -848,4 +866,151 @@ export function saveProjectTemplate(body: {
 
 export function deleteProjectTemplate(id: number): Promise<undefined> {
   return request("DELETE", `/project-templates/${String(id)}`);
+}
+
+export interface PublicPolicy {
+  registration: "closed" | "invite" | "open";
+  min_password_length: number;
+  allowed_domain: string;
+}
+
+export function getPublicPolicy(): Promise<PublicPolicy> {
+  return request("GET", "/auth/policy");
+}
+
+export function register(body: {
+  email: string;
+  name: string;
+  password: string;
+  invite?: string;
+}): Promise<{ user: User }> {
+  return request("POST", "/auth/register", body);
+}
+
+export async function changeEmail(
+  email: string,
+  password: string,
+): Promise<User> {
+  return (
+    await request<{ user: User }>("PUT", "/me/email", { email, password })
+  ).user;
+}
+
+export function deleteAccount(password: string): Promise<undefined> {
+  return request("DELETE", "/me", { password });
+}
+
+async function sendFile(
+  method: string,
+  path: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/v1${path}`, {
+    method,
+    headers: { "X-CSRF-Token": csrfToken },
+    body: form,
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: { code?: string; message?: string };
+    };
+    throw new ApiError(
+      res.status,
+      data.error?.code ?? "unknown",
+      data.error?.message ?? res.statusText,
+    );
+  }
+}
+
+export function uploadAvatar(file: File): Promise<void> {
+  return sendFile("PUT", "/me/avatar", file);
+}
+
+export function removeAvatar(): Promise<undefined> {
+  return request("DELETE", "/me/avatar");
+}
+
+export interface SecurityInfo {
+  totp: boolean;
+  recovery_remaining: number;
+}
+
+export function getSecurity(): Promise<SecurityInfo> {
+  return request("GET", "/me/security");
+}
+
+export function totpSetup(): Promise<{ secret: string; uri: string }> {
+  return request("POST", "/me/totp/setup");
+}
+
+export async function totpEnable(code: string): Promise<string[]> {
+  return (
+    await request<{ recovery_codes: string[] }>("POST", "/me/totp/enable", {
+      code,
+    })
+  ).recovery_codes;
+}
+
+export function totpDisable(
+  password: string,
+  code: string,
+): Promise<undefined> {
+  return request("POST", "/me/totp/disable", { password, code });
+}
+
+export interface Policy {
+  min_password_length: number;
+  registration: "closed" | "invite" | "open";
+  allowed_domain: string;
+  session_days: number;
+}
+
+export function getPolicy(): Promise<Policy> {
+  return request("GET", "/admin/policy");
+}
+
+export function setPolicy(p: Policy): Promise<Policy> {
+  return request("PUT", "/admin/policy", p);
+}
+
+export interface Invite {
+  id: number;
+  email: string;
+  is_admin: boolean;
+  created_at: number;
+  expires_at: number;
+  used_at: number | null;
+}
+
+export async function listInvites(): Promise<Invite[]> {
+  return (await request<{ items: Invite[] }>("GET", "/admin/invites")).items;
+}
+
+export function createInvite(body: {
+  email: string;
+  is_admin: boolean;
+  days: number;
+}): Promise<{ invite: Invite; code: string }> {
+  return request("POST", "/admin/invites", body);
+}
+
+export function revokeInvite(id: number): Promise<undefined> {
+  return request("DELETE", `/admin/invites/${String(id)}`);
+}
+
+export async function listInstanceItemTemplates(): Promise<ItemTemplate[]> {
+  return (await request<{ items: ItemTemplate[] }>("GET", "/item-templates"))
+    .items;
+}
+
+export function saveInstanceItemTemplate(
+  t: Omit<ItemTemplate, "id" | "scope">,
+): Promise<ItemTemplate> {
+  return request("POST", "/item-templates", t);
+}
+
+export function deleteInstanceItemTemplate(id: number): Promise<undefined> {
+  return request("DELETE", `/item-templates/${String(id)}`);
 }

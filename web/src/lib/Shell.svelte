@@ -235,7 +235,7 @@
       title={collapsed ? t("nav.settings") : undefined}
       aria-label={collapsed ? t("nav.settings") : undefined}
     >
-      <Avatar name={user.name} size={32} />
+      <Avatar name={user.name} size={32} userId={user.id} />
       <span class="who" class:sr-only={collapsed}>
         <span class="whoname">{user.name}</span>
         <span class="whoemail">{user.email}</span>

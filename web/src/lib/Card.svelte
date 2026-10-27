@@ -112,7 +112,11 @@
       >
     {/if}
     {#if cardFields.assignee && card.assignee !== null}
-      <Avatar name={personName(card.assignee)} size={24} />
+      <Avatar
+        name={personName(card.assignee)}
+        size={24}
+        userId={card.assignee}
+      />
     {/if}
   </footer>
 </article>

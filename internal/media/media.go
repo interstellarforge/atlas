@@ -135,6 +135,12 @@ func (s *Store) Open(rel string) (*os.File, error) { return os.Open(s.abs(rel)) 
 // Remove deletes a stored file; used to clean up when the database write that follows an upload fails.
 func (s *Store) Remove(rel string) { _ = os.Remove(s.abs(rel)) }
 
+// RemoveAll deletes a stored file and its cached thumbnail.
+func (s *Store) RemoveAll(rel string) {
+	s.Remove(rel)
+	_ = os.Remove(filepath.Join(s.dir, "thumbs", strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))+".jpg"))
+}
+
 // Thumb returns the path of a JPEG thumbnail (longest edge 320 px), generating and caching it on first use.
 func (s *Store) Thumb(rel string) (string, error) {
 	out := filepath.Join(s.dir, "thumbs", strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))+".jpg")

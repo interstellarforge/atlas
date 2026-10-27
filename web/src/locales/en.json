@@ -38,9 +38,23 @@
       "invalid": "Invalid email or password.",
       "rateLimited": "Too many attempts. Try again later.",
       "failed": "Sign-in failed. Try again.",
-      "subtitle": "Welcome back. Sign in to continue."
+      "subtitle": "Welcome back. Sign in to continue.",
+      "code": "Authentication code",
+      "codeHint": "From your authenticator app, or one of your recovery codes.",
+      "codeNeeded": "This account uses two-factor authentication. Enter your code to continue."
     },
-    "quote": "A clearer tomorrow builds from a more focused today."
+    "quote": "A clearer tomorrow builds from a more focused today.",
+    "register": {
+      "title": "Create your account",
+      "open": "Anyone with a {domain} address can register.",
+      "invite": "You need an invite code to register.",
+      "minLength": "At least {count} characters.",
+      "invitecode": "Invite code",
+      "submit": "Create account",
+      "create": "Create an account",
+      "haveAccount": "I already have an account",
+      "failed": "Could not register: {message}"
+    }
   },
   "home": {
     "title": "Projects",
@@ -388,7 +402,35 @@
       "mention": "Mentions in comments",
       "blocker_done": "A blocking item is done",
       "followed": "Changes to items I follow"
-    }
+    },
+    "avatar": "Profile picture",
+    "avatarHint": "PNG, JPEG or WebP. Others see a small re-encoded copy; the original is never shown.",
+    "avatarSaved": "Profile picture saved.",
+    "avatarRemove": "Remove picture",
+    "avatarRemoved": "Profile picture removed.",
+    "changeEmail": "Change email",
+    "emailChangeHint": "Needs your password. There is no mail server to confirm the new address, so check it carefully.",
+    "newEmail": "New email address",
+    "emailChanged": "Email changed.",
+    "twoFactor": "Two-factor authentication",
+    "twoFactorIntro": "Ask for a code from an authenticator app (TOTP) as well as your password when you sign in.",
+    "setupTwoFactor": "Set up two-factor authentication",
+    "enrolHint": "Add this key to your authenticator app (enter it manually, or open the link on a device that has the app), then type the 6-digit code it shows.",
+    "secretKey": "Secret key",
+    "openInApp": "Open in authenticator app",
+    "confirmCode": "Code from the app",
+    "enable": "Turn on",
+    "twoFactorEnabled": "Two-factor authentication is on.",
+    "twoFactorOn": "On",
+    "twoFactorOff": "Two-factor authentication is off.",
+    "recoveryLeft": "{count} recovery codes left",
+    "recoveryOnce": "Save these recovery codes somewhere safe. Each works once if you lose your device. They are shown only now.",
+    "recoverySaved": "I saved them",
+    "disable": "Turn off",
+    "disableHint": "Needs your password and a current code, or a recovery code.",
+    "deleteAccount": "Delete my account",
+    "deleteHint": "Closes your account for good: sessions, tokens and memberships go, your name shows as Deleted user on what you created. This cannot be undone. You cannot do this while you are the only admin of the instance or of a project.",
+    "typeEmail": "Type {email} to confirm"
   },
   "psettings": {
     "sections": "Project settings",
@@ -451,7 +493,11 @@
     "saveTemplate": "Save template",
     "saveAsProjectTemplate": "Save as project template",
     "projectTemplateHint": "Captures this project's statuses, WIP limits, transitions, labels, custom fields and item templates for new projects. No items, members or tokens. Global admins only.",
-    "projectTemplateSaved": "Project template saved."
+    "projectTemplateSaved": "Project template saved.",
+    "subitems": "Subitems (optional)",
+    "subitemsHint": "One per line as type: title. Indent two spaces to nest. They are created together with the item, in one go.",
+    "instanceWide": "all projects",
+    "subitemCount": "{count} subitems"
   },
   "admin": {
     "title": "Administration",
@@ -462,7 +508,8 @@
       "rights": "Rights",
       "audit": "Audit log",
       "instance": "Instance",
-      "templates": "Project templates"
+      "templates": "Project templates",
+      "access": "Access"
     },
     "loadFailed": "Could not load this page.",
     "deactivated": "Deactivated",
@@ -513,6 +560,32 @@
     "templatesIntro": "Templates for new projects: workflow, labels, custom fields and item templates. Save one from a project's settings, or import JSON. Anyone who can create projects can start from them.",
     "export": "Export JSON",
     "importTemplate": "Import template",
-    "templateJson": "Template JSON (version 1)"
+    "templateJson": "Template JSON (version 1)",
+    "resetTotp": "Reset 2FA",
+    "totpReset": "Two-factor authentication reset for that user.",
+    "policy": "Registration and passwords",
+    "policyIntro": "Who may create an account, how long passwords must be and how long a sign-in lasts. These settings are stored in the database.",
+    "registration": "Registration",
+    "regClosed": "Closed: admins create accounts",
+    "regInvite": "By invite only",
+    "regOpen": "Open",
+    "allowedDomain": "Only for email addresses at (optional)",
+    "minPassword": "Minimum password length",
+    "sessionDays": "Session length (days)",
+    "invites": "Invites",
+    "invitesIntro": "Create an invite and send the link yourself: Atlas does not send email. An invite works once and expires.",
+    "inviteOnce": "Copy this link now. It is shown only once.",
+    "anyEmail": "Any email address",
+    "inviteUsed": "used {date}",
+    "inviteExpires": "expires {date}",
+    "inviteRevoked": "Invite removed.",
+    "inviteCreated": "Invite created.",
+    "inviteEmail": "Email (optional)",
+    "inviteDays": "Days valid",
+    "createInvite": "Create invite",
+    "exportCsv": "Export CSV",
+    "exportJson": "Export JSON",
+    "instanceItemTemplates": "Item templates for all projects",
+    "instanceItemTemplatesIntro": "Available in every project; a project template with the same name wins there."
   }
 }

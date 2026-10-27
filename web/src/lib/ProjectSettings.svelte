@@ -22,6 +22,7 @@
   } from "./api";
   import { t } from "./i18n";
   import { people } from "./people.svelte";
+  import { formatSubitems, parseSubitems } from "./subitems";
   import WorkflowSettings from "./WorkflowSettings.svelte";
 
   let {
@@ -107,7 +108,9 @@
     labels: "",
     status: "",
     checklist: "",
+    subitems: "",
   };
+  const subitemsExample = "story: Plan\n  task: Draft\n  task: Review";
   let templates = $state<ItemTemplate[]>([]);
   let draft = $state({ ...blank });
   let asTemplate = $state("");
@@ -284,8 +287,12 @@
               <div>
                 <strong>{tpl.name}</strong>
                 <span class="muted"
-                  >{t(`types.${tpl.type}` as "types.epic")}{tpl.status
-                    ? ` · ${tpl.status}`
+                  >{t(`types.${tpl.type}` as "types.epic")}{tpl.scope ===
+                  "instance"
+                    ? ` · ${t("psettings.instanceWide")}`
+                    : ""}{tpl.status ? ` · ${tpl.status}` : ""}{tpl.subitems
+                    .length > 0
+                    ? ` · ${t("psettings.subitemCount", { count: formatSubitems(tpl.subitems).split("\n").length })}`
                     : ""}{tpl.checklist.length > 0
                     ? ` · ${t("psettings.checklistCount", { count: tpl.checklist.length })}`
                     : ""}</span
@@ -293,6 +300,7 @@
               </div>
               <button
                 type="button"
+                disabled={tpl.scope === "instance"}
                 onclick={() =>
                   void run(t("psettings.templateDeleted"), async () => {
                     await deleteItemTemplate(project, tpl.id);
@@ -316,6 +324,7 @@
                 labels: lines(draft.labels, /,/),
                 status: draft.status,
                 checklist: lines(draft.checklist, /\n/),
+                subitems: parseSubitems(draft.subitems),
               });
               draft = { ...blank };
               await loadTemplates();
@@ -383,6 +392,13 @@
               bind:value={draft.checklist}
               rows="3"></textarea></label
           >
+          <label
+            >{t("psettings.subitems")}<textarea
+              bind:value={draft.subitems}
+              rows="4"
+              placeholder={subitemsExample}></textarea></label
+          >
+          <p class="muted hint">{t("psettings.subitemsHint")}</p>
           <p class="muted hint">{t("psettings.placeholders")}</p>
           <div>
             <button class="primary" type="submit"
