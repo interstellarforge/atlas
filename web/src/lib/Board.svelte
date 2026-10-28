@@ -280,18 +280,24 @@
     }
   }
 
-  // Hint only: the server decides from the item's whole history, this looks at the card's current status.
+  // Hint only: the server decides from the item's whole history. Here the card counts as having been in
+  // its current status and in everything that status (transitively) required, so moving back is allowed.
   function blocked(column: Column, card = drag?.card): boolean {
     if (!card) return false;
+    const all = columns.flatMap((c) => c.statuses ?? [c.status]);
     const from =
       card.status ??
       columns.find((c) => c.items.some((i) => i.key === card.key))?.status.name;
+    if (from === undefined) return false;
+    const visited: string[] = [];
+    const walk = (name: string): void => {
+      if (visited.includes(name)) return;
+      visited.push(name);
+      all.find((st) => st.name === name)?.requires.forEach(walk);
+    };
+    walk(from);
     return (column.statuses ?? [column.status]).every(
-      (st) =>
-        st.name !== from &&
-        st.requires.length > 0 &&
-        from !== undefined &&
-        !st.requires.includes(from),
+      (st) => st.name !== from && st.requires.some((r) => !visited.includes(r)),
     );
   }
 
