@@ -172,10 +172,14 @@
     }
   }
 
+  // The route re-derives `project` on every navigation, even to the same key; a derived only notifies
+  // when the key really changes, so opening or closing a ticket does not reset the workflow and view.
+  const projectKey = $derived(project);
+
   $effect(() => {
     workflow = undefined;
     error = "";
-    void loadWorkflow(project);
+    void loadWorkflow(projectKey);
   });
 
   let progressTimer: ReturnType<typeof setTimeout> | undefined;
@@ -189,7 +193,7 @@
   }
   $effect(() => {
     progress = undefined;
-    void loadProgress(project);
+    void loadProgress(projectKey);
   });
   $effect(() =>
     onChange((event) => {

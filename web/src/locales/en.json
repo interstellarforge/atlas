@@ -73,8 +73,7 @@
     "count": "{count} projects",
     "progress": "Share of items done",
     "items": "items",
-    "inProgress": "in progress",
-    "done": "done"
+    "backlog": "Backlog"
   },
   "projects": {
     "create": "New project",
@@ -306,6 +305,7 @@
     "properties": "Properties",
     "descriptionHint": "Describe the work. Markdown is supported.",
     "unsaved": "Unsaved changes",
+    "children": "Child items",
     "editor": {
       "bold": "Bold",
       "italic": "Italic",

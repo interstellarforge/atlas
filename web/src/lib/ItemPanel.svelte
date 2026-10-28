@@ -4,9 +4,11 @@
   import {
     addLink,
     ApiError,
+    type Card,
     createItem,
     getFollowing,
     getItem,
+    getItems,
     getLinks,
     type ItemDetail,
     type ItemTemplate,
@@ -76,6 +78,7 @@
   let linkTarget = $state("");
   let linkError = $state("");
   let following = $state(false);
+  let children = $state<Card[]>([]);
   let draftType = $state("task");
   let template = $state("");
   let templates = $state<ItemTemplate[]>([]);
@@ -186,6 +189,11 @@
     return current ? statusTone(current, workflow.statuses) : "todo";
   });
 
+  function toneOf(name: string | undefined): ReturnType<typeof statusTone> {
+    const st = workflow.statuses.find((x) => x.name === name);
+    return st ? statusTone(st, workflow.statuses) : "todo";
+  }
+
   function apply(it: ItemDetail): void {
     item = it;
     form = toForm(it);
@@ -242,10 +250,25 @@
       ]);
       links = l;
       following = f;
+      void loadChildren();
       apply(it);
       loadError = false;
     } catch {
       loadError = true;
+    }
+  }
+
+  async function loadChildren(): Promise<void> {
+    try {
+      children = (
+        await getItems({
+          parent: itemKey,
+          fields: "key,type,title,status,priority",
+          limit: 100,
+        })
+      ).items;
+    } catch {
+      /* the next event or reload refreshes it */
     }
   }
 
@@ -355,7 +378,11 @@
     void load();
     // Edits in progress are never overwritten: when the item changes elsewhere the user decides.
     const offChange = onChange((event) => {
-      if (event.key !== itemKey) return;
+      // A child changing is not an edit of this item.
+      if (event.key !== itemKey) {
+        if (!create) void loadChildren();
+        return;
+      }
       // Checklist and comments reload themselves and never conflict with the form.
       if (
         event.type === "checklist.changed" ||
@@ -476,6 +503,24 @@
               }}
             />
           </details>
+          {#if children.length > 0}
+            <details class="panel sec" open>
+              <summary
+                >{t("item.children")}
+                <span class="count">{children.length}</span></summary
+              >
+              <ul class="childlist">
+                {#each children as c (c.key)}
+                  <li>
+                    <TypeIcon type={c.type} size={14} />
+                    <a class="lkey" href={itemHref(c.key)}>{c.key}</a>
+                    <span class="ltitle">{c.title}</span>
+                    <StatusChip name={c.status ?? ""} tone={toneOf(c.status)} />
+                  </li>
+                {/each}
+              </ul>
+            </details>
+          {/if}
           {#if !create}
             <div class="panel"><ItemAttachments {itemKey} /></div>
             {#if workflow.time_tracking}
@@ -874,6 +919,28 @@
     list-style: none;
     display: grid;
     gap: 6px;
+  }
+  .childlist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 6px;
+  }
+  .childlist li {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: var(--atlas-fs-sm);
+    background: var(--color-soft);
+    border-radius: var(--atlas-radius-sm);
+  }
+  .count {
+    margin-left: 6px;
+    color: var(--color-muted);
+    font-weight: var(--atlas-fw-regular);
   }
   .linklist li {
     display: grid;
