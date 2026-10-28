@@ -151,3 +151,16 @@ Reading:
 - Without an explicit instruction Claude haiku never called the tool, with the paragraph in its system prompt (0 of 9) or with server instructions (0 of 9): the benefit only exists when the agent is told to use it. Codex used it in 4 of 5 runs with the paragraph, but its token total did not drop in that variant (151k vs 110k, one run each cell at this size is noise).
 - The pitfall keyword check (documented as not implemented, mentions `Batch`) scored 0 to 2 of 3 in every variant and is unreliable: the answers I read were substantively right. It is also contaminated: this change's own docs (`docs/api-contract.md`) now state the pitfall, so the no-context variant could find it.
 - Bias: the entries were written by the author of the tasks, so they answer them directly. This is an upper bound for a hand-curated entry on a question it was written for, not the saving on questions nobody anticipated. Two small models, three tasks, few runs: no claim of a general saving. Not measured: entries that are wrong or stale, questions the entries do not cover, a human-written set for another repository.
+
+## Title search without FTS5 (ATL-291, 2026-10-28)
+
+- Hardware: developer Mac (Apple M1 Pro, arm64), SSD. **Not representative hardware**: repeat on the low-end target machine.
+- Dataset: 10.000 items, 3 projects (seed 1). SQLite level, the query `ListItems` runs for `q`: `title LIKE '%term%' ESCAPE '\'`, archived excluded, `ORDER BY key LIMIT 50`.
+- Reproduce: `ATLAS_BENCH=1 go test ./benchmarks -run Baseline -v`.
+
+| Query (200 runs) | p50 | p95 |
+|---|---|---|
+| Common word (`task`, hits the limit early) | 55 µs | 62 µs |
+| No match (full scan of all 10.000 titles, worst case) | 2.8 ms | 3.0 ms |
+
+Result: the worst case is ~30x under the 100 ms search target in `docs/performance.md`. There is no measured need for an FTS5 index (ATL-76 acceptance: only after a measured need). Revisit when searching descriptions or comments, or when the dataset or hardware changes the full scan past ~50 ms.

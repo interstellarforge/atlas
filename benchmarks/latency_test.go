@@ -55,6 +55,16 @@ func TestBaseline(t *testing.T) {
 				return drain(d.R.Query(`WITH RECURSIVE s(id) AS (SELECT ? UNION ALL SELECT w.id FROM work_items w JOIN s ON w.parent_id = s.id)
 					SELECT w.key FROM work_items w JOIN s ON s.id = w.id`, epicID))
 			}))
+			// Title search as items_search/ListItems runs it (ATL-291): substring LIKE over all 10.000 items.
+			var common string
+			if err := d.R.QueryRow(`SELECT substr(title, 1, instr(title || ' ', ' ') - 1) FROM work_items GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1`).Scan(&common); err != nil {
+				t.Fatal(err)
+			}
+			for name, term := range map[string]string{"common word " + common: common, "no match": "zzqxj"} {
+				report(t, "title search: "+name, measure(200, func(i int) error {
+					return drain(d.R.Query(`SELECT key, title FROM work_items i WHERE i.title LIKE ? ESCAPE '\' AND i.archived_at IS NULL ORDER BY i.key LIMIT 50`, "%"+term+"%"))
+				}))
+			}
 			report(t, "item update (tx, FULL/NORMAL)", measure(500, func(i int) error {
 				_, err := d.W.Exec(`UPDATE work_items SET status_id = 4, version = version + 1, updated_at = ? WHERE id = ?`,
 					time.Now().UnixMilli(), 10+i)
