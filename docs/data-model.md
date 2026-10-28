@@ -15,7 +15,7 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 
 | Table | Purpose |
 |---|---|
-| `projects` | id, key (unique, e.g. EXO), name, settings, next_item_number, archived_at |
+| `projects` | id, key (unique, e.g. EXO), name, next_item_number, archived_at |
 | `work_items` | Epics, stories, tasks, bugs |
 | `project_statuses` | Per-project statuses: id, project_id, name, position, color_group, category, wip_limit |
 | `workflow_transitions` | Optional allowed from_status -> to_status per project |
