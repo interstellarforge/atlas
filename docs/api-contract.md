@@ -6,7 +6,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 
 - Items are referenced by key (`EXO-42`); numeric ids are accepted too.
 - Auth: session cookie (UI) or `Authorization: Bearer <token>`.
-- `Idempotency-Key` header (replay returns the original result): honoured on project context writes (POST, DELETE, supersede) and, as `idempotency_key`, by the MCP tool `items_write`. The item routes do not implement it yet (issue 281/282 in Taiga).
+- `Idempotency-Key` header (replay returns the original result): honoured on project context writes (POST, DELETE, supersede) and, as `idempotency_key`, by the MCP tool `items_write`. The item routes do not implement it; use the batch endpoint (`POST /items/batch`, `idempotency_key`) for retry-safe item writes (ATL-305).
 - Updates require `version` (body or `If-Match`); mismatch returns 409.
 - Field selection: `?fields=key,title,status,version`. Default responses are compact.
 - Pagination: `?limit=` (default 50, max 200) and opaque `?cursor=`; response has `next_cursor` (null at end).
