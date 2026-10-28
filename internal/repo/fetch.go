@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -126,6 +127,33 @@ func (f *Fetcher) Get(ctx context.Context, rawURL string, limit int64) (body []b
 	}
 	ct := strings.TrimSpace(strings.SplitN(res.Header.Get("Content-Type"), ";", 2)[0])
 	return body, strings.ToLower(ct), nil
+}
+
+// Post sends one webhook delivery with the same address checks as Get and returns an error unless the answer is
+// 2xx. https is required, except on private networks when AllowPrivate is set. The answer body is not read.
+func (f *Fetcher) Post(ctx context.Context, rawURL string, header map[string]string, body []byte) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" || u.User != nil || (u.Scheme != "https" && !(u.Scheme == "http" && f.AllowPrivate)) {
+		return errors.New("webhook URL must be a plain https URL")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Atlas")
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	res, err := f.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("post %s: %w", u.Host, errors.Unwrap(err))
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return fmt.Errorf("post %s: HTTP %d", u.Host, res.StatusCode)
+	}
+	return nil
 }
 
 // Readme loads README.md (or readme.md) from the repository root.

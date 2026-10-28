@@ -25,6 +25,7 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `checklist_items` | item_id, text, done, position |
 | `milestones` | Releases and milestones |
 | `recurrences` | Schedules that create an item (ADR-0021) |
+| `webhooks`, `webhook_outbox` | Per-project outgoing webhooks and their queued deliveries (ADR-0022) |
 | `attachments` | Metadata: item_id, filename, mime, size, width, height, path, created_by |
 | `custom_field_definitions` | Typed fields per project: name, type, default, validation |
 | `users`, `project_members` | Users and per-project role (a name in `roles`) |

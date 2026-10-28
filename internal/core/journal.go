@@ -36,5 +36,8 @@ func (s *Service) journal(ctx context.Context, tx *sql.Tx, a auth.Actor, c chang
 		c.Event, c.Project, c.ItemKey, a.String(), now); err != nil {
 		return err
 	}
+	if err := s.enqueueWebhooks(tx, a, c, now); err != nil {
+		return err
+	}
 	return s.fanOut(tx, a, c)
 }

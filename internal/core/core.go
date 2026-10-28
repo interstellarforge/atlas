@@ -53,6 +53,9 @@ type Service struct {
 	media *media.Store
 	mail  MailConfig
 	repos RepoFetcher
+	// hooks sends webhook deliveries; nil disables webhooks (ADR-0022).
+	hooks     WebhookPoster
+	hooksHTTP bool
 	// readmes caches fetched READMEs per project key (ADR-0013).
 	readmes *readmeCache
 }

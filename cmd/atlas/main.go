@@ -106,6 +106,7 @@ func run() error {
 	uploads := media.NewStore(filepath.Join(cfg.DataDir, "uploads"), media.Limits{MaxBytes: cfg.UploadMaxBytes, MaxPixels: cfg.UploadMaxMegapixels})
 	svc.SetMedia(uploads)
 	svc.SetRepoFetcher(repo.NewFetcher(cfg.RepoAllowPrivate))
+	svc.SetWebhooks(repo.NewFetcher(cfg.RepoAllowPrivate), cfg.RepoAllowPrivate)
 	svc.SetMail(core.MailConfig{Env: cfg.SMTP, KeyPath: filepath.Join(cfg.DataDir, "mail.key"), PublicURL: cfg.PublicURL, Sender: notifications.SMTP{}})
 	svc.ApplyPolicy()
 	if len(os.Args) > 1 {
@@ -118,6 +119,7 @@ func run() error {
 	defer stop()
 	go pruneJournal(ctx, feed, cfg.EventRetention)
 	go scheduler.Every(ctx, time.Minute, func(ctx context.Context) { svc.RunDueRecurrences(ctx) })
+	go scheduler.Every(ctx, 5*time.Second, func(ctx context.Context) { svc.DeliverWebhooks(ctx) })
 	go (&notifications.Worker{DB: database, Sender: notifications.SMTP{}, Load: svc.MailWorkerSettings}).Run(ctx)
 
 	var updates *update.Checker
