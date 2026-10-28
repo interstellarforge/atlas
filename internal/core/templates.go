@@ -596,11 +596,13 @@ func (s *Service) CreateProjectFromTemplate(ctx context.Context, a auth.Actor, k
 	if err := t.Data.validate(); err != nil {
 		return Project{}, err
 	}
-	tx, err := s.db.W.Begin()
-	if err != nil {
-		return Project{}, err
+	tx := s.outer // inside a batch or idempotent call the caller commits, rolls back and notifies
+	if tx == nil {
+		if tx, err = s.db.W.Begin(); err != nil {
+			return Project{}, err
+		}
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 	bs := *s // shares the database; its tx() joins this transaction
 	bs.outer = tx
 	p, err := bs.CreateProject(ctx, a, key, name)
@@ -656,6 +658,9 @@ func (s *Service) CreateProjectFromTemplate(ctx context.Context, a auth.Actor, k
 	if err := bs.journal(ctx, tx, a, change{Operation: "project.from_template", Target: p.Key, Event: "project.updated", Project: p.Key,
 		Changes: map[string]any{"template": t.Name}}); err != nil {
 		return Project{}, err
+	}
+	if s.outer != nil {
+		return p, nil
 	}
 	if err := tx.Commit(); err != nil {
 		return Project{}, err

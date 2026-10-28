@@ -111,6 +111,61 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 		return result(map[string]any{"items": items})
 	})
 
+	type projectCreateIn struct {
+		Key  string `json:"key" jsonschema:"2-10 characters: letters and digits, starting with a letter, e.g. EXO"`
+		Name string `json:"name"`
+		// Template is a name from project_templates_list; empty uses the default workflow.
+		Template string `json:"template,omitempty" jsonschema:"name of a project template (see project_templates_list)"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "project_create",
+		Description: "Create a project, optionally from a project template (workflow, labels, item templates); the token's owner becomes its admin. Tokens limited to specific projects cannot create new ones.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in projectCreateIn) (*sdk.CallToolResult, any, error) {
+		out, failed := write(ctx, svc, writes, a, 1, "project_create", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {
+			var p core.Project
+			var err error
+			if in.Template == "" {
+				p, err = s.CreateProject(ctx, a, in.Key, in.Name)
+			} else {
+				var id int64
+				if id, err = projectTemplateID(ctx, s, a, in.Template); err == nil {
+					p, err = s.CreateProjectFromTemplate(ctx, a, in.Key, in.Name, id)
+				}
+			}
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"key": p.Key, "name": p.Name}, nil
+		})
+		if failed != nil {
+			return failed, nil, nil
+		}
+		return result(out)
+	})
+
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "project_templates_list",
+		Description: "List the project templates available to project_create (name, description, status names).",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
+		ts, err := svc.ListProjectTemplates(ctx, a)
+		if err != nil {
+			return fail(err)
+		}
+		items := make([]map[string]any, 0, len(ts))
+		for _, t := range ts {
+			names := make([]string, 0, len(t.Data.Statuses))
+			for _, st := range t.Data.Statuses {
+				names = append(names, st.Name)
+			}
+			items = append(items, map[string]any{"name": t.Name, "description": t.Description, "statuses": names})
+		}
+		return result(map[string]any{"items": items})
+	})
+
 	type workflowIn struct {
 		Project string `json:"project" jsonschema:"project key, e.g. EXO"`
 	}
@@ -681,6 +736,20 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 	})
 
 	return s
+}
+
+// projectTemplateID resolves a project template by name.
+func projectTemplateID(ctx context.Context, svc *core.Service, a auth.Actor, name string) (int64, error) {
+	ts, err := svc.ListProjectTemplates(ctx, a)
+	if err != nil {
+		return 0, err
+	}
+	for _, t := range ts {
+		if strings.EqualFold(t.Name, strings.TrimSpace(name)) {
+			return t.ID, nil
+		}
+	}
+	return 0, &core.InvalidError{Msg: "unknown project template " + name}
 }
 
 // quota charges n mutations to the actor's hourly budget; when it is spent the agent gets a readable error.
