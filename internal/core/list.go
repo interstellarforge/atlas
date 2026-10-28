@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/kees/atlas/internal/auth"
 )
@@ -98,7 +99,12 @@ func (s *Service) filterConds(f ItemFilter, projectIDs []int64) ([]string, []any
 	}
 	if f.Q != "" {
 		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(f.Q)
-		add(`i.title LIKE ? ESCAPE '\'`, "%"+esc+"%")
+		if m := ftsQuery(f.Q); m != "" {
+			// Titles match as a substring; descriptions match on word prefixes through the FTS5 index.
+			add(`(i.title LIKE ? ESCAPE '\' OR i.id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?))`, "%"+esc+"%", m)
+		} else {
+			add(`i.title LIKE ? ESCAPE '\'`, "%"+esc+"%")
+		}
 	}
 	if f.DoneBefore != nil {
 		add("NOT (st.category = 'completed' AND i.updated_at < ?)", *f.DoneBefore)
@@ -171,4 +177,14 @@ func decodeOffsetCursor(c string) (int, error) {
 		return 0, invalid("invalid cursor")
 	}
 	return n, nil
+}
+
+// ftsQuery turns free text into an FTS5 query: every word is quoted and matched as a prefix, all words must match.
+// It returns "" when the text holds no word.
+func ftsQuery(q string) string {
+	words := strings.FieldsFunc(q, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+	for i, w := range words {
+		words[i] = `"` + w + `"*`
+	}
+	return strings.Join(words, " ")
 }
