@@ -37,3 +37,57 @@ jobs:
       - run: pnpm format
       - run: pnpm build
       - run: pnpm audit --prod
+
+  # Every push to main that carries a feat/fix/perf/breaking commit becomes a release: tag, GitHub release
+  # (the update check in the app reads it) and a ghcr.io image. docs/chore-only pushes release nothing.
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [go, web]
+    runs-on: ubuntu-latest
+    concurrency: release
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Next version
+        id: v
+        run: |
+          last=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          log=$(git log ${last:+$last..}HEAD --format='%s%n%b')
+          if [ -z "$last" ]; then next=v0.1.0; else
+            IFS=. read -r maj min pat <<<"${last#v}"
+            if grep -qE '^[a-z]+(\(.+\))?!:|^BREAKING CHANGE' <<<"$log"; then bump=major
+            elif grep -qE '^feat(\(.+\))?:' <<<"$log"; then bump=minor
+            elif grep -qE '^(fix|perf)(\(.+\))?:' <<<"$log"; then bump=patch
+            else bump=none; fi
+            case $bump in
+              major) next=v$((maj + 1)).0.0 ;;
+              minor) next=v$maj.$((min + 1)).0 ;;
+              patch) next=v$maj.$min.$((pat + 1)) ;;
+              none) next= ;;
+            esac
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+      - name: Release
+        if: steps.v.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ steps.v.outputs.version }}" --target "$GITHUB_SHA" --generate-notes
+      - uses: docker/login-action@v3
+        if: steps.v.outputs.version != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v6
+        if: steps.v.outputs.version != ''
+        with:
+          context: .
+          push: true
+          build-args: VERSION=${{ steps.v.outputs.version }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest

@@ -23,6 +23,7 @@ import (
 	"github.com/kees/atlas/internal/events"
 	"github.com/kees/atlas/internal/logbuf"
 	"github.com/kees/atlas/internal/media"
+	"github.com/kees/atlas/internal/update"
 )
 
 const maxBodyBytes = 1 << 20
@@ -36,9 +37,10 @@ type Deps struct {
 	CookieSecure bool
 	SPA          fs.FS
 	MCP          http.Handler
-	MCPStats     http.Handler   // aggregate MCP call metrics; may be nil
-	Logs         *logbuf.Buffer // recent server log records for administrators; may be nil
-	Instance     map[string]any // effective settings shown read-only to admins
+	MCPStats     http.Handler    // aggregate MCP call metrics; may be nil
+	Logs         *logbuf.Buffer  // recent server log records for administrators; may be nil
+	Instance     map[string]any  // effective settings shown read-only to admins
+	Update       *update.Checker // newer-release check for admins; nil disables it
 	Media        *media.Store
 	MaxUpload    int64 // bytes per uploaded file
 	// TrustedProxies are the proxies whose X-Forwarded-For is believed; empty means the connection address is the client.
@@ -56,13 +58,14 @@ type Server struct {
 	mcpStats     http.Handler
 	logs         *logbuf.Buffer
 	instance     map[string]any
+	update       *update.Checker
 	media        *media.Store
 	maxUpload    int64
 	proxies      []netip.Prefix
 }
 
 func New(d Deps) *Server {
-	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, mcpStats: d.MCPStats, logs: d.Logs, instance: d.Instance, media: d.Media, maxUpload: d.MaxUpload, proxies: d.TrustedProxies}
+	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, mcpStats: d.MCPStats, logs: d.Logs, instance: d.Instance, update: d.Update, media: d.Media, maxUpload: d.MaxUpload, proxies: d.TrustedProxies}
 }
 
 func (s *Server) Handler() http.Handler {

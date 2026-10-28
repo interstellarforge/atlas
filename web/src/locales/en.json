@@ -4,7 +4,9 @@
     "loading": "Loading…",
     "by": "by Interstellarforge",
     "tagline": "Build further.",
-    "maker": "Interstellarforge"
+    "maker": "Interstellarforge",
+    "update": "Atlas {latest} is available (you run {current}). Upgrade to the latest version.",
+    "updateLink": "Release notes"
   },
   "nav": {
     "projects": "Projects",

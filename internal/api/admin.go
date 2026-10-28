@@ -8,6 +8,7 @@ import (
 	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/logbuf"
+	"github.com/kees/atlas/internal/update"
 )
 
 func (s *Server) registerAdmin(mux *http.ServeMux, protect func(http.HandlerFunc) http.Handler) {
@@ -15,6 +16,7 @@ func (s *Server) registerAdmin(mux *http.ServeMux, protect func(http.HandlerFunc
 	mux.Handle("PATCH /api/v1/admin/users/{id}", protect(s.adminPatchUser))
 	mux.Handle("GET /api/v1/admin/audit", protect(s.adminAudit))
 	mux.Handle("GET /api/v1/admin/instance", protect(s.adminInstance))
+	mux.Handle("GET /api/v1/admin/update", protect(s.adminUpdate))
 	mux.Handle("GET /api/v1/admin/logs", protect(s.adminLogs))
 	mux.Handle("GET /api/v1/admin/mail", protect(s.adminMail))
 	mux.Handle("PUT /api/v1/admin/mail", protect(s.adminSaveMail))
@@ -83,6 +85,19 @@ func (s *Server) adminInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"settings": s.instance})
+}
+
+// adminUpdate reports whether a newer release exists; with the check disabled it reports nothing available.
+func (s *Server) adminUpdate(w http.ResponseWriter, r *http.Request) {
+	if a := actor(r); !a.IsAdmin || a.Kind != "human" {
+		writeError(w, http.StatusForbidden, "forbidden", "not allowed")
+		return
+	}
+	if s.update == nil {
+		writeJSON(w, http.StatusOK, update.Status{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.update.Check(r.Context()))
 }
 
 // roles lists the project roles with their actions, and the action names the matrix is built from.

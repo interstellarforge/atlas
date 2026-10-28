@@ -35,6 +35,8 @@ type Config struct {
 	TrustedProxies []netip.Prefix
 	// PublicURL is the address users reach Atlas at, for links in emails. Optional.
 	PublicURL string
+	// UpdateCheck lets admins see when a newer GitHub release exists (one request to api.github.com every few hours).
+	UpdateCheck bool
 }
 
 func Load() (Config, error) {
@@ -45,6 +47,7 @@ func Load() (Config, error) {
 		CookieSecure:  env("ATLAS_COOKIE_SECURE", "true") != "false",
 		AdminEmail:    os.Getenv("ATLAS_ADMIN_EMAIL"),
 		AdminPassword: os.Getenv("ATLAS_ADMIN_PASSWORD"),
+		UpdateCheck:   env("ATLAS_UPDATE_CHECK", "true") != "false",
 	}
 	if c.Synchronous != "FULL" && c.Synchronous != "NORMAL" {
 		return c, fmt.Errorf("ATLAS_SYNCHRONOUS must be FULL or NORMAL, got %q", c.Synchronous)

@@ -1,7 +1,12 @@
 <script lang="ts">
   import { type Snippet, tick } from "svelte";
 
-  import type { Project, User } from "./api";
+  import {
+    getUpdateStatus,
+    type Project,
+    type UpdateStatus,
+    type User,
+  } from "./api";
   import Avatar from "./Avatar.svelte";
   import Brand from "./Brand.svelte";
   import { realtime } from "./events.svelte";
@@ -32,6 +37,15 @@
   let drawerOpen = $state(false);
   let drawerEl = $state<HTMLElement | undefined>();
   let menuButton = $state<HTMLButtonElement | undefined>();
+
+  let update = $state<UpdateStatus | undefined>();
+  $effect(() => {
+    if (!user.is_admin) return;
+    getUpdateStatus().then(
+      (u) => (update = u.available ? u : undefined),
+      () => undefined, // advisory only
+    );
+  });
 
   const current = $derived(matchProject(route.path));
   const links: {
@@ -300,6 +314,17 @@
       >
     </header>
     <main>
+      {#if update?.url}
+        <p class="banner" role="status">
+          {t("app.update", {
+            latest: update.latest ?? "",
+            current: update.current,
+          })}
+          <a href={update.url} target="_blank" rel="noopener noreferrer"
+            >{t("app.updateLink")}</a
+          >
+        </p>
+      {/if}
       {@render children()}
     </main>
   </div>

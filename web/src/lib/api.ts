@@ -941,6 +941,17 @@ export function getInstance(): Promise<{
   return request("GET", "/admin/instance");
 }
 
+export interface UpdateStatus {
+  current: string;
+  latest?: string;
+  url?: string;
+  available: boolean;
+}
+
+export function getUpdateStatus(): Promise<UpdateStatus> {
+  return request("GET", "/admin/update");
+}
+
 export interface ItemTemplate {
   id: number;
   name: string;

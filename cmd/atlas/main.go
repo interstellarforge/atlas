@@ -24,9 +24,13 @@ import (
 	"github.com/kees/atlas/internal/media"
 	"github.com/kees/atlas/internal/notifications"
 	"github.com/kees/atlas/internal/repo"
+	"github.com/kees/atlas/internal/update"
 	"github.com/kees/atlas/migrations"
 	"github.com/kees/atlas/web"
 )
+
+// version is set at build time with -ldflags "-X main.version=v1.2.3"; "dev" never reports an update.
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -114,11 +118,15 @@ func run() error {
 	go pruneJournal(ctx, feed, cfg.EventRetention)
 	go (&notifications.Worker{DB: database, Sender: notifications.SMTP{}, Load: svc.MailWorkerSettings}).Run(ctx)
 
+	var updates *update.Checker
+	if cfg.UpdateCheck {
+		updates = &update.Checker{Current: version, URL: update.LatestURL, Client: &http.Client{}}
+	}
 	mcpMetrics := mcp.NewMetrics()
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, Media: uploads, MaxUpload: cfg.UploadMaxBytes, CookieSecure: cfg.CookieSecure, TrustedProxies: cfg.TrustedProxies,
-			SPA: web.Dist(), MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: cfg.MCPWritesPerHour, Metrics: mcpMetrics, Label: tokenLabel(database)}), MCPStats: mcpMetrics, Logs: logs,
+			SPA: web.Dist(), MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: cfg.MCPWritesPerHour, Metrics: mcpMetrics, Label: tokenLabel(database)}), MCPStats: mcpMetrics, Logs: logs, Update: updates,
 			Instance: map[string]any{"upload_max_mb": cfg.UploadMaxBytes >> 20, "upload_max_megapixels": cfg.UploadMaxMegapixels / 1_000_000,
 				"mcp_writes_per_hour": cfg.MCPWritesPerHour, "event_retention_days": int(cfg.EventRetention.Hours() / 24), "cookie_secure": cfg.CookieSecure,
 				"synchronous": cfg.Synchronous}}).Handler(),
