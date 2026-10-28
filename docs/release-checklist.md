@@ -23,4 +23,4 @@ Status 2026-10-27. The original 12-point "definition of success" is not in this 
 - Screen-reader and full keyboard pass; target-size leftovers on cards (fixed by the UIX redesign).
 - Export/import UI, and import of comments, checklists, links, attachments and assignees, if needed.
 - Confirm the license and replace this list with the original 12 points.
-- Project context: show that `context_get` saves agent work (see RESULTS.md, Atlas Context), or simplify the module; screen-reader pass of the Context tab; context in project export.
+- Project context: show that `context_get` saves agent work (see RESULTS.md, Atlas Context), or simplify the module; screen-reader pass of the Context tab.
