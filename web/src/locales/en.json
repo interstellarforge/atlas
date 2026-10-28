@@ -305,7 +305,18 @@
     "unfollow": "Following",
     "properties": "Properties",
     "descriptionHint": "Describe the work. Markdown is supported.",
-    "unsaved": "Unsaved changes"
+    "unsaved": "Unsaved changes",
+    "editor": {
+      "bold": "Bold",
+      "italic": "Italic",
+      "heading": "Heading",
+      "bullets": "Bulleted list",
+      "numbers": "Numbered list",
+      "quote": "Quote",
+      "code": "Code block",
+      "link": "Link",
+      "linkPrompt": "Link URL"
+    }
   },
   "milestones": {
     "title": "Milestones",

@@ -75,8 +75,8 @@
   });
 </script>
 
-<section aria-labelledby="item-attachments">
-  <h3 id="item-attachments">{t("item.attachments")}</h3>
+<details class="sec" open>
+  <summary>{t("item.attachments")}</summary>
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
   {#if items.length === 0}
     <p class="meta">{t("item.noAttachments")}</p>
@@ -118,15 +118,10 @@
       onchange={picked}
     />
   </label>
-</section>
+</details>
 
 <style>
-  section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-  h3 {
+  summary {
     display: flex;
     align-items: center;
     gap: var(--space-2);

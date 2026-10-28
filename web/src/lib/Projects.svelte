@@ -14,9 +14,12 @@
   import PageHero from "./PageHero.svelte";
   import ProgressBar from "./ProgressBar.svelte";
   import { projectColor, projectCoverName } from "./projectColor";
+  import { toneVar } from "./statusTone";
 
   let { projects, onchange }: { projects: Project[]; onchange: () => void } =
     $props();
+
+  const CATEGORIES = ["todo", "active", "review", "completed"] as const;
 
   let creating = $state(false);
   let key = $state("");
@@ -34,7 +37,7 @@
     ),
   );
 
-  // One grouped query per project (ADR-0014); the compact bar shows the split by status.
+  // One grouped query per project (ADR-0014); the compact bar shows the split by category.
   $effect(() => {
     for (const project of projects) {
       if (counts[project.key]) continue;
@@ -164,8 +167,16 @@
               <ProgressBar progress={c} compact />
               <p class="stats">
                 <span><b>{c.total}</b> {t("home.items")}</span>
-                <span><b>{c.categories.active}</b> {t("home.inProgress")}</span>
-                <span><b>{c.categories.completed}</b> {t("home.done")}</span>
+                {#each CATEGORIES as cat (cat)}
+                  <span
+                    ><i
+                      style:background={toneVar(
+                        cat === "completed" ? "done" : cat,
+                      )}
+                    ></i><b>{c.categories[cat]}</b>
+                    {t(`workflow.cat.${cat}`)}</span
+                  >
+                {/each}
               </p>
             {:else}
               <p class="stats muted">…</p>
@@ -317,6 +328,13 @@
     gap: 4px var(--space-4);
     font-size: var(--atlas-fs-sm);
     color: var(--color-muted);
+  }
+  .stats i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
   }
   .stats b {
     color: var(--color-text);

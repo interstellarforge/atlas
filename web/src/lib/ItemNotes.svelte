@@ -95,11 +95,11 @@
   });
 </script>
 
-<section aria-labelledby="item-checklist">
-  <h3 id="item-checklist">
+<details class="sec" open>
+  <summary>
     {t("item.checklist")}{#if checklist.length > 0}
       <span class="count">{done}/{checklist.length}</span>{/if}
-  </h3>
+  </summary>
   {#if checklist.length > 0}
     <div class="bar" aria-hidden="true">
       <span style:width="{Math.round((done / checklist.length) * 100)}%"></span>
@@ -147,10 +147,10 @@
       >{t("item.checklistAddButton")}</button
     >
   </form>
-</section>
+</details>
 
-<section aria-labelledby="item-comments">
-  <h3 id="item-comments">{t("item.comments")}</h3>
+<details class="sec" open>
+  <summary>{t("item.comments")}</summary>
   {#if comments.length === 0}
     <p class="meta">{t("item.noComments")}</p>
   {:else}
@@ -179,15 +179,10 @@
       >{t("item.commentSubmit")}</button
     >
   </form>
-</section>
+</details>
 
 <style>
-  section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-  h3 {
+  summary {
     display: flex;
     align-items: center;
     gap: var(--space-2);

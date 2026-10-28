@@ -101,22 +101,36 @@ func (s *Service) filterConds(f ItemFilter, projectIDs []int64) ([]string, []any
 	return conds, args, nil
 }
 
-// sortClause maps a sort name to ORDER BY. Only the default (creation order) supports keyset paging;
-// other sorts page by offset, which is fine at the target size of 10.000 items.
+// sortColumns maps a sort name to its ORDER BY in default and reversed (leading "-") direction.
+// Missing due dates and assignees always sort last.
+var sortColumns = map[string][2]string{
+	"key":      {"i.id", "i.id DESC"},
+	"title":    {"i.title COLLATE NOCASE, i.id", "i.title COLLATE NOCASE DESC, i.id"},
+	"type":     {"i.type, i.id", "i.type DESC, i.id"},
+	"status":   {"st.position, st.name, i.id", "st.position DESC, st.name DESC, i.id"},
+	"priority": {"CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, i.id", "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END DESC, i.id"},
+	"assignee": {"i.assignee_id IS NULL, (SELECT name FROM users WHERE id = i.assignee_id) COLLATE NOCASE, i.id", "i.assignee_id IS NULL, (SELECT name FROM users WHERE id = i.assignee_id) COLLATE NOCASE DESC, i.id"},
+	"due":      {"i.due_at IS NULL, i.due_at, i.id", "i.due_at IS NULL, i.due_at DESC, i.id"},
+	"updated":  {"i.updated_at DESC, i.id DESC", "i.updated_at, i.id"},
+	"rank":     {"i.rank, i.id", "i.rank DESC, i.id"},
+}
+
+// sortClause maps a sort name (optionally prefixed with "-" to reverse) to ORDER BY. Only the default
+// (creation order) supports keyset paging; other sorts page by offset, which is fine at the target
+// size of 10.000 items.
 func sortClause(sort string) (order string, keyset bool, err error) {
-	switch sort {
-	case "", "key":
-		return "i.id", true, nil
-	case "updated":
-		return "i.updated_at DESC, i.id DESC", false, nil
-	case "priority":
-		return "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, i.id", false, nil
-	case "due":
-		return "i.due_at IS NULL, i.due_at, i.id", false, nil
-	case "rank":
-		return "i.rank, i.id", false, nil
+	if sort == "" {
+		sort = "key"
 	}
-	return "", false, invalid("sort must be key, updated, priority, due or rank")
+	name, rev := strings.CutPrefix(sort, "-")
+	cols, ok := sortColumns[name]
+	if !ok {
+		return "", false, invalid("sort must be key, title, type, status, priority, assignee, due, updated or rank, optionally prefixed with -")
+	}
+	if rev {
+		return cols[1], false, nil
+	}
+	return cols[0], name == "key", nil
 }
 
 func encodeIDCursor(id int64) string {

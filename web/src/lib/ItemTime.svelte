@@ -96,8 +96,8 @@
   $effect(() => onResync(() => void load()));
 </script>
 
-<section>
-  <h3>{t("time.itemTitle")}</h3>
+<details class="sec" open>
+  <summary>{t("time.itemTitle")}</summary>
   <p class="muted">{t("time.total", { time: formatMinutes(total) })}</p>
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
   {#if entries.length === 0}
@@ -176,15 +176,10 @@
   {:else}
     <p class="muted">{t("time.off")}</p>
   {/if}
-</section>
+</details>
 
 <style>
-  section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-  h3 {
+  summary {
     margin: 0;
     font-size: var(--atlas-fs-md);
     font-weight: var(--atlas-fw-bold);

@@ -24,7 +24,15 @@
   const ROW = 48; // --atlas-list-row-h
   const FIELDS =
     "key,type,title,status,priority,assignee,due_at,blocked,updated_at,archived_at";
-  type SortKey = "key" | "priority" | "due" | "updated";
+  type SortKey =
+    | "key"
+    | "title"
+    | "type"
+    | "status"
+    | "priority"
+    | "assignee"
+    | "due"
+    | "updated";
 
   // With `fixedType` the list shows only items of that type (the issues page lists bugs).
   let {
@@ -36,7 +44,10 @@
   let items = $state<Card[]>([]);
   let nextCursor = $state<string | null>(null);
   let filters = $state<Filters>({ ...emptyFilters });
-  let sort = $state<SortKey>("key");
+  // "-" prefix reverses the column's default direction (server contract).
+  let sort = $state<SortKey | `-${SortKey}`>("key");
+  const sortName = $derived(sort.replace(/^-/, ""));
+  const reversed = $derived(sort.startsWith("-"));
   let ready = $state(false);
   let loading = false;
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -45,7 +56,7 @@
     dateStyle: "medium",
   });
   const columns: {
-    key: SortKey | undefined;
+    key: SortKey;
     label:
       | "list.key"
       | "list.title"
@@ -57,11 +68,11 @@
       | "list.updated";
   }[] = [
     { key: "key", label: "list.key" },
-    { key: undefined, label: "list.title" },
-    { key: undefined, label: "list.type" },
-    { key: undefined, label: "list.status" },
+    { key: "title", label: "list.title" },
+    { key: "type", label: "list.type" },
+    { key: "status", label: "list.status" },
     { key: "priority", label: "list.priority" },
-    { key: undefined, label: "list.assignee" },
+    { key: "assignee", label: "list.assignee" },
     { key: "due", label: "list.due" },
     { key: "updated", label: "list.updated" },
   ];
@@ -147,23 +158,26 @@
       {#each columns as column (column.label)}
         <div
           role="columnheader"
-          aria-sort={column.key && sort === column.key ? "ascending" : "none"}
+          aria-sort={sortName === column.key
+            ? reversed
+              ? "descending"
+              : "ascending"
+            : "none"}
         >
-          {#if column.key}
-            {@const sortKey = column.key}
-            <button
-              type="button"
-              class:active={sort === sortKey}
-              onclick={() => (sort = sortKey)}
-            >
-              {t(column.label)}{#if sort === sortKey}<Icon
-                  name="arrow-down"
-                  size={12}
-                />{/if}
-            </button>
-          {:else}
-            {t(column.label)}
-          {/if}
+          <button
+            type="button"
+            class:active={sortName === column.key}
+            onclick={() =>
+              (sort =
+                sortName === column.key && !reversed
+                  ? `-${column.key}`
+                  : column.key)}
+          >
+            {t(column.label)}{#if sortName === column.key}<span
+                class="dir"
+                class:reversed><Icon name="arrow-down" size={12} /></span
+              >{/if}
+          </button>
         </div>
       {/each}
     </div>
@@ -294,6 +308,12 @@
   }
   .head button.active {
     color: var(--color-accent);
+  }
+  .dir {
+    display: inline-flex;
+  }
+  .dir.reversed {
+    transform: rotate(180deg);
   }
   .rows {
     flex: 1;

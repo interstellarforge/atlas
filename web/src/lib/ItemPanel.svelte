@@ -25,6 +25,7 @@
   import ItemTime from "./ItemTime.svelte";
   import { people } from "./people.svelte";
   import PriorityIndicator from "./PriorityIndicator.svelte";
+  import RichEditor from "./RichEditor.svelte";
   import { navigate } from "./router.svelte";
   import { itemHref } from "./routes";
   import StatusChip from "./StatusChip.svelte";
@@ -464,15 +465,17 @@
 
       <div class="layout">
         <div class="main">
-          <section class="panel" aria-labelledby="item-desc">
-            <h3 id="item-desc">{t("item.description")}</h3>
-            <textarea
-              form="item-form"
-              aria-labelledby="item-desc"
-              bind:value={form.description}
-              rows="7"
-              placeholder={t("item.descriptionHint")}></textarea>
-          </section>
+          <details class="panel sec" open>
+            <summary id="item-desc">{t("item.description")}</summary>
+            <RichEditor
+              value={form.description}
+              labelledby="item-desc"
+              placeholder={t("item.descriptionHint")}
+              onchange={(markdown: string) => {
+                if (form) form.description = markdown;
+              }}
+            />
+          </details>
           {#if !create}
             <div class="panel"><ItemAttachments {itemKey} /></div>
             {#if workflow.time_tracking}
@@ -485,8 +488,8 @@
         </div>
 
         <aside class="side">
-          <section class="panel" aria-labelledby="item-props">
-            <h3 id="item-props">{t("item.properties")}</h3>
+          <details class="panel sec" open>
+            <summary>{t("item.properties")}</summary>
             <div class="props">
               {#if create}
                 {#if templates.length > 0}
@@ -602,11 +605,11 @@
             {#if !create}<p class="meta">
                 {t("item.updated", { date: dateTime.format(item.updated_at) })}
               </p>{/if}
-          </section>
+          </details>
 
           {#if !create}
-            <section class="panel" aria-labelledby="item-links">
-              <h3 id="item-links">{t("item.links")}</h3>
+            <details class="panel sec" open>
+              <summary>{t("item.links")}</summary>
               {#if linkError}<p class="banner error" role="alert">
                   {linkError}
                 </p>{/if}
@@ -675,7 +678,7 @@
                   ><Icon name="link" size={14} />{t("item.addLink")}</button
                 >
               </form>
-            </section>
+            </details>
           {/if}
         </aside>
       </div>
@@ -718,16 +721,16 @@
 
 <style>
   dialog {
-    margin: 0 0 0 auto;
-    height: 100dvh;
-    max-height: 100dvh;
-    width: min(var(--atlas-panel-w), 100vw);
-    max-width: 100vw;
+    margin: auto;
+    height: min(92dvh, 960px);
+    width: min(1180px, 96vw);
+    max-width: 96vw;
     padding: 0;
+    overflow: hidden;
     background: var(--color-bg);
     color: var(--color-text);
-    border: none;
-    border-left: 1px solid var(--color-border);
+    border: 1px solid var(--color-border);
+    border-radius: var(--atlas-radius-md);
     box-shadow: var(--atlas-shadow-lg);
   }
   dialog[open] {
@@ -819,7 +822,7 @@
   }
   .layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-columns: minmax(0, 1fr) 320px;
     gap: var(--space-4);
     align-items: start;
   }
@@ -830,22 +833,14 @@
     min-width: 0;
   }
   .panel {
-    display: grid;
-    gap: var(--space-3);
     padding: 16px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--atlas-radius-md);
   }
-  h3 {
-    margin: 0;
+  summary {
     font-size: var(--atlas-fs-md);
     font-weight: var(--atlas-fw-bold);
-  }
-  textarea {
-    resize: vertical;
-    line-height: 1.55;
-    background: var(--color-bg);
   }
   .props {
     display: grid;
@@ -953,7 +948,10 @@
     }
     dialog {
       width: 100vw;
-      border-left: none;
+      max-width: 100vw;
+      height: 100dvh;
+      border-radius: 0;
+      border: none;
     }
     .layout {
       grid-template-columns: minmax(0, 1fr);
