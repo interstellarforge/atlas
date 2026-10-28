@@ -22,6 +22,7 @@ type BoardFilter struct {
 	Type, Priority, Label, Milestone, Q string
 	Assignee                            *int64
 	IncludeArchived                     bool
+	DoneBefore                          *int64 // see ItemFilter
 	Fields                              []string
 	Limit                               int // cards per column in the first page
 }
@@ -44,7 +45,7 @@ type Board struct {
 
 func (f BoardFilter) item() ItemFilter {
 	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Milestone: f.Milestone, Q: f.Q, Assignee: f.Assignee,
-		IncludeArchived: f.IncludeArchived, Fields: f.fields()}
+		IncludeArchived: f.IncludeArchived, DoneBefore: f.DoneBefore, Fields: f.fields()}
 }
 
 func (f BoardFilter) fields() []string {

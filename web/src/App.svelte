@@ -47,6 +47,14 @@
   let projects = $state<Project[]>([]);
 
   const current = $derived(matchProject(route.path));
+  // Browser tab title: "Atlas - {project name} {ticket}".
+  $effect(() => {
+    const name = current
+      ? (projects.find((p) => p.key === current.key)?.name ?? current.key)
+      : "";
+    document.title = ["Atlas -", name, current?.item].filter(Boolean).join(" ");
+    if (!name) document.title = "Atlas";
+  });
   const allKeys = $derived(projects.map((p) => p.key));
 
   void me()

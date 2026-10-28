@@ -750,6 +750,7 @@ type ItemFilter struct {
 	Assignee        *int64
 	UpdatedSince    *int64
 	IncludeArchived bool
+	DoneBefore      *int64 // hide completed items last updated before this (unix ms)
 	Cursor          string
 	Limit           int
 	Fields          []string

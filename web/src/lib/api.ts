@@ -219,6 +219,7 @@ export interface Filters {
   milestone: string;
   assignee: string;
   archived: boolean;
+  olderDone: boolean; // include completed items the admin policy hides
 }
 
 export const emptyFilters: Filters = {
@@ -230,6 +231,7 @@ export const emptyFilters: Filters = {
   milestone: "",
   assignee: "",
   archived: false,
+  olderDone: false,
 };
 
 function query(
@@ -253,6 +255,7 @@ function filterParams(f: Filters): Record<string, string | boolean> {
     milestone: f.milestone,
     assignee: f.assignee,
     archived: f.archived,
+    hide_old_done: !f.olderDone,
   };
 }
 
@@ -1121,6 +1124,7 @@ export interface Policy {
   allowed_domain: string;
   session_days: number;
   default_role: string;
+  done_visible_days: number;
 }
 
 export function getPolicy(): Promise<Policy> {
