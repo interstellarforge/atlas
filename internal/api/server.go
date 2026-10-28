@@ -43,6 +43,8 @@ type Deps struct {
 	Update       *update.Checker // newer-release check for admins; nil disables it
 	Media        *media.Store
 	MaxUpload    int64 // bytes per uploaded file
+	// PublicURL (no trailing slash) is the address clients reach the server at (OAuth metadata); empty derives it from the request.
+	PublicURL string
 	// TrustedProxies are the proxies whose X-Forwarded-For is believed; empty means the connection address is the client.
 	TrustedProxies []netip.Prefix
 }
@@ -62,10 +64,11 @@ type Server struct {
 	media        *media.Store
 	maxUpload    int64
 	proxies      []netip.Prefix
+	publicURL    string
 }
 
 func New(d Deps) *Server {
-	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, mcpStats: d.MCPStats, logs: d.Logs, instance: d.Instance, update: d.Update, media: d.Media, maxUpload: d.MaxUpload, proxies: d.TrustedProxies}
+	return &Server{db: d.DB, auth: d.Auth, core: d.Core, feed: d.Feed, cookieSecure: d.CookieSecure, spa: d.SPA, mcp: d.MCP, mcpStats: d.MCPStats, logs: d.Logs, instance: d.Instance, update: d.Update, media: d.Media, maxUpload: d.MaxUpload, proxies: d.TrustedProxies, publicURL: strings.TrimRight(d.PublicURL, "/")}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -89,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerIdentity(mux, protect)
 	s.registerInsight(mux, protect)
 	s.registerContext(mux, protect)
+	s.registerOAuth(mux)
 	mux.Handle("GET /api/v1/events", protect(s.events))
 	mux.Handle("GET /api/v1/changes", protect(s.changes))
 	if s.mcpStats != nil {
@@ -106,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 		// scopes are enforced per tool in core instead.
 		mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 			if _, ok := auth.ActorFrom(r.Context()); !ok {
+				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+s.resourceMetadataURL(r)+`"`)
 				writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 				return
 			}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Atlas</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f7f9;color:#1a1d23}
+main{width:min(26rem,calc(100vw - 2rem));background:#fff;border:1px solid #dde1e7;border-radius:12px;padding:1.5rem}
+h1{font-size:1.25rem;margin:0 0 .75rem}
+label{display:block;margin:.75rem 0 .25rem;font-size:.875rem}
+input{box-sizing:border-box;width:100%;padding:.55rem .65rem;border:1px solid #b8bfca;border-radius:8px;font:inherit}
+button{margin-top:1rem;padding:.55rem 1rem;border-radius:8px;border:1px solid #2b5bd7;background:#2b5bd7;color:#fff;font:inherit;cursor:pointer}
+button.secondary{background:#fff;color:#1a1d23;border-color:#b8bfca;margin-left:.5rem}
+.err{color:#b3261e;margin:.5rem 0 0}
+ul{padding-left:1.25rem}
+@media (prefers-color-scheme:dark){body{background:#12151a;color:#e8eaee}main{background:#1a1e25;border-color:#2c323c}input{background:#12151a;color:inherit;border-color:#3a414d}button.secondary{background:#1a1e25;color:inherit;border-color:#3a414d}.err{color:#ff8a80}}
+</style>
+</head>
+<body>
+<main>
+{{if eq .Mode "error"}}
+<h1>Request refused</h1>
+<p class="err">{{.Error}}</p>
+{{else}}
+{{if eq .Mode "login"}}
+<h1>Sign in to Atlas</h1>
+<p><strong>{{.Client}}</strong> wants to connect to your Atlas account.</p>
+{{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+<form method="post" action="/oauth/authorize" autocomplete="on">
+{{template "hidden" .}}
+<input type="hidden" name="action" value="login">
+<label for="email">Email</label>
+<input id="email" name="email" type="email" value="{{.Email}}" autocomplete="username" required>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
+{{if .Totp}}<label for="code">Two-factor code</label>
+<input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required>{{end}}
+<button type="submit">Sign in</button>
+</form>
+{{else}}
+<h1>Connect {{.Client}}?</h1>
+<p><strong>{{.Client}}</strong> will act as you in Atlas, with:</p>
+<ul>{{range .Scopes}}<li>{{if eq . "write"}}read and change work items{{else}}read projects and work items{{end}}</li>{{end}}</ul>
+<p>You can revoke access at any time in your token list.</p>
+<form method="post" action="/oauth/authorize">
+{{template "hidden" .}}
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<button type="submit" name="action" value="approve">Allow</button>
+<button type="submit" name="action" value="deny" class="secondary">Deny</button>
+</form>
+{{end}}
+{{end}}
+</main>
+</body>
+</html>
+{{define "hidden"}}<input type="hidden" name="response_type" value="code">
+<input type="hidden" name="code_challenge_method" value="S256">
+<input type="hidden" name="client_id" value="{{.Req.ClientID}}">
+<input type="hidden" name="redirect_uri" value="{{.Req.RedirectURI}}">
+<input type="hidden" name="code_challenge" value="{{.Req.Challenge}}">
+<input type="hidden" name="scope" value="{{.Req.Scope}}">
+<input type="hidden" name="state" value="{{.Req.State}}">{{end}}

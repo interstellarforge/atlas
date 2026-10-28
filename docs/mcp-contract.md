@@ -1,6 +1,6 @@
 # MCP contract
 
-Transport: Streamable HTTP at `/mcp` over HTTPS. Official Go MCP SDK. Auth: scoped personal access token (bearer). OAuth is v1.5.
+Transport: Streamable HTTP at `/mcp` over HTTPS. Official Go MCP SDK. Auth: scoped personal access token (bearer), or an OAuth 2.1 access token for OAuth-based clients (ADR-0025): a 401 from `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource"`, the metadata names Atlas itself as authorization server (RFC 9728, RFC 8414), clients register themselves (RFC 7591) and use authorization code + PKCE S256. OAuth access tokens are normal tokens named `OAuth: <client>` (1 hour, scopes read/write, revocable in the token list).
 Tools are thin adapters over `core` services (same as REST). Tool names, descriptions and schemas stay stable.
 
 ## Tools (first contract, extensible when it measurably reduces calls/tokens/errors)

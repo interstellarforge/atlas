@@ -104,3 +104,12 @@
 - The MCP connection list (token names, owners, client names) and the server log window are admin-only and need a human session; tokens get 403. Log lines carry request ids, actors, paths and error reasons, never secrets or bodies.
 - Handler panics are recovered and logged with a stack; the client only sees a generic 500. Header size is capped at 64 KiB and MCP request bodies at 1 MiB.
 - Responses carry `Permissions-Policy` (camera, microphone, geolocation, payment off) and `Cross-Origin-Opener-Policy: same-origin`; with `ATLAS_COOKIE_SECURE` on, also `Strict-Transport-Security` (one year, no subdomains).
+
+### OAuth for MCP clients (ADR-0025)
+
+- Atlas is its own authorization server. Public clients only (no client secrets); authorization code with mandatory PKCE S256; codes live 5 minutes and are single use, also when the exchange fails.
+- Redirects: the `redirect_uri` must match a registered one exactly, otherwise the user sees an error page and nothing is redirected. Registration refuses `javascript:`, `data:`, `file:` and similar schemes, fragments and plain `http` outside localhost.
+- Consent: the page needs a signed-in session (or signs the user in, with the normal login rules: throttling, two-factor) and a CSRF token tied to that session. It sends `X-Frame-Options: DENY` and a frame-ancestors CSP.
+- Tokens: access tokens are normal `api_tokens` (hashed, scoped read/write, 1 hour, revocable). Refresh tokens are hashed, rotate on use, live 30 days; reuse of a used refresh token revokes the whole family. A token cannot mint tokens, so OAuth cannot be used to widen access.
+- Abuse: registration and failed token requests count against a per-address limit (5 per 15 minutes); at most 1000 clients exist. Registered clients are not shown to users beyond their name on the consent page: treat the name as untrusted text (it is escaped).
+- The `resource` parameter, when sent, must equal `<base>/mcp` (RFC 8707). Set `ATLAS_PUBLIC_URL`; without it the metadata is built from the request's Host header.

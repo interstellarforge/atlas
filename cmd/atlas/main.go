@@ -120,6 +120,7 @@ func run() error {
 	go pruneJournal(ctx, feed, cfg.EventRetention)
 	go scheduler.Every(ctx, time.Minute, func(ctx context.Context) { svc.RunDueRecurrences(ctx) })
 	go scheduler.Every(ctx, 24*time.Hour, func(context.Context) { svc.PruneBatchInverses(time.Now().Add(-cfg.EventRetention).UnixMilli()) })
+	go scheduler.Every(ctx, time.Hour, func(context.Context) { authSvc.PurgeOAuth() })
 	go scheduler.Every(ctx, 5*time.Second, func(ctx context.Context) { svc.DeliverWebhooks(ctx) })
 	go (&notifications.Worker{DB: database, Sender: notifications.SMTP{}, Load: svc.MailWorkerSettings}).Run(ctx)
 
@@ -130,7 +131,7 @@ func run() error {
 	mcpMetrics := mcp.NewMetrics()
 	srv := &http.Server{
 		Addr: cfg.Addr,
-		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, Media: uploads, MaxUpload: cfg.UploadMaxBytes, CookieSecure: cfg.CookieSecure, TrustedProxies: cfg.TrustedProxies,
+		Handler: api.New(api.Deps{DB: database, Auth: authSvc, Core: svc, Feed: feed, Media: uploads, MaxUpload: cfg.UploadMaxBytes, CookieSecure: cfg.CookieSecure, TrustedProxies: cfg.TrustedProxies, PublicURL: cfg.PublicURL,
 			SPA: web.Dist(), MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: cfg.MCPWritesPerHour, Metrics: mcpMetrics, Label: tokenLabel(database)}), MCPStats: mcpMetrics, Logs: logs, Update: updates,
 			Instance: map[string]any{"upload_max_mb": cfg.UploadMaxBytes >> 20, "upload_max_megapixels": cfg.UploadMaxMegapixels / 1_000_000,
 				"mcp_writes_per_hour": cfg.MCPWritesPerHour, "event_retention_days": int(cfg.EventRetention.Hours() / 24), "cookie_secure": cfg.CookieSecure,
