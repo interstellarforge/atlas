@@ -73,6 +73,11 @@ func (s *Service) filterConds(f ItemFilter, projectIDs []int64) ([]string, []any
 	if f.Milestone != "" {
 		add("i.milestone_id = (SELECT id FROM milestones WHERE project_id = i.project_id AND name = ? COLLATE NOCASE)", f.Milestone)
 	}
+	if f.Sprint == "none" {
+		add("i.sprint_id IS NULL")
+	} else if f.Sprint != "" {
+		add("i.sprint_id = (SELECT id FROM sprints WHERE project_id = i.project_id AND name = ? COLLATE NOCASE)", f.Sprint)
+	}
 	if f.Parent != "" {
 		add("i.parent_id = (SELECT id FROM work_items WHERE key = ?)", f.Parent)
 	}

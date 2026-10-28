@@ -20,7 +20,7 @@ func (s *Server) registerBoard(mux *http.ServeMux, protect func(http.HandlerFunc
 func (s *Server) boardFilter(w http.ResponseWriter, r *http.Request) (core.BoardFilter, bool) {
 	q := r.URL.Query()
 	f := core.BoardFilter{
-		Type: q.Get("type"), Priority: q.Get("priority"), Label: q.Get("label"), Milestone: q.Get("milestone"), Q: q.Get("q"), Category: q.Get("category"),
+		Type: q.Get("type"), Priority: q.Get("priority"), Label: q.Get("label"), Milestone: q.Get("milestone"), Sprint: q.Get("sprint"), Q: q.Get("q"), Category: q.Get("category"),
 		IncludeArchived: q.Get("archived") == "1" || q.Get("archived") == "true",
 		Fields:          fieldsParam(r),
 	}

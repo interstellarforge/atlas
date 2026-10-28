@@ -19,13 +19,13 @@ const defaultColumnPage = 50
 var boardFields = []string{"key", "type", "title", "priority", "assignee", "due_at", "parent", "root", "blocked", "version", "labels", "archived_at"}
 
 type BoardFilter struct {
-	Type, Priority, Label, Milestone, Q string
-	Category                            string // status category; ignored by the cross-project overview, which has its own columns
-	Assignee                            *int64
-	IncludeArchived                     bool
-	DoneBefore                          *int64 // see ItemFilter
-	Fields                              []string
-	Limit                               int // cards per column in the first page
+	Type, Priority, Label, Milestone, Sprint, Q string
+	Category                                    string // status category; ignored by the cross-project overview, which has its own columns
+	Assignee                                    *int64
+	IncludeArchived                             bool
+	DoneBefore                                  *int64 // see ItemFilter
+	Fields                                      []string
+	Limit                                       int // cards per column in the first page
 }
 
 type Column struct {
@@ -45,7 +45,7 @@ type Board struct {
 }
 
 func (f BoardFilter) item() ItemFilter {
-	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Milestone: f.Milestone, Q: f.Q, Assignee: f.Assignee, Category: f.Category,
+	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Milestone: f.Milestone, Sprint: f.Sprint, Q: f.Q, Assignee: f.Assignee, Category: f.Category,
 		IncludeArchived: f.IncludeArchived, DoneBefore: f.DoneBefore, Fields: f.fields()}
 }
 

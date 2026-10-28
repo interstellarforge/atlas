@@ -30,11 +30,12 @@ const (
 			JOIN work_items b ON b.id = l.from_id AND b.archived_at IS NULL
 			JOIN project_statuses bs ON bs.id = b.status_id AND bs.category <> 'completed'
 			WHERE l.to_id = i.id AND l.type = 'blocks'),
-		ms.name
+		ms.name, sp.name
 		FROM work_items i
 		JOIN projects p ON p.id = i.project_id
 		JOIN project_statuses st ON st.id = i.status_id
 		LEFT JOIN milestones ms ON ms.id = i.milestone_id
+		LEFT JOIN sprints sp ON sp.id = i.sprint_id
 		LEFT JOIN work_items par ON par.id = i.parent_id
 		LEFT JOIN work_items rt ON rt.id = CAST(substr(i.path, 2, instr(substr(i.path, 2), '/') - 1) AS INTEGER)`
 )
@@ -53,6 +54,7 @@ type Item struct {
 	Assignee       *int64         `json:"assignee"`
 	DueAt          *int64         `json:"due_at"`
 	Milestone      *string        `json:"milestone"`
+	Sprint         *string        `json:"sprint"`
 	Labels         []string       `json:"labels"`
 	CustomData     map[string]any `json:"custom_data"`
 	Blocked        bool           `json:"blocked"`
@@ -112,12 +114,12 @@ func Select(it Item, fields []string) (map[string]any, error) {
 
 func scanItem(rows *sql.Rows) (itemRow, error) {
 	var r itemRow
-	var parent, root, milestone sql.NullString
+	var parent, root, milestone, sprint sql.NullString
 	var assignee, due, archived sql.NullInt64
 	var custom string
 	err := rows.Scan(&r.id, &r.Key, &r.Project, &r.Type, &r.Title, &r.Description, &parent, &root, &r.Status, &r.StatusCategory,
 		&r.Priority, &assignee, &due, &custom, &r.Version, &archived, &r.CreatedAt, &r.UpdatedAt,
-		&r.projectID, &r.statusID, &r.parentID, &r.path, &r.Blocked, &milestone)
+		&r.projectID, &r.statusID, &r.parentID, &r.path, &r.Blocked, &milestone, &sprint)
 	if err != nil {
 		return r, err
 	}
@@ -127,6 +129,9 @@ func scanItem(rows *sql.Rows) (itemRow, error) {
 	r.Root = root.String
 	if milestone.Valid {
 		r.Milestone = &milestone.String
+	}
+	if sprint.Valid {
+		r.Sprint = &sprint.String
 	}
 	if assignee.Valid {
 		r.Assignee = &assignee.Int64
@@ -241,6 +246,7 @@ type CreateItem struct {
 	Labels      []string
 	CustomData  map[string]any
 	Milestone   string
+	Sprint      string
 	// Template names an item template of the project; its type, description, priority, labels, status
 	// and checklist fill what the caller left empty, and its title prefix is put before the title.
 	Template string
@@ -347,6 +353,10 @@ func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, c
 		if err := checkRequiredSteps(tx, 0, 0, statusID); err != nil {
 			return err
 		}
+		sprintID, err := resolveSprint(tx, p.ID, in.Sprint)
+		if err != nil {
+			return err
+		}
 		milestoneID, err := resolveMilestone(tx, p.ID, in.Milestone)
 		if err != nil {
 			return err
@@ -378,10 +388,10 @@ func (s *Service) createItem(ctx context.Context, a auth.Actor, in CreateItem, c
 			return err
 		}
 		res, err := tx.Exec(`INSERT INTO work_items (key, project_id, parent_id, path, type, title, description, status_id, priority,
-			assignee_id, due_at, milestone_id, rank, custom_data, version, created_at, updated_at)
-			VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+			assignee_id, due_at, milestone_id, sprint_id, rank, custom_data, version, created_at, updated_at)
+			VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 			key, p.ID, parentID, in.Type, in.Title, in.Description, statusID, in.Priority,
-			in.Assignee, in.DueAt, milestoneID, rank, string(customJSON), now, now)
+			in.Assignee, in.DueAt, milestoneID, sprintID, rank, string(customJSON), now, now)
 		if err != nil {
 			return err
 		}
@@ -667,6 +677,25 @@ func (s *Service) UpdateItem(ctx context.Context, a auth.Actor, key string, vers
 				}
 				set("milestone_id", k, from, v)
 				args[len(args)-1] = id
+			case "sprint":
+				name := ""
+				if v != nil {
+					str, ok := v.(string)
+					if !ok {
+						return invalid("sprint must be a sprint name or null")
+					}
+					name = str
+				}
+				id, err := resolveSprint(tx, p.ID, name)
+				if err != nil {
+					return err
+				}
+				var from any
+				if cur.Sprint != nil {
+					from = *cur.Sprint
+				}
+				set("sprint_id", k, from, v)
+				args[len(args)-1] = id
 			case "archived":
 				arch, ok := v.(bool)
 				if !ok {
@@ -742,6 +771,7 @@ type ItemFilter struct {
 	Priority        string
 	Label           string
 	Milestone       string
+	Sprint          string // sprint name, or "none" for items in no sprint (the backlog)
 	Parent          string
 	Under           string // item key: that item and all its descendants
 	Q               string // case-insensitive title substring
