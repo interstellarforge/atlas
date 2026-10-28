@@ -1,6 +1,11 @@
 services:
   atlas:
-    build: .
+    # Release image; upgrade with `docker compose pull && docker compose up -d`. `up --build` builds from source instead.
+    image: ghcr.io/interstellarforge/atlas:latest
+    build:
+      context: .
+      args:
+        VERSION: ${ATLAS_VERSION:-dev}
     ports:
       - "8080:8080"
     volumes:

@@ -645,6 +645,7 @@
       "label": "Version",
       "available": "Update available: {latest}",
       "upToDate": "Up to date",
+      "devBuild": "Not a release build (latest release: {latest}). Build with VERSION to track updates.",
       "unknown": "Latest version unknown (development build, check disabled or GitHub unreachable)"
     },
     "instanceIntro": "Effective settings. They come from the environment of the server and cannot be changed here.",

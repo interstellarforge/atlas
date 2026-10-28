@@ -868,8 +868,12 @@
           <a href={update.url} target="_blank" rel="noopener noreferrer"
             >{t("admin.version.available", { latest: update.latest ?? "" })}</a
           >
-        {:else if update?.latest}
+        {:else if update?.latest && update.current === update.latest}
           <span class="muted">{t("admin.version.upToDate")}</span>
+        {:else if update?.latest}
+          <span class="muted"
+            >{t("admin.version.devBuild", { latest: update.latest })}</span
+          >
         {:else if update}
           <span class="muted">{t("admin.version.unknown")}</span>
         {/if}
