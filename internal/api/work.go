@@ -256,16 +256,23 @@ func (s *Server) putTransitions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) patchWorkflow(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		MergeColumns *bool `json:"merge_columns"`
+		MergeColumns    *bool     `json:"merge_columns"`
+		MergeCategories *[]string `json:"merge_categories"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.MergeColumns == nil {
-		writeError(w, http.StatusBadRequest, "invalid", "merge_columns is required")
+	if in.MergeColumns == nil && in.MergeCategories == nil {
+		writeError(w, http.StatusBadRequest, "invalid", "merge_categories or merge_columns is required")
 		return
 	}
-	if err := s.core.SetMergeColumns(r.Context(), actor(r), r.PathValue("key"), *in.MergeColumns); err != nil {
+	var err error
+	if in.MergeCategories != nil {
+		err = s.core.SetMergeCategories(r.Context(), actor(r), r.PathValue("key"), *in.MergeCategories)
+	} else {
+		err = s.core.SetMergeColumns(r.Context(), actor(r), r.PathValue("key"), *in.MergeColumns)
+	}
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}

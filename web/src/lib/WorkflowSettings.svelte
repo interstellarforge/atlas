@@ -3,7 +3,7 @@
     addStatus,
     ApiError,
     deleteStatus,
-    setMergeColumns,
+    setMergeCategories,
     setTimeTracking,
     type StatusInfo,
     updateStatus,
@@ -13,6 +13,8 @@
   import Icon from "./Icon.svelte";
   import StatusChip from "./StatusChip.svelte";
   import { statusTone } from "./statusTone";
+
+  const CATEGORIES = ["todo", "active", "review", "completed"];
 
   let { project, workflow }: { project: string; workflow: Workflow } = $props();
 
@@ -172,18 +174,30 @@
     {#if error}<p class="banner error" role="alert">{error}</p>{/if}
     <p class="sr-only" aria-live="polite">{announcement}</p>
 
-    <label class="merge">
-      <input
-        type="checkbox"
-        checked={workflow.merge_columns}
-        onchange={(e) =>
-          void run(() => setMergeColumns(project, e.currentTarget.checked))}
-      />
-      <span
-        ><strong>{t("workflow.merge")}</strong>
-        <small class="muted">{t("workflow.mergeHint")}</small></span
-      >
-    </label>
+    <fieldset class="merge-cats">
+      <legend><strong>{t("workflow.merge")}</strong></legend>
+      <small class="muted">{t("workflow.mergeHint")}</small>
+      {#each CATEGORIES as category (category)}
+        <label class="merge">
+          <input
+            type="checkbox"
+            checked={workflow.merge_categories.includes(category)}
+            onchange={(e) =>
+              void run(() =>
+                setMergeCategories(
+                  project,
+                  CATEGORIES.filter((c) =>
+                    c === category
+                      ? e.currentTarget.checked
+                      : workflow.merge_categories.includes(c),
+                  ),
+                ),
+              )}
+          />
+          <span>{t(`workflow.cat.${category}` as "workflow.cat.todo")}</span>
+        </label>
+      {/each}
+    </fieldset>
 
     <label class="merge">
       <input
@@ -476,6 +490,13 @@
   .toggle {
     display: flex;
     justify-content: center;
+  }
+  .merge-cats {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    border: 0;
   }
   .merge {
     display: flex;

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"strings"
 
 	"github.com/kees/atlas/internal/auth"
@@ -92,18 +93,44 @@ func recordVisit(tx *sql.Tx, itemID, statusID int64) error {
 	return err
 }
 
-// SetMergeColumns turns merged board columns on or off for a project (ADR-0011).
+// allCategories are the status categories, in board order.
+var allCategories = []string{"todo", "active", "review", "completed"}
+
+// SetMergeColumns merges every category (on) or none (ADR-0011).
 func (s *Service) SetMergeColumns(ctx context.Context, a auth.Actor, key string, on bool) error {
+	if on {
+		return s.SetMergeCategories(ctx, a, key, allCategories)
+	}
+	return s.SetMergeCategories(ctx, a, key, nil)
+}
+
+// SetMergeCategories chooses the status categories whose statuses share one board column (ADR-0020).
+func (s *Service) SetMergeCategories(ctx context.Context, a auth.Actor, key string, categories []string) error {
+	for _, c := range categories {
+		if !slices.Contains(allCategories, c) {
+			return invalid("unknown category %q", c)
+		}
+	}
+	// Stored in board order so the same choice always reads the same.
+	var keep []string
+	for _, c := range allCategories {
+		if slices.Contains(categories, c) {
+			keep = append(keep, c)
+		}
+	}
 	return s.tx(func(tx *sql.Tx) error {
 		p, _, err := s.access(tx, a, key, actWorkflow)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE projects SET merge_columns = ? WHERE id = ?`, on, p.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE projects SET merge_categories = ?, merge_columns = ? WHERE id = ?`, strings.Join(keep, ","), len(keep) > 0, p.ID); err != nil {
 			return err
+		}
+		if keep == nil {
+			keep = []string{}
 		}
 		// project.updated makes clients refetch the workflow and the board.
 		return s.journal(ctx, tx, a, change{Operation: "workflow.merge_columns", Target: key, Event: "project.updated",
-			Project: key, Changes: map[string]any{"merge_columns": on}})
+			Project: key, Changes: map[string]any{"merge_categories": keep}})
 	})
 }

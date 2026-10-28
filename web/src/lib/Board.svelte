@@ -215,14 +215,16 @@
       : undefined;
   }
 
-  function fail(e: unknown): void {
-    error =
+  // The reload clears the banner, so the message is set again once the board is back.
+  async function fail(e: unknown): Promise<void> {
+    const message =
       e instanceof ApiError && e.status === 409
         ? t("board.conflict")
         : t("board.saveFailed", {
             message: e instanceof ApiError ? e.message : String(e),
           });
-    void load();
+    await load();
+    error = message;
   }
 
   // Moves a card to `index` among the target column's other cards. The board updates at once;
@@ -273,18 +275,17 @@
           });
       return position;
     } catch (e) {
-      fail(e);
+      void fail(e);
       return undefined;
     }
   }
 
   // Hint only: the server decides from the item's whole history, this looks at the card's current status.
-  function blocked(column: Column): boolean {
-    if (!drag) return false;
+  function blocked(column: Column, card = drag?.card): boolean {
+    if (!card) return false;
     const from =
-      drag.card.status ??
-      columns.find((c) => c.items.some((i) => i.key === drag?.card.key))?.status
-        .name;
+      card.status ??
+      columns.find((c) => c.items.some((i) => i.key === card.key))?.status.name;
     return (column.statuses ?? [column.status]).every(
       (st) =>
         st.name !== from &&
@@ -319,22 +320,27 @@
     return undefined;
   }
 
+  // The drag only starts after the pointer moved a few pixels, so a plain click still opens the card.
+  let pending: { card: Card; x: number; y: number } | undefined;
+
   function startDrag(event: PointerEvent, card: Card): void {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     event.preventDefault();
-    drag = {
-      card,
-      x: event.clientX,
-      y: event.clientY,
-      over: locate(event.clientX, event.clientY),
-    };
+    pending = { card, x: event.clientX, y: event.clientY };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", stopDrag);
   }
 
   function onMove(event: PointerEvent): void {
-    if (!drag) return;
+    if (!drag) {
+      if (
+        !pending ||
+        Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < 5
+      )
+        return;
+      drag = { card: pending.card, x: 0, y: 0, over: undefined };
+    }
     drag.x = event.clientX;
     drag.y = event.clientY;
     drag.over = locate(event.clientX, event.clientY);
@@ -344,7 +350,17 @@
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", stopDrag);
+    pending = undefined;
     drag = undefined;
+  }
+
+  async function tryMove(card: Card, status: string): Promise<void> {
+    try {
+      await moveItem(card.key, card.version, { status });
+      await load();
+    } catch (e) {
+      await fail(e);
+    }
   }
 
   function onUp(): void {
@@ -360,6 +376,11 @@
           ? finished.over.index - 1
           : finished.over.index;
       const sub = finished.over.sub;
+      if (target && blocked(target, finished.card)) {
+        // Probably refused: ask the server first and leave the card where it is meanwhile.
+        void tryMove(finished.card, sub ?? target.status.name);
+        return;
+      }
       const moved =
         sub !== undefined &&
         sub !== (finished.card.status ?? target?.status.name);
@@ -460,7 +481,7 @@
       await archiveItem(card.key, card.version, !card.archived_at);
       await load();
     } catch (e) {
-      fail(e);
+      void fail(e);
     }
   }
 </script>

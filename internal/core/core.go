@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/kees/atlas/internal/auth"
@@ -131,8 +133,9 @@ type Project struct {
 	ArchivedAt *int64 `json:"archived_at"`
 	CreatedAt  int64  `json:"created_at"`
 	Role       string `json:"role,omitempty"`
-	// MergeColumns shows statuses of one category in a single board column (ADR-0011).
-	MergeColumns bool `json:"merge_columns"`
+	// MergeColumns is true when any category is merged; MergeCategories names them (ADR-0011, ADR-0020).
+	MergeColumns    bool     `json:"merge_columns"`
+	MergeCategories []string `json:"merge_categories"`
 	// Repository is the linked git repository, or null (ADR-0013).
 	Repository *repo.Repo `json:"repository"`
 	// TimeTracking lets members book time on items (ADR-0014).
@@ -164,9 +167,9 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	}
 	var p Project
 	var archived sql.NullInt64
-	var repoURL, repoBranch string
-	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_columns, repo_url, repo_branch, time_tracking FROM projects WHERE key = ?`, key).
-		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns, &repoURL, &repoBranch, &p.TimeTracking)
+	var repoURL, repoBranch, merged string
+	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_categories, repo_url, repo_branch, time_tracking FROM projects WHERE key = ?`, key).
+		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &merged, &repoURL, &repoBranch, &p.TimeTracking)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !a.CanProject(p.Key)) {
 		return Project{}, "", ErrNotFound
 	}
@@ -177,6 +180,7 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 		p.ArchivedAt = &archived.Int64
 	}
 	p.Repository = linkedRepo(repoURL, repoBranch)
+	p.setMerged(merged)
 
 	role, allowed := "admin", true
 	if !a.IsAdmin {
@@ -225,3 +229,15 @@ func (s *Service) readableProjects(q queryer, a auth.Actor) (map[int64]string, e
 	}
 	return out, rows.Err()
 }
+
+// setMerged fills the merge fields from the stored comma separated category list.
+func (p *Project) setMerged(stored string) {
+	p.MergeCategories = []string{}
+	if stored != "" {
+		p.MergeCategories = strings.Split(stored, ",")
+	}
+	p.MergeColumns = len(p.MergeCategories) > 0
+}
+
+// merges reports whether statuses of this category share a board column.
+func (p Project) merges(category string) bool { return slices.Contains(p.MergeCategories, category) }
