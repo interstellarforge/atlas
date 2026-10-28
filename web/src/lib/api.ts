@@ -214,6 +214,7 @@ export interface Filters {
   q: string;
   type: string;
   status: string;
+  category: string; // status category
   priority: string;
   label: string;
   milestone: string;
@@ -226,6 +227,7 @@ export const emptyFilters: Filters = {
   q: "",
   type: "",
   status: "",
+  category: "",
   priority: "",
   label: "",
   milestone: "",
@@ -250,6 +252,7 @@ function filterParams(f: Filters): Record<string, string | boolean> {
     q: f.q,
     type: f.type,
     status: f.status,
+    category: f.category,
     priority: f.priority,
     label: f.label,
     milestone: f.milestone,

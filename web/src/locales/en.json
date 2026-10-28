@@ -128,7 +128,9 @@
     "milestone": "Milestone",
     "anyMilestone": "Any milestone",
     "status": "Status",
-    "anyStatus": "Any status"
+    "anyStatus": "Any status",
+    "category": "Category",
+    "anyCategory": "Any category"
   },
   "board": {
     "dropBlocked": "This card cannot move here yet. Move it through the required step first.",

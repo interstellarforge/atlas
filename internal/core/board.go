@@ -20,6 +20,7 @@ var boardFields = []string{"key", "type", "title", "priority", "assignee", "due_
 
 type BoardFilter struct {
 	Type, Priority, Label, Milestone, Q string
+	Category                            string // status category; ignored by the cross-project overview, which has its own columns
 	Assignee                            *int64
 	IncludeArchived                     bool
 	DoneBefore                          *int64 // see ItemFilter
@@ -44,7 +45,7 @@ type Board struct {
 }
 
 func (f BoardFilter) item() ItemFilter {
-	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Milestone: f.Milestone, Q: f.Q, Assignee: f.Assignee,
+	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Milestone: f.Milestone, Q: f.Q, Assignee: f.Assignee, Category: f.Category,
 		IncludeArchived: f.IncludeArchived, DoneBefore: f.DoneBefore, Fields: f.fields()}
 }
 

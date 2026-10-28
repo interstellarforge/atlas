@@ -337,3 +337,17 @@ func TestDoneCutoffHidesOnlyOldCompletedItems(t *testing.T) {
 		t.Fatalf("recent completed item hidden: %v", got)
 	}
 }
+
+func TestBoardCategoryFilter(t *testing.T) {
+	e := setup(t)
+	e.project("EXO")
+	e.item(e.admin, core.CreateItem{Project: "EXO", Type: "task", Title: "finished", Status: "Done"})
+	open := todo(e, "EXO", "open")
+	f := core.BoardFilter{Category: "todo"}
+	if got := keys(column(t, e, "EXO", "Done", f)); len(got) != 0 {
+		t.Fatalf("done item shown under todo category: %v", got)
+	}
+	if got := keys(column(t, e, "EXO", "Todo", f)); !slices.Equal(got, []string{open.Key}) {
+		t.Fatalf("todo item hidden: %v", got)
+	}
+}
