@@ -641,6 +641,12 @@
     "operation": "Operation",
     "target": "Target",
     "more": "Load more",
+    "version": {
+      "label": "Version",
+      "available": "Update available: {latest}",
+      "upToDate": "Up to date",
+      "unknown": "Latest version unknown (development build, check disabled or GitHub unreachable)"
+    },
     "instanceIntro": "Effective settings. They come from the environment of the server and cannot be changed here.",
     "settings": {
       "upload_max_mb": "Upload limit (MB)",

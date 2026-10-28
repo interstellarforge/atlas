@@ -14,6 +14,7 @@
     getInstance,
     getMailSettings,
     getPolicy,
+    getUpdateStatus,
     type Invite,
     type ItemTemplate,
     listAdminUsers,
@@ -33,6 +34,7 @@
     saveRole,
     sendTestMail,
     setPolicy,
+    type UpdateStatus,
     type User,
   } from "./api";
   import { t } from "./i18n";
@@ -85,6 +87,7 @@
   let roleActions = $state<string[]>([]);
   let newRole = $state("");
   let settings = $state<Record<string, string | number | boolean>>({});
+  let update = $state<UpdateStatus | undefined>();
   let audit = $state<AuditEntry[]>([]);
   let notice = $state("");
   let error = $state("");
@@ -206,10 +209,15 @@
     if (active === "audit")
       void loadAudit().catch(() => (error = t("admin.loadFailed")));
     if (active === "rights") void loadRoles();
-    if (active === "instance")
+    if (active === "instance") {
       void getInstance()
         .then((i) => (settings = i.settings))
         .catch(() => (error = t("admin.loadFailed")));
+      void getUpdateStatus().then(
+        (u) => (update = u),
+        () => undefined, // advisory only
+      );
+    }
   });
 </script>
 
@@ -853,6 +861,19 @@
     <h2 id="instance-title">{t("admin.nav.instance")}</h2>
     <p class="muted hint">{t("admin.instanceIntro")}</p>
     <dl>
+      <dt>{t("admin.version.label")}</dt>
+      <dd>
+        {update?.current ?? ""}
+        {#if update?.available && update.url}
+          <a href={update.url} target="_blank" rel="noopener noreferrer"
+            >{t("admin.version.available", { latest: update.latest ?? "" })}</a
+          >
+        {:else if update?.latest}
+          <span class="muted">{t("admin.version.upToDate")}</span>
+        {:else if update}
+          <span class="muted">{t("admin.version.unknown")}</span>
+        {/if}
+      </dd>
       {#each Object.entries(settings) as [k, v] (k)}
         <dt>{t(`admin.settings.${k}` as "admin.settings.upload_max_mb")}</dt>
         <dd>{String(v)}</dd>
