@@ -24,6 +24,16 @@ All values are acceptance targets, not measured results. Record measurements in 
 - Run on representative (low-end) hardware, not only a developer machine.
 - Measure before optimizing: profile and benchmark before adding caches or infrastructure.
 
+### Representative server with Docker
+
+The server only needs Docker and Git; a host Go installation is not required. From the repository root, run:
+
+```sh
+benchmarks/server.sh all | tee "performance-server-$(date +%F-%H%M).log"
+```
+
+Use `benchmark` or `rss` instead of `all` to run one part. The runner archives the exact committed `HEAD` from the read-only Git directory, so untracked files such as `.env` are neither copied nor exposed. It uses persistent Docker volumes for the Go module and build caches. Run `benchmarks/server.sh --help` for supported overrides.
+
 ## Benchmarks required
 
 1. Materialized path vs indexed recursive CTE (subtree reads, re-parent).
