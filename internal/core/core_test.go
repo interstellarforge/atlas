@@ -358,3 +358,26 @@ func TestCustomFieldsValidation(t *testing.T) {
 		t.Fatalf("required field removed: %v", err)
 	}
 }
+
+func TestImportCommentKeepsAuthorAndTimeForAdminsOnly(t *testing.T) {
+	e := setup(t)
+	e.project("EXO")
+	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.aliceID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	it := e.item(e.alice, core.CreateItem{Project: "EXO", Type: "story", Title: "migrated"})
+
+	if _, err := e.svc.ImportComment(ctx, e.alice, it.Key, "old", "Dana", 1600000000000); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("member import: %v", err)
+	}
+	c, err := e.svc.ImportComment(ctx, e.admin, it.Key, "old", "Dana", 1600000000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CreatedAt != 1600000000000 || !strings.HasPrefix(c.Actor, "Dana (imported by ") {
+		t.Fatalf("import kept %+v", c)
+	}
+	if _, err := e.svc.ImportComment(ctx, e.admin, it.Key, "old", "", 1); !isInvalid(err) {
+		t.Fatalf("missing author: %v", err)
+	}
+}

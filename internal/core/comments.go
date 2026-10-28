@@ -19,6 +19,20 @@ type Comment struct {
 
 // AddComment appends a comment. It does not change the item, so its version stays the same.
 func (s *Service) AddComment(ctx context.Context, a auth.Actor, key, body string) (Comment, error) {
+	return s.addComment(ctx, a, key, body, "", nil)
+}
+
+// ImportComment adds a comment that keeps its original author and time (a migration). It needs a project admin
+// and records the importing actor in the author, so the audit trail stays honest.
+func (s *Service) ImportComment(ctx context.Context, a auth.Actor, key, body, author string, createdAt int64) (Comment, error) {
+	author = strings.TrimSpace(author)
+	if author == "" || len(author) > maxFilenameLen || createdAt <= 0 {
+		return Comment{}, invalid("author and created_at (unix milliseconds) are required to import a comment")
+	}
+	return s.addComment(ctx, a, key, body, author, &createdAt)
+}
+
+func (s *Service) addComment(ctx context.Context, a auth.Actor, key, body, author string, createdAt *int64) (Comment, error) {
 	body = strings.TrimSpace(body)
 	if body == "" || len(body) > maxCommentLen {
 		return Comment{}, invalid("comment is required (max %d characters)", maxCommentLen)
@@ -32,6 +46,12 @@ func (s *Service) AddComment(ctx context.Context, a auth.Actor, key, body string
 		if _, _, err := s.access(tx, a, pk, actComment); err != nil {
 			return err
 		}
+		if createdAt != nil {
+			if _, _, err := s.access(tx, a, pk, actProjectUpdate); err != nil {
+				return err
+			}
+			c.Actor = author + " (imported by " + a.String() + ")"
+		}
 		var itemID int64
 		if err := tx.QueryRow(`SELECT id FROM work_items WHERE key = ?`, key).Scan(&itemID); err != nil {
 			if err == sql.ErrNoRows {
@@ -40,6 +60,9 @@ func (s *Service) AddComment(ctx context.Context, a auth.Actor, key, body string
 			return err
 		}
 		c.CreatedAt = s.nowMs()
+		if createdAt != nil {
+			c.CreatedAt = *createdAt
+		}
 		res, err := tx.Exec(`INSERT INTO comments (item_id, actor, body, created_at) VALUES (?, ?, ?, ?)`, itemID, c.Actor, body, c.CreatedAt)
 		if err != nil {
 			return err

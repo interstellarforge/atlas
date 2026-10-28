@@ -3,8 +3,11 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -463,15 +466,21 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 	type commentIn struct {
 		Key  string `json:"key" jsonschema:"item key, e.g. EXO-42"`
 		Body string `json:"body"`
+		// Both are for migrations: project admins only, and the comment is marked as imported by you.
+		Author    string `json:"author,omitempty" jsonschema:"import: original author name; needs created_at"`
+		CreatedAt int64  `json:"created_at,omitempty" jsonschema:"import: original time in unix milliseconds; needs author"`
 
 		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "comment_add",
-		Description: "Add a comment to a work item (recorded under your token). Use it for progress updates and questions.",
+		Description: "Add a comment to a work item (recorded under your token). Use it for progress updates and questions. A project admin can import a comment with its original author and created_at.",
 		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in commentIn) (*sdk.CallToolResult, any, error) {
 		c, failed := write(ctx, svc, writes, a, 1, "comment_add", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (core.Comment, error) {
+			if in.Author != "" || in.CreatedAt != 0 {
+				return s.ImportComment(ctx, a, in.Key, in.Body, in.Author, in.CreatedAt)
+			}
 			return s.AddComment(ctx, a, in.Key, in.Body)
 		})
 		if failed != nil {
@@ -733,6 +742,94 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 				"width": at.Width, "height": at.Height, "url": at.URL, "thumb_url": at.ThumbURL})
 		}
 		return result(map[string]any{"items": out})
+	})
+
+	type milestoneIn struct {
+		Project  string `json:"project" jsonschema:"project key"`
+		Action   string `json:"action" jsonschema:"create, update or delete"`
+		Name     string `json:"name" jsonschema:"milestone name (the existing one for update and delete)"`
+		NewName  string `json:"new_name,omitempty" jsonschema:"update: rename"`
+		DueAt    *int64 `json:"due_at,omitempty" jsonschema:"create or update: due date in unix milliseconds"`
+		Released *bool  `json:"released,omitempty" jsonschema:"update: true stamps released, false clears it"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "milestone_write",
+		Description: "Create, update or delete a milestone (project admin). Delete is refused while items use it. Assign items with items_write's milestone field.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(true)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in milestoneIn) (*sdk.CallToolResult, any, error) {
+		m, failed := write(ctx, svc, writes, a, 1, "milestone_write", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {
+			if in.Action == "create" {
+				m, err := s.CreateMilestone(ctx, a, in.Project, in.Name, in.DueAt)
+				return map[string]any{"milestone": m}, err
+			}
+			list, err := s.ListMilestones(ctx, a, in.Project)
+			if err != nil {
+				return nil, err
+			}
+			id := int64(0)
+			for _, m := range list {
+				if strings.EqualFold(m.Name, strings.TrimSpace(in.Name)) {
+					id = m.ID
+				}
+			}
+			if id == 0 {
+				return nil, &core.InvalidError{Msg: "unknown milestone " + in.Name}
+			}
+			switch in.Action {
+			case "delete":
+				return map[string]any{"deleted": in.Name}, s.DeleteMilestone(ctx, a, in.Project, id)
+			case "update":
+				patch := map[string]any{}
+				if in.NewName != "" {
+					patch["name"] = in.NewName
+				}
+				if in.DueAt != nil {
+					patch["due_at"] = *in.DueAt
+				}
+				if in.Released != nil {
+					patch["released"] = *in.Released
+				}
+				m, err := s.UpdateMilestone(ctx, a, in.Project, id, patch)
+				return map[string]any{"milestone": m}, err
+			}
+			return nil, &core.InvalidError{Msg: "action must be create, update or delete"}
+		})
+		if failed != nil {
+			return failed, nil, nil
+		}
+		return result(m)
+	})
+
+	type attachIn struct {
+		Key      string `json:"key" jsonschema:"item key, e.g. EXO-42"`
+		Filename string `json:"filename"`
+		Data     string `json:"data" jsonschema:"base64 file contents; images only, within the server upload limits"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "attachment_add",
+		Description: "Attach an image to an item from base64 data. Same type, size and pixel limits as the web upload.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in attachIn) (*sdk.CallToolResult, any, error) {
+		raw, err := base64.StdEncoding.DecodeString(in.Data)
+		if err != nil {
+			return fail(inputError("data is not valid base64"))
+		}
+		req := struct {
+			Key, Filename string
+			Sum           [32]byte
+		}{in.Key, in.Filename, sha256.Sum256(raw)}
+		at, failed := write(ctx, svc, writes, a, 1, "attachment_add", in.IdempotencyKey, req, func(ctx context.Context, s *core.Service) (core.Attachment, error) {
+			return s.AddAttachment(ctx, a, in.Key, in.Filename, bytes.NewReader(raw))
+		})
+		if failed != nil {
+			return failed, nil, nil
+		}
+		return result(map[string]any{"id": at.ID, "filename": at.Filename, "mime": at.Mime, "size": at.Size,
+			"width": at.Width, "height": at.Height, "url": at.URL, "thumb_url": at.ThumbURL})
 	})
 
 	return s
