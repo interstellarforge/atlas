@@ -77,6 +77,7 @@
 - Optional. Only a global admin in a human session can read or change the settings; tokens cannot.
 - The SMTP password is encrypted at rest (AES-256-GCM) with `<data dir>/mail.key` (mode 0600). It is not part of API answers, audit entries or logs, and send errors are redacted before they are stored or shown. Environment settings (`ATLAS_SMTP_PASSWORD`) stay in the process environment. A backup does not contain the key: after a restore elsewhere, enter the password again.
 - Mail is sent by a worker outside any database transaction, with limited retries. Recipient and subject with line breaks are refused (header injection). Plain SMTP login over an unencrypted connection to a remote host is refused by `net/smtp`.
+- Every mail is sent as `multipart/alternative`: the plain-text template plus an HTML version in the Atlas layout (`internal/notifications/html.go`). The HTML is built with `html/template`, so template values are escaped; a paragraph that is only a URL becomes a button. No remote images or scripts.
 - Notification mails go only to users who switched them on; they contain a summary and a link, never item contents.
 
 ### Repository link and README (ADR-0013)
