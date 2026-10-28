@@ -127,7 +127,13 @@ func buildMessage(from, to mail.Address, m Message) []byte {
 	b.WriteString("To: " + to.String() + "\r\n")
 	b.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", m.Subject) + "\r\n")
 	b.WriteString("Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n")
-	b.WriteString("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(strings.ReplaceAll(strings.ReplaceAll(m.Body, "\r\n", "\n"), "\n", "\r\n"))
+	const sep = "atlas-alt"
+	crlf := func(v string) string { return strings.ReplaceAll(strings.ReplaceAll(v, "\r\n", "\n"), "\n", "\r\n") }
+	b.WriteString("MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=" + sep + "\r\n\r\n")
+	b.WriteString("--" + sep + "\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + crlf(m.Body) + "\r\n")
+	if h := HTML(m.Body); h != "" {
+		b.WriteString("--" + sep + "\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + crlf(h) + "\r\n")
+	}
+	b.WriteString("--" + sep + "--\r\n")
 	return []byte(b.String())
 }

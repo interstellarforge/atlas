@@ -74,6 +74,20 @@ func (s *Server) registerWork(mux *http.ServeMux, protect func(http.HandlerFunc)
 	mux.Handle("POST /api/v1/projects/{key}/milestones", protect(s.createMilestone))
 	mux.Handle("PATCH /api/v1/projects/{key}/milestones/{id}", protect(s.patchMilestone))
 	mux.Handle("DELETE /api/v1/projects/{key}/milestones/{id}", protect(s.deleteMilestone))
+	mux.Handle("GET /api/v1/projects/{key}/sprints", protect(s.listSprints))
+	mux.Handle("POST /api/v1/projects/{key}/sprints", protect(s.createSprint))
+	mux.Handle("PATCH /api/v1/projects/{key}/sprints/{id}", protect(s.patchSprint))
+	mux.Handle("DELETE /api/v1/projects/{key}/sprints/{id}", protect(s.deleteSprint))
+	mux.Handle("GET /api/v1/projects/{key}/recurrences", protect(s.listRecurrences))
+	mux.Handle("POST /api/v1/projects/{key}/recurrences", protect(s.createRecurrence))
+	mux.Handle("PATCH /api/v1/projects/{key}/recurrences/{id}", protect(s.patchRecurrence))
+	mux.Handle("DELETE /api/v1/projects/{key}/recurrences/{id}", protect(s.deleteRecurrence))
+	mux.Handle("GET /api/v1/projects/{key}/webhooks", protect(s.listWebhooks))
+	mux.Handle("POST /api/v1/projects/{key}/webhooks", protect(s.createWebhook))
+	mux.Handle("PATCH /api/v1/projects/{key}/webhooks/{id}", protect(s.patchWebhook))
+	mux.Handle("DELETE /api/v1/projects/{key}/webhooks/{id}", protect(s.deleteWebhook))
+	mux.Handle("GET /api/v1/projects/{key}/batches", protect(s.listBatches))
+	mux.Handle("POST /api/v1/batches/{id}/undo", protect(s.undoBatch))
 	s.registerNotes(mux, protect)
 	s.registerInbox(mux, protect)
 }
@@ -360,7 +374,7 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := core.ItemFilter{
 		Project: q.Get("project"), Type: q.Get("type"), Status: q.Get("status"), Priority: q.Get("priority"),
-		Label: q.Get("label"), Milestone: q.Get("milestone"), Parent: q.Get("parent"), Under: q.Get("under"), Q: q.Get("q"),
+		Label: q.Get("label"), Milestone: q.Get("milestone"), Sprint: q.Get("sprint"), Parent: q.Get("parent"), Under: q.Get("under"), Q: q.Get("q"),
 		Category: q.Get("category"), Sort: q.Get("sort"),
 		IncludeArchived: q.Get("archived") == "1" || q.Get("archived") == "true",
 		Cursor:          q.Get("cursor"), Fields: fieldsParam(r),
@@ -417,6 +431,7 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 		Labels      []string       `json:"labels"`
 		CustomData  map[string]any `json:"custom_data"`
 		Milestone   string         `json:"milestone"`
+		Sprint      string         `json:"sprint"`
 		Template    string         `json:"template"`
 	}
 	if !decode(w, r, &in) {

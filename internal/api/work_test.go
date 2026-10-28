@@ -445,14 +445,15 @@ func TestExportImportRoundTrip(t *testing.T) {
 	e.do("POST", "/api/v1/items", map[string]any{"project": "SRC", "type": "epic", "title": "Platform", "labels": []string{"core"}}, asUser)
 	e.do("POST", "/api/v1/items", map[string]any{"project": "SRC", "type": "story", "title": "Login", "parent": "SRC-1"}, asUser)
 	e.do("POST", "/api/v1/items/SRC-1/comments", map[string]any{"body": "hello"}, asUser)
+	e.do("POST", "/api/v1/projects/SRC/context", map[string]any{"category": "architecture", "title": "Exported note", "summary": "In the export."}, asUser)
 
 	w := e.do("GET", "/api/v1/projects/SRC/export", nil, asUser)
 	if w.Code != 200 {
 		t.Fatalf("export: %d %s", w.Code, w.Body)
 	}
 	exported := w.Body.Bytes()
-	if !strings.Contains(string(exported), `"hello"`) {
-		t.Fatalf("export misses comments: %s", exported)
+	if !strings.Contains(string(exported), `"hello"`) || !strings.Contains(string(exported), `"Exported note"`) {
+		t.Fatalf("export misses comments or context: %s", exported)
 	}
 	if w := e.do("GET", "/api/v1/projects/SRC/export?format=csv", nil, asUser); w.Code != 200 || !strings.Contains(w.Body.String(), "SRC-2,story,Login") {
 		t.Fatalf("csv export: %d %s", w.Code, w.Body)

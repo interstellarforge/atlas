@@ -58,6 +58,7 @@ type Workflow struct {
 	Transitions  []Transition        `json:"transitions"`
 	Labels       []string            `json:"labels"`
 	Milestones   []Milestone         `json:"milestones"`
+	Sprints      []Sprint            `json:"sprints"`
 	CustomFields []CustomField       `json:"custom_fields"`
 	// ItemTemplates are the names of the project's item templates (see /item-templates for their content).
 	ItemTemplates []string `json:"item_templates"`
@@ -111,6 +112,9 @@ func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Wo
 	lrows.Close()
 
 	if w.Milestones, err = milestones(s.db.R, p.ID); err != nil {
+		return w, err
+	}
+	if w.Sprints, err = sprints(s.db.R, p.ID); err != nil {
 		return w, err
 	}
 	if w.CustomFields, err = s.customFields(s.db.R, p.ID); err != nil {

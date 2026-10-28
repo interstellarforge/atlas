@@ -167,7 +167,7 @@ func TestHealthAndSPAFallback(t *testing.T) {
 	if w := e.do("GET", "/board/EXO", nil, nil); w.Code != 200 || w.Body.String() != "<html></html>" {
 		t.Fatalf("spa fallback: %d %q", w.Code, w.Body)
 	}
-	if w := e.do("GET", "/.well-known/oauth-authorization-server", nil, nil); w.Code != 404 {
+	if w := e.do("GET", "/.well-known/other", nil, nil); w.Code != 404 {
 		t.Fatalf("well-known: %d", w.Code)
 	}
 	if w := e.do("GET", "/api/v1/nope", nil, nil); w.Code != 404 {

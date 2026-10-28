@@ -192,6 +192,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 		Priority        string   `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
 		Label           string   `json:"label,omitempty"`
 		Milestone       string   `json:"milestone,omitempty" jsonschema:"milestone name"`
+		Sprint          string   `json:"sprint,omitempty" jsonschema:"sprint name, or none for items in no sprint (the backlog)"`
 		Parent          string   `json:"parent,omitempty" jsonschema:"parent item key, e.g. EXO-12"`
 		Under           string   `json:"under,omitempty" jsonschema:"item key; returns that item and all its descendants"`
 		Query           string   `json:"query,omitempty" jsonschema:"case-insensitive title substring"`
@@ -211,7 +212,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 			limit = searchLimit
 		}
 		page, err := svc.ListItems(ctx, a, core.ItemFilter{
-			Project: in.Project, Type: in.Type, Status: in.Status, Priority: in.Priority, Label: in.Label, Milestone: in.Milestone,
+			Project: in.Project, Type: in.Type, Status: in.Status, Priority: in.Priority, Label: in.Label, Milestone: in.Milestone, Sprint: in.Sprint,
 			Parent: in.Parent, Under: in.Under, Q: in.Query, Assignee: in.Assignee, UpdatedSince: in.UpdatedSince,
 			IncludeArchived: in.IncludeArchived, Cursor: in.Cursor, Limit: min(limit, searchLimitMax), Fields: in.Fields,
 		})
@@ -802,6 +803,92 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 		return result(m)
 	})
 
+	type sprintIn struct {
+		Project string `json:"project" jsonschema:"project key"`
+		Action  string `json:"action" jsonschema:"create, update or delete"`
+		Name    string `json:"name" jsonschema:"sprint name (the existing one for update and delete)"`
+		NewName string `json:"new_name,omitempty" jsonschema:"update: rename"`
+		StartAt *int64 `json:"start_at,omitempty" jsonschema:"create or update: start in unix milliseconds"`
+		EndAt   *int64 `json:"end_at,omitempty" jsonschema:"create or update: end in unix milliseconds"`
+		Closed  *bool  `json:"closed,omitempty" jsonschema:"update: true closes the sprint (no new items), false reopens it"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "sprint_write",
+		Description: "Create, update or delete a sprint (project admin). Delete is refused while items use it. Assign items with items_write's sprint field; filter with items_search sprint (\"none\" = backlog).",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(true)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in sprintIn) (*sdk.CallToolResult, any, error) {
+		m, failed := write(ctx, svc, writes, a, 1, "sprint_write", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {
+			if in.Action == "create" {
+				if in.StartAt == nil || in.EndAt == nil {
+					return nil, &core.InvalidError{Msg: "create needs start_at and end_at"}
+				}
+				sp, err := s.CreateSprint(ctx, a, in.Project, in.Name, *in.StartAt, *in.EndAt)
+				return map[string]any{"sprint": sp}, err
+			}
+			list, err := s.ListSprints(ctx, a, in.Project)
+			if err != nil {
+				return nil, err
+			}
+			id := int64(0)
+			for _, sp := range list {
+				if strings.EqualFold(sp.Name, strings.TrimSpace(in.Name)) {
+					id = sp.ID
+				}
+			}
+			if id == 0 {
+				return nil, &core.InvalidError{Msg: "unknown sprint " + in.Name}
+			}
+			switch in.Action {
+			case "delete":
+				return map[string]any{"deleted": in.Name}, s.DeleteSprint(ctx, a, in.Project, id)
+			case "update":
+				patch := map[string]any{}
+				if in.NewName != "" {
+					patch["name"] = in.NewName
+				}
+				if in.StartAt != nil {
+					patch["start_at"] = *in.StartAt
+				}
+				if in.EndAt != nil {
+					patch["end_at"] = *in.EndAt
+				}
+				if in.Closed != nil {
+					patch["closed"] = *in.Closed
+				}
+				sp, err := s.UpdateSprint(ctx, a, in.Project, id, patch)
+				return map[string]any{"sprint": sp}, err
+			}
+			return nil, &core.InvalidError{Msg: "action must be create, update or delete"}
+		})
+		if failed != nil {
+			return failed, nil, nil
+		}
+		return result(m)
+	})
+
+	type undoIn struct {
+		BatchID string `json:"batch_id" jsonschema:"batch_id returned by items_write"`
+		Force   bool   `json:"force,omitempty" jsonschema:"also overwrite fields edited after the batch (default: leave them and report a conflict)"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "batch_undo",
+		Description: "Undo an items_write batch (project admin, once per batch, within the event retention). Restores each changed field to its value before the batch; created items are archived. Fields edited after the batch are left alone and listed as conflicts unless force is set. Board position is not restored.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(true)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in undoIn) (*sdk.CallToolResult, any, error) {
+		m, failed := write(ctx, svc, writes, a, 1, "batch_undo", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {
+			res, err := s.UndoBatch(ctx, a, in.BatchID, in.Force)
+			return map[string]any{"batch_id": res.BatchID, "restored": res.Restored, "conflicts": res.Conflicts}, err
+		})
+		if failed != nil {
+			return failed, nil, nil
+		}
+		return result(m)
+	})
+
 	type attachIn struct {
 		Key      string `json:"key" jsonschema:"item key, e.g. EXO-42"`
 		Filename string `json:"filename"`
@@ -972,8 +1059,9 @@ type opIn struct {
 	CustomData  map[string]any `json:"custom_data,omitempty" jsonschema:"custom field values (update merges; null removes a key)"`
 	Archived    *bool          `json:"archived,omitempty" jsonschema:"update: archive or restore"`
 	Milestone   string         `json:"milestone,omitempty" jsonschema:"milestone name (see workflow_get)"`
+	Sprint      string         `json:"sprint,omitempty" jsonschema:"sprint name (see workflow_get); closed sprints take no items"`
 	Template    string         `json:"template,omitempty" jsonschema:"create: name of an item template of the project (see workflow_get); fills type, description, priority, labels, status and checklist you leave out"`
-	Clear       []string       `json:"clear,omitempty" jsonschema:"update: fields to set to null: assignee, due_at, parent, milestone"`
+	Clear       []string       `json:"clear,omitempty" jsonschema:"update: fields to set to null: assignee, due_at, parent, milestone, sprint"`
 	After       string         `json:"after,omitempty" jsonschema:"move: place after this item key"`
 	Before      string         `json:"before,omitempty" jsonschema:"move: place before this item key"`
 }
@@ -989,7 +1077,7 @@ func (o opIn) toCore() core.BatchOp {
 		}
 		op.Create = core.CreateItem{Project: o.Project, Type: o.Type, Title: o.Title, Description: desc, Parent: o.Parent,
 			Status: o.Status, Priority: o.Priority, Assignee: o.Assignee, DueAt: o.DueAt, Labels: o.Labels, CustomData: o.CustomData,
-			Milestone: o.Milestone, Template: o.Template}
+			Milestone: o.Milestone, Sprint: o.Sprint, Template: o.Template}
 	case "update":
 		p := map[string]any{}
 		if o.Title != "" {
@@ -1021,6 +1109,9 @@ func (o opIn) toCore() core.BatchOp {
 		}
 		if o.Milestone != "" {
 			p["milestone"] = o.Milestone
+		}
+		if o.Sprint != "" {
+			p["sprint"] = o.Sprint
 		}
 		if o.Archived != nil {
 			p["archived"] = *o.Archived
@@ -1054,7 +1145,7 @@ func workflowView(w core.Workflow) map[string]any {
 	}
 	return map[string]any{
 		"project": w.Project, "types": w.Types, "parents": w.Hierarchy, "statuses": statuses,
-		"transitions": w.Transitions, "labels": w.Labels, "item_templates": w.ItemTemplates, "milestones": w.Milestones, "custom_fields": w.CustomFields,
+		"transitions": w.Transitions, "labels": w.Labels, "item_templates": w.ItemTemplates, "milestones": w.Milestones, "sprints": w.Sprints, "custom_fields": w.CustomFields,
 		"merge_columns": w.MergeColumns, "merge_categories": w.MergeCategories,
 	}
 }

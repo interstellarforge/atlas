@@ -31,12 +31,13 @@ type ExportItem struct {
 
 // Export is the JSON export document of one project (format 1).
 type Export struct {
-	Format     int          `json:"format"`
-	Project    string       `json:"project"`
-	Name       string       `json:"name"`
-	ExportedAt int64        `json:"exported_at"`
-	Workflow   Workflow     `json:"workflow"`
-	Items      []ExportItem `json:"items"`
+	Format     int            `json:"format"`
+	Project    string         `json:"project"`
+	Name       string         `json:"name"`
+	ExportedAt int64          `json:"exported_at"`
+	Workflow   Workflow       `json:"workflow"`
+	Items      []ExportItem   `json:"items"`
+	Context    []ContextEntry `json:"context"`
 }
 
 // ExportProject reads everything of a project the actor may see, archived items included.
@@ -49,7 +50,17 @@ func (s *Service) ExportProject(ctx context.Context, a auth.Actor, key string) (
 	if err != nil {
 		return Export{}, err
 	}
-	out := Export{Format: 1, Project: p.Key, Name: p.Name, ExportedAt: s.nowMs(), Workflow: w, Items: []ExportItem{}}
+	out := Export{Format: 1, Project: p.Key, Name: p.Name, ExportedAt: s.nowMs(), Workflow: w, Items: []ExportItem{}, Context: []ContextEntry{}}
+	for offset := 0; ; offset += 200 {
+		list, _, err := s.contextQuery(s.db.R, p.ID, ContextFilter{Status: "all", WithBody: true, Cursor: encodeOffsetCursor(offset)}, false)
+		if err != nil {
+			return out, err
+		}
+		out.Context = append(out.Context, list[:min(len(list), 200)]...)
+		if len(list) <= 200 {
+			break
+		}
+	}
 	cursor := ""
 	for {
 		page, err := s.ListItems(ctx, a, ItemFilter{Project: key, IncludeArchived: true, Limit: maxPage, Cursor: cursor, Fields: []string{"key"}})

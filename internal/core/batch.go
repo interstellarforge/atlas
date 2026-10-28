@@ -124,6 +124,12 @@ func (s *Service) Batch(ctx context.Context, a auth.Actor, ops []BatchOp, partia
 		if _, err := tx.Exec(`SAVEPOINT op`); err != nil {
 			return out, err
 		}
+		var before Item
+		if op.Op != "create" {
+			if r, err := loadRow(tx, op.Key); err == nil {
+				before = r.Item
+			}
+		}
 		it, opErr := bs.runOp(bctx, a, op)
 		if opErr != nil {
 			if _, err := tx.Exec(`ROLLBACK TO op`); err != nil {
@@ -134,6 +140,13 @@ func (s *Service) Batch(ctx context.Context, a auth.Actor, ops []BatchOp, partia
 			return out, err
 		}
 		if opErr == nil {
+			kind := "update"
+			if op.Op == "create" {
+				kind = "create"
+			}
+			if err := bs.recordInverse(tx, a, out.BatchID, kind, before, it); err != nil {
+				return out, err
+			}
 			m, err := Select(it, append(append([]string{}, defaultFields...), batchItemFields))
 			if err != nil {
 				return out, err

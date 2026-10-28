@@ -15,7 +15,7 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 
 | Table | Purpose |
 |---|---|
-| `projects` | id, key (unique, e.g. EXO), name, settings, next_item_number, archived_at |
+| `projects` | id, key (unique, e.g. EXO), name, next_item_number, archived_at |
 | `work_items` | Epics, stories, tasks, bugs |
 | `project_statuses` | Per-project statuses: id, project_id, name, position, color_group, category, wip_limit |
 | `workflow_transitions` | Optional allowed from_status -> to_status per project |
@@ -24,6 +24,11 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `comments` | Human and agent comments (actor stored) |
 | `checklist_items` | item_id, text, done, position |
 | `milestones` | Releases and milestones |
+| `batch_inverses`, `batch_undos` | Before/after values of every batch operation, and which batches were undone (ADR-0024) |
+| `items_fts` | FTS5 index over `work_items` title and description (external content, kept in sync by triggers; ADR-0026) |
+| `sprints` | Time-boxed groups of items; `work_items.sprint_id` (ADR-0023) |
+| `recurrences` | Schedules that create an item (ADR-0021) |
+| `webhooks`, `webhook_outbox` | Per-project outgoing webhooks and their queued deliveries (ADR-0022) |
 | `attachments` | Metadata: item_id, filename, mime, size, width, height, path, created_by |
 | `custom_field_definitions` | Typed fields per project: name, type, default, validation |
 | `users`, `project_members` | Users and per-project role (a name in `roles`) |
