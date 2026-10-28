@@ -28,7 +28,8 @@
       filters.label !== "" ||
       filters.milestone !== "" ||
       filters.assignee !== "" ||
-      filters.archived,
+      filters.archived ||
+      filters.olderDone,
   );
 
   function clear(): void {
@@ -100,6 +101,10 @@
   <label class="check">
     <input type="checkbox" bind:checked={filters.archived} />
     {t("filters.archived")}
+  </label>
+  <label class="check">
+    <input type="checkbox" bind:checked={filters.olderDone} />
+    {t("filters.olderDone")}
   </label>
   {#if active}
     <button type="button" class="clear" onclick={clear}

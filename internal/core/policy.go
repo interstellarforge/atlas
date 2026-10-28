@@ -21,9 +21,10 @@ type Policy struct {
 	AllowedDomain     string `json:"allowed_domain"`      // open registration only: e.g. example.com; empty = any
 	SessionDays       int    `json:"session_days"`        // 1-90
 	DefaultRole       string `json:"default_role"`        // project role used when a member is added without one
+	DoneVisibleDays   int    `json:"done_visible_days"`   // 0-3650: lists hide completed items not updated for this long; 0 = never
 }
 
-var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14, DefaultRole: "member"}
+var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14, DefaultRole: "member", DoneVisibleDays: 14}
 
 func loadPolicy(q queryer) Policy {
 	p := defaultPolicy
@@ -48,6 +49,10 @@ func loadPolicy(q queryer) Policy {
 			p.SessionDays, _ = strconv.Atoi(v)
 		case "default_role":
 			p.DefaultRole = v
+		case "done_visible_days":
+			if n, err := strconv.Atoi(v); err == nil {
+				p.DoneVisibleDays = n
+			}
 		}
 	}
 	if p.MinPasswordLength < 8 || p.SessionDays < 1 {
@@ -57,6 +62,16 @@ func loadPolicy(q queryer) Policy {
 }
 
 func (s *Service) Policy() Policy { return loadPolicy(s.db.R) }
+
+// DoneCutoff is the updated_at (unix ms) before which completed items count as old, or nil when they never do.
+func (s *Service) DoneCutoff() *int64 {
+	days := s.Policy().DoneVisibleDays
+	if days <= 0 {
+		return nil
+	}
+	t := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
+	return &t
+}
 
 // ApplyPolicy pushes the session length to the auth service; call at startup and after every change.
 func (s *Service) ApplyPolicy() {
@@ -75,9 +90,9 @@ func (s *Service) SetPolicy(ctx context.Context, a auth.Actor, p Policy) (Policy
 		return Policy{}, err
 	}
 	p.AllowedDomain = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(p.AllowedDomain), "@"))
-	if p.MinPasswordLength < 8 || p.MinPasswordLength > 128 || p.SessionDays < 1 || p.SessionDays > 90 ||
+	if p.MinPasswordLength < 8 || p.MinPasswordLength > 128 || p.SessionDays < 1 || p.SessionDays > 90 || p.DoneVisibleDays < 0 || p.DoneVisibleDays > 3650 ||
 		!slices.Contains([]string{"closed", "invite", "open"}, p.Registration) || strings.ContainsAny(p.AllowedDomain, " @/") {
-		return Policy{}, invalid("min_password_length 8-128, session_days 1-90, registration closed, invite or open, allowed_domain like example.com")
+		return Policy{}, invalid("min_password_length 8-128, session_days 1-90, done_visible_days 0-3650, registration closed, invite or open, allowed_domain like example.com")
 	}
 	if p.DefaultRole == "" {
 		p.DefaultRole = defaultPolicy.DefaultRole
@@ -91,7 +106,8 @@ func (s *Service) SetPolicy(ctx context.Context, a auth.Actor, p Policy) (Policy
 			return invalid("unknown default_role")
 		}
 		for k, v := range map[string]string{"min_password_length": strconv.Itoa(p.MinPasswordLength), "registration": p.Registration,
-			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays), "default_role": p.DefaultRole} {
+			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays), "default_role": p.DefaultRole,
+			"done_visible_days": strconv.Itoa(p.DoneVisibleDays)} {
 			if _, err := tx.Exec(`INSERT INTO instance_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, k, v); err != nil {
 				return err
 			}

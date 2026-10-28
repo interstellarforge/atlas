@@ -43,7 +43,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET | `/users/{id}/avatar` | 320 px JPEG thumbnail for any signed-in reader (metadata such as EXIF is dropped); 404 without a picture |
 | GET | `/me/security` | `{totp, recovery_remaining}` |
 | POST | `/me/totp/setup`, `/me/totp/enable`, `/me/totp/disable` | Enrol: setup returns `secret` and `otpauth` `uri`; enable `{"code"}` returns 10 recovery codes once; disable `{"password","code"}` (a code or recovery code) |
-| GET, PUT | `/admin/policy` | `{"min_password_length": 8-128, "registration", "allowed_domain", "session_days": 1-90, "default_role"}` (global admin; default_role must exist, used when a member is added without a role) |
+| GET, PUT | `/admin/policy` | `{"min_password_length": 8-128, "registration", "allowed_domain", "session_days": 1-90, "default_role", "done_visible_days": 0-3650 (default 14, 0 = never hide)}` (global admin; default_role must exist, used when a member is added without a role) |
 | GET, POST, DELETE | `/admin/invites[/{id}]` | POST `{"email"?,"is_admin","days"}` returns the `code` once; single use; with an email only that address may redeem it |
 | GET | `/admin/audit/export` | CSV (default) or `?format=json` (JSON lines) with the filters of `/admin/audit`; at most 50.000 entries per download (continue with `before`) |
 | GET, POST, DELETE | `/item-templates[/{id}]` | Instance-wide item templates (read: any user; write: global admin); usable in every project, a project template of the same name wins |
@@ -59,7 +59,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET | `/projects/{key}/board` | Every status column with `count`, `over_wip` and the first `limit` cards (default 50, max 200), plus `seq` (journal position to subscribe from). Filters: `type`, `priority`, `label`, `assignee`, `q`, `archived=1`; `fields` selects card fields |
 | GET | `/projects/{key}/board/columns/{statusId}?cursor=` | Further cards of one column |
 | GET | `/board?projects=A,B` | Cross-project overview: four columns by status category (todo, active, review, completed), no WIP limits, read-only. Same filters |
-| GET/POST | `/items` | Search/list, create. Filters also: `under` (subtree), `q` (title), `category`, `projects=A,B`, `archived=1`. `sort`: `key` (default, keyset paging), `title`, `type`, `status`, `priority`, `assignee`, `due`, `updated`, `rank` (offset paging); prefix `-` to reverse. `fields` may include `root` (top-level ancestor) |
+| GET/POST | `/items` | Search/list, create. Filters also: `under` (subtree), `q` (title), `category`, `projects=A,B`, `archived=1`, `hide_old_done=1` (leave out completed items not updated within the admin policy's `done_visible_days`; the board endpoints take it too). `sort`: `key` (default, keyset paging), `title`, `type`, `status`, `priority`, `assignee`, `due`, `updated`, `rank` (offset paging); prefix `-` to reverse. `fields` may include `root` (top-level ancestor) |
 | GET/PATCH | `/items/{key}` | Read; update (needs `version` in body or `If-Match`). Archive via `{"archived": true}`; there is no hard delete |
 | POST | `/items/{key}/move` | `{"version","status"?,"after"?,"before"?}`: status and/or position between neighbour keys (same project and target column, else 422). Omitting both neighbours appends. Conflicts return 409 |
 | POST | `/items/batch` | Up to 25 mutations |

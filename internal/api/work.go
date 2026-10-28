@@ -361,6 +361,9 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("projects"); v != "" {
 		f.Projects = strings.Split(v, ",")
 	}
+	if hideOldDone(q) {
+		f.DoneBefore = s.core.DoneCutoff()
+	}
 	num := func(name string) (*int64, bool) {
 		v := q.Get(name)
 		if v == "" {

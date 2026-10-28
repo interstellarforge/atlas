@@ -391,6 +391,17 @@
         />
       </label>
       <label>
+        {t("admin.doneVisibleDays")}
+        <input
+          type="number"
+          min="0"
+          max="3650"
+          bind:value={policy.done_visible_days}
+          required
+        />
+        <span class="hint">{t("admin.doneVisibleDaysHint")}</span>
+      </label>
+      <label>
         {t("admin.defaultRole")}
         <select bind:value={policy.default_role}>
           {#each roles as r (r.name)}

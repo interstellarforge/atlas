@@ -95,6 +95,9 @@ func (s *Service) filterConds(f ItemFilter, projectIDs []int64) ([]string, []any
 		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(f.Q)
 		add(`i.title LIKE ? ESCAPE '\'`, "%"+esc+"%")
 	}
+	if f.DoneBefore != nil {
+		add("NOT (st.category = 'completed' AND i.updated_at < ?)", *f.DoneBefore)
+	}
 	if !f.IncludeArchived {
 		conds = append(conds, "i.archived_at IS NULL")
 	}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -16,12 +17,15 @@ func (s *Server) registerBoard(mux *http.ServeMux, protect func(http.HandlerFunc
 }
 
 // boardFilter reads the filters shared by board endpoints from the query string.
-func boardFilter(w http.ResponseWriter, r *http.Request) (core.BoardFilter, bool) {
+func (s *Server) boardFilter(w http.ResponseWriter, r *http.Request) (core.BoardFilter, bool) {
 	q := r.URL.Query()
 	f := core.BoardFilter{
 		Type: q.Get("type"), Priority: q.Get("priority"), Label: q.Get("label"), Milestone: q.Get("milestone"), Q: q.Get("q"),
 		IncludeArchived: q.Get("archived") == "1" || q.Get("archived") == "true",
 		Fields:          fieldsParam(r),
+	}
+	if hideOldDone(q) {
+		f.DoneBefore = s.core.DoneCutoff()
 	}
 	if v := q.Get("assignee"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -43,7 +47,7 @@ func boardFilter(w http.ResponseWriter, r *http.Request) (core.BoardFilter, bool
 }
 
 func (s *Server) getBoard(w http.ResponseWriter, r *http.Request) {
-	f, ok := boardFilter(w, r)
+	f, ok := s.boardFilter(w, r)
 	if !ok {
 		return
 	}
@@ -61,7 +65,7 @@ func (s *Server) getBoardColumn(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", "invalid status id")
 		return
 	}
-	f, ok := boardFilter(w, r)
+	f, ok := s.boardFilter(w, r)
 	if !ok {
 		return
 	}
@@ -75,7 +79,7 @@ func (s *Server) getBoardColumn(w http.ResponseWriter, r *http.Request) {
 
 // getCrossBoard groups several projects by status category: GET /board?projects=EXO,ATL (default: all readable).
 func (s *Server) getCrossBoard(w http.ResponseWriter, r *http.Request) {
-	f, ok := boardFilter(w, r)
+	f, ok := s.boardFilter(w, r)
 	if !ok {
 		return
 	}
@@ -109,4 +113,9 @@ func (s *Server) moveItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, it)
+}
+
+// hideOldDone is set by the web app so lists and boards leave out long-finished items; API and MCP clients get everything.
+func hideOldDone(q url.Values) bool {
+	return q.Get("hide_old_done") == "1" || q.Get("hide_old_done") == "true"
 }

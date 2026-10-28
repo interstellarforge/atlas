@@ -93,7 +93,7 @@ Status category enum: `todo`, `active`, `review`, `completed` (`review` since mi
 ## Accounts, policy and templates (migration 0011)
 
 - `users`: `avatar_path`, `totp_secret`, `totp_pending`, `totp_enabled`, `totp_last_step` (replay protection). `recovery_codes` holds SHA-256 hashes, single use.
-- `instance_settings` (key/value): `min_password_length`, `registration`, `allowed_domain`, `session_days`; absent keys use the defaults in `core/policy.go`. The environment-only settings (`ATLAS_*`) are unchanged.
+- `instance_settings` (key/value): `min_password_length`, `registration`, `allowed_domain`, `session_days`, `default_role`, `done_visible_days`; absent keys use the defaults in `core/policy.go`. The environment-only settings (`ATLAS_*`) are unchanged.
 - `invites`: code hash, optional email, admin flag, expiry, used_at/used_by.
 - `item_templates.project_id` is nullable (NULL = instance wide), `subitems` holds the JSON tree. A unique index on `(COALESCE(project_id, 0), name)` replaces the old unique constraint.
 

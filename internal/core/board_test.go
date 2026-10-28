@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kees/atlas/internal/core"
 )
@@ -315,5 +316,24 @@ func TestListSortAndOffsetPaging(t *testing.T) {
 	}
 	if _, err := e.svc.ListItems(ctx, e.admin, core.ItemFilter{Project: "EXO", Sort: "nonsense"}); !isInvalid(err) {
 		t.Fatalf("bad sort accepted: %v", err)
+	}
+}
+
+func TestDoneCutoffHidesOnlyOldCompletedItems(t *testing.T) {
+	e := setup(t)
+	e.project("EXO")
+	fresh := e.item(e.admin, core.CreateItem{Project: "EXO", Type: "task", Title: "fresh", Status: "Done"})
+	open := todo(e, "EXO", "open")
+	future := time.Now().Add(time.Hour).UnixMilli() // makes every item "older" than the cutoff
+	f := core.BoardFilter{DoneBefore: &future}
+	if got := keys(column(t, e, "EXO", "Done", f)); len(got) != 0 {
+		t.Fatalf("old completed item still shown: %v", got)
+	}
+	if got := keys(column(t, e, "EXO", "Todo", f)); !slices.Equal(got, []string{open.Key}) {
+		t.Fatalf("open item hidden: %v", got)
+	}
+	past := time.Now().Add(-time.Hour).UnixMilli()
+	if got := keys(column(t, e, "EXO", "Done", core.BoardFilter{DoneBefore: &past})); !slices.Equal(got, []string{fresh.Key}) {
+		t.Fatalf("recent completed item hidden: %v", got)
 	}
 }
