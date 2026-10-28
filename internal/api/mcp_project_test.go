@@ -17,6 +17,7 @@ func TestMCPProjectCreate(t *testing.T) {
 	cookie, csrf := e.login(t)
 	asUser := func(r *http.Request) { r.AddCookie(cookie); r.Header.Set(auth.CSRFHeader, csrf) }
 	_, all, _ := e.auth.CreateToken(1, "all", []string{auth.ScopeRead, auth.ScopeWrite}, nil, nil)
+	_, blank, _ := e.auth.CreateToken(1, "blank", []string{auth.ScopeRead, auth.ScopeWrite}, []string{}, nil) // what the token form sends without projects
 	_, scoped, _ := e.auth.CreateToken(1, "scoped", []string{auth.ScopeRead, auth.ScopeWrite}, []string{"EXO"}, nil)
 	_, ro, _ := e.auth.CreateToken(1, "ro", []string{auth.ScopeRead}, nil, nil)
 	srv := httptest.NewServer(e.h)
@@ -29,6 +30,9 @@ func TestMCPProjectCreate(t *testing.T) {
 		return connect(t, srv, token).CallTool(context.Background(), &sdk.CallToolParams{Name: "project_create", Arguments: args})
 	}
 
+	if res, err := create(blank, "BLK"); failed(res, err) {
+		t.Fatalf("token with an empty project list: %v %s", err, text(res))
+	}
 	if res, err := create(all, "NEW"); failed(res, err) || !strings.Contains(text(res), `"key":"NEW"`) {
 		t.Fatalf("project_create: %v %s", err, text(res))
 	}
@@ -57,7 +61,7 @@ func TestMCPProjectCreate(t *testing.T) {
 	if res, err := connect(t, srv, all).CallTool(context.Background(), &sdk.CallToolParams{Name: "project_templates_list"}); failed(res, err) || !strings.Contains(text(res), `"name":"Lean"`) {
 		t.Fatalf("project_templates_list: %v %s", err, text(res))
 	}
-	if n := countAudit(t, e, "project.create"); n != 3 { // NEW, SRC (API), TPL
+	if n := countAudit(t, e, "project.create"); n != 4 { // BLK, NEW, SRC (API), TPL
 		t.Errorf("%d project.create audit entries", n)
 	}
 }

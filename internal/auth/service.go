@@ -238,7 +238,7 @@ func (s *Service) CreateToken(userID int64, name string, scopes, projects []stri
 	plain, prefix, hash := NewTokenSecret()
 	scopesJSON, _ := json.Marshal(scopes)
 	var projectsJSON any
-	if projects != nil {
+	if len(projects) > 0 { // an empty list means all projects, as a blank form field sends one
 		b, _ := json.Marshal(projects)
 		projectsJSON = string(b)
 	}
@@ -323,6 +323,9 @@ func (s *Service) TokenActor(plain string) (Actor, error) {
 	_ = json.Unmarshal([]byte(scopes), &a.Scopes)
 	if projects.Valid {
 		_ = json.Unmarshal([]byte(projects.String), &a.Projects)
+		if len(a.Projects) == 0 {
+			a.Projects = nil // tokens stored with "[]" before empty meant all projects
+		}
 	}
 	return a, nil
 }
