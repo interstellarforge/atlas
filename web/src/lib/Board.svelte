@@ -278,6 +278,22 @@
     }
   }
 
+  // Hint only: the server decides from the item's whole history, this looks at the card's current status.
+  function blocked(column: Column): boolean {
+    if (!drag) return false;
+    const from =
+      drag.card.status ??
+      columns.find((c) => c.items.some((i) => i.key === drag?.card.key))?.status
+        .name;
+    return (column.statuses ?? [column.status]).every(
+      (st) =>
+        st.name !== from &&
+        st.requires.length > 0 &&
+        from !== undefined &&
+        !st.requires.includes(from),
+    );
+  }
+
   function locate(x: number, y: number): Drag["over"] {
     for (const el of document.elementsFromPoint(x, y)) {
       const columnEl = el.closest<HTMLElement>("[data-col]");
@@ -500,6 +516,8 @@
         class="column"
         data-col={column.status.id}
         class:over={drag?.over?.status === column.status.id}
+        class:blocked={blocked(column)}
+        title={blocked(column) ? t("board.dropBlocked") : undefined}
         class:overwip={column.over_wip}
         style:--tone={toneVar(
           statusTone(
@@ -698,6 +716,11 @@
     border-color: var(--color-accent);
     border-top-color: var(--color-accent);
     background: var(--color-accent-soft);
+  }
+  .column.blocked {
+    border: 2px dashed var(--color-danger);
+    background: var(--color-danger-soft);
+    cursor: not-allowed;
   }
   .column.overwip {
     border-color: var(--color-danger);

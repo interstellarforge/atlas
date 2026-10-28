@@ -131,6 +131,7 @@
     "anyStatus": "Any status"
   },
   "board": {
+    "dropBlocked": "This card cannot move here yet. Move it through the required step first.",
     "tools": "Filters and add item",
     "add": "Add item",
     "type": "Type",
@@ -232,6 +233,9 @@
     "back": "Back to start"
   },
   "item": {
+    "copyUrl": "Copy link",
+    "copyRef": "Copy key + title",
+    "copied": "Copied",
     "close": "Close",
     "loading": "Loading…",
     "loadFailed": "Could not load this item.",
