@@ -406,6 +406,20 @@
     };
   });
 
+  let copied = $state<"url" | "ref" | undefined>();
+
+  async function copy(text: string, what: "url" | "ref"): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = what;
+      setTimeout(() => {
+        copied = undefined;
+      }, 1500);
+    } catch {
+      /* clipboard blocked (insecure origin or denied): nothing to copy to */
+    }
+  }
+
   function backdropClick(event: MouseEvent): void {
     if (event.target === dialog) dialog.close();
   }
@@ -432,6 +446,25 @@
     {/if}
     <span class="spacer"></span>
     {#if item && !create}
+      <button
+        type="button"
+        class="ghost"
+        onclick={() => void copy(location.href, "url")}
+        ><Icon
+          name={copied === "url" ? "check" : "link"}
+          size={16}
+        />{copied === "url" ? t("item.copied") : t("item.copyUrl")}</button
+      >
+      <button
+        type="button"
+        class="ghost"
+        onclick={() =>
+          void copy(`${itemKey} ${item?.title ?? ""}`.trim(), "ref")}
+        ><Icon
+          name={copied === "ref" ? "check" : "comment"}
+          size={16}
+        />{copied === "ref" ? t("item.copied") : t("item.copyRef")}</button
+      >
       <button
         type="button"
         class="ghost"
