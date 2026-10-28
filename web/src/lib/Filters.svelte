@@ -24,6 +24,7 @@
     filters.q !== "" ||
       filters.type !== "" ||
       filters.status !== "" ||
+      filters.category !== "" ||
       filters.priority !== "" ||
       filters.label !== "" ||
       filters.milestone !== "" ||
@@ -70,6 +71,12 @@
       {/each}
     </select>
   {/if}
+  <select aria-label={t("filters.category")} bind:value={filters.category}>
+    <option value="">{t("filters.anyCategory")}</option>
+    {#each ["todo", "active", "review", "completed"] as c (c)}
+      <option value={c}>{t(`workflow.cat.${c}` as "workflow.cat.todo")}</option>
+    {/each}
+  </select>
   <select aria-label={t("filters.priority")} bind:value={filters.priority}>
     <option value="">{t("filters.anyPriority")}</option>
     {#each ["urgent", "high", "normal", "low"] as p (p)}

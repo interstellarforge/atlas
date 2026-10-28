@@ -145,8 +145,8 @@ export interface Workflow {
   statuses: StatusInfo[];
   labels: string[];
   item_templates: string[];
-  /** Statuses of one category share a board column. */
-  merge_columns: boolean;
+  /** Categories whose statuses share one board column. */
+  merge_categories: string[];
   /** Members may book time on items. */
   time_tracking: boolean;
 }
@@ -214,6 +214,7 @@ export interface Filters {
   q: string;
   type: string;
   status: string;
+  category: string; // status category
   priority: string;
   label: string;
   milestone: string;
@@ -226,6 +227,7 @@ export const emptyFilters: Filters = {
   q: "",
   type: "",
   status: "",
+  category: "",
   priority: "",
   label: "",
   milestone: "",
@@ -250,6 +252,7 @@ function filterParams(f: Filters): Record<string, string | boolean> {
     q: f.q,
     type: f.type,
     status: f.status,
+    category: f.category,
     priority: f.priority,
     label: f.label,
     milestone: f.milestone,
@@ -629,12 +632,12 @@ export function updateStatus(
   return request("PATCH", `/projects/${project}/statuses/${String(id)}`, patch);
 }
 
-export function setMergeColumns(
+export function setMergeCategories(
   project: string,
-  mergeColumns: boolean,
+  categories: string[],
 ): Promise<Workflow> {
   return request("PATCH", `/projects/${project}/workflow`, {
-    merge_columns: mergeColumns,
+    merge_categories: categories,
   });
 }
 

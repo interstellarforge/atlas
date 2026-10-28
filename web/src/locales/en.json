@@ -128,7 +128,9 @@
     "milestone": "Milestone",
     "anyMilestone": "Any milestone",
     "status": "Status",
-    "anyStatus": "Any status"
+    "anyStatus": "Any status",
+    "category": "Category",
+    "anyCategory": "Any category"
   },
   "board": {
     "dropBlocked": "This card cannot move here yet. Move it through the required step first.",
@@ -399,8 +401,8 @@
     "requiresOf": "Statuses an item must have been in before {name}",
     "requiresNone": "None",
     "requiresHint": "An item can only enter this status after it has been in the selected statuses.",
-    "merge": "Merge statuses of one category into one board column",
-    "mergeHint": "Off shows one column per status. On shows To do, In progress and Completed as three columns; each card shows its own status.",
+    "merge": "Merge statuses into one board column, per category",
+    "mergeHint": "Tick the categories whose statuses share one column (for example Backlog and Todo). Unticked categories keep one column per status. Each card in a merged column shows its own status.",
     "timeTracking": "Time tracking",
     "timeTrackingHint": "Lets members with the time.log right book time on items. Existing bookings are kept when you turn it off."
   },

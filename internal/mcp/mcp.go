@@ -1055,7 +1055,7 @@ func workflowView(w core.Workflow) map[string]any {
 	return map[string]any{
 		"project": w.Project, "types": w.Types, "parents": w.Hierarchy, "statuses": statuses,
 		"transitions": w.Transitions, "labels": w.Labels, "item_templates": w.ItemTemplates, "milestones": w.Milestones, "custom_fields": w.CustomFields,
-		"merge_columns": w.MergeColumns,
+		"merge_columns": w.MergeColumns, "merge_categories": w.MergeCategories,
 	}
 }
 

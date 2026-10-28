@@ -63,7 +63,7 @@ func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, er
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, key, name, archived_at, created_at, merge_columns, repo_url, repo_branch, time_tracking FROM projects ORDER BY key`)
+	rows, err := s.db.R.Query(`SELECT id, key, name, archived_at, created_at, merge_categories, repo_url, repo_branch, time_tracking FROM projects ORDER BY key`)
 	if err != nil {
 		return nil, err
 	}
@@ -72,11 +72,12 @@ func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, er
 	for rows.Next() {
 		var p Project
 		var archived sql.NullInt64
-		var repoURL, repoBranch string
-		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &p.MergeColumns, &repoURL, &repoBranch, &p.TimeTracking); err != nil {
+		var repoURL, repoBranch, merged string
+		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &merged, &repoURL, &repoBranch, &p.TimeTracking); err != nil {
 			return nil, err
 		}
 		p.Repository = linkedRepo(repoURL, repoBranch)
+		p.setMerged(merged)
 		if _, ok := readable[p.ID]; !ok {
 			continue
 		}

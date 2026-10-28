@@ -101,7 +101,7 @@ Status category enum: `todo`, `active`, `review`, `completed` (`review` since mi
 
 - `status_requirements (status_id, required_status_id)`: an item may enter `status_id` only if it is in, or has been in, every required status. Empty = no rule.
 - `item_status_visits (item_id, status_id)`: statuses an item has been in, written with the status change. Backfilled from the current status and the audit log (by name).
-- `projects.merge_columns` (default 0): statuses of one category share a board column. Ranks stay per item; the rank queries work on the set of statuses of a column. See ADR-0011.
+- `projects.merge_categories` (default empty, comma separated, migration 0020): statuses of these categories share a board column per category; `merge_columns` is kept equal to "any category merged". Ranks stay per item; the rank queries work on the set of statuses of a column. See ADR-0011.
 
 ## Email (migration 0015)
 

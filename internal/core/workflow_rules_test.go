@@ -265,3 +265,31 @@ func TestReviewIsItsOwnMergedColumn(t *testing.T) {
 		t.Fatalf("progress by category: %v %v", p.Categories, err)
 	}
 }
+
+func TestMergeOnlyChosenCategories(t *testing.T) {
+	e := setup(t)
+	e.project("EXO")
+	w, err := e.svc.GetWorkflow(ctx, e.admin, "EXO")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.SetMergeCategories(ctx, e.admin, "EXO", []string{"todo"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := e.svc.Board(ctx, e.admin, "EXO", core.BoardFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	todos := 0
+	for _, st := range w.Statuses {
+		if st.Category == "todo" {
+			todos++
+		}
+	}
+	if todos < 2 || len(b.Columns) != len(w.Statuses)-todos+1 {
+		t.Fatalf("only todo should merge: %d columns for %d statuses (%d todo)", len(b.Columns), len(w.Statuses), todos)
+	}
+	if err := e.svc.SetMergeCategories(ctx, e.admin, "EXO", []string{"nope"}); err == nil {
+		t.Fatal("unknown category accepted")
+	}
+}

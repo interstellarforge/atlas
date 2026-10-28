@@ -399,13 +399,14 @@ type TemplateStatus struct {
 // ProjectTemplateData is the JSON schema (version 1) of a project template: workflow, labels, custom
 // fields and item templates. Never members, tokens, items or other user data.
 type ProjectTemplateData struct {
-	Version       int              `json:"version"`
-	MergeColumns  bool             `json:"merge_columns,omitempty"`
-	Statuses      []TemplateStatus `json:"statuses"`
-	Transitions   []Transition     `json:"transitions"`
-	Labels        []string         `json:"labels"`
-	CustomFields  []CustomField    `json:"custom_fields"`
-	ItemTemplates []ItemTemplate   `json:"item_templates"`
+	Version         int              `json:"version"`
+	MergeColumns    bool             `json:"merge_columns,omitempty"`
+	MergeCategories []string         `json:"merge_categories,omitempty"`
+	Statuses        []TemplateStatus `json:"statuses"`
+	Transitions     []Transition     `json:"transitions"`
+	Labels          []string         `json:"labels"`
+	CustomFields    []CustomField    `json:"custom_fields"`
+	ItemTemplates   []ItemTemplate   `json:"item_templates"`
 }
 
 type ProjectTemplate struct {
@@ -546,7 +547,7 @@ func (s *Service) projectToTemplate(ctx context.Context, a auth.Actor, key strin
 	if err != nil {
 		return ProjectTemplateData{}, err
 	}
-	d := ProjectTemplateData{Version: 1, MergeColumns: w.MergeColumns, Transitions: w.Transitions, Labels: w.Labels, CustomFields: w.CustomFields}
+	d := ProjectTemplateData{Version: 1, MergeColumns: w.MergeColumns, MergeCategories: w.MergeCategories, Transitions: w.Transitions, Labels: w.Labels, CustomFields: w.CustomFields}
 	for _, st := range w.Statuses {
 		d.Statuses = append(d.Statuses, TemplateStatus{Name: st.Name, Category: st.Category, WIPLimit: st.WIPLimit, AllowCreate: st.AllowCreate, Requires: st.Requires})
 	}
@@ -630,7 +631,11 @@ func (s *Service) CreateProjectFromTemplate(ctx context.Context, a auth.Actor, k
 			return Project{}, err
 		}
 	}
-	if t.Data.MergeColumns {
+	if len(t.Data.MergeCategories) > 0 {
+		if err := bs.SetMergeCategories(ctx, a, p.Key, t.Data.MergeCategories); err != nil {
+			return Project{}, err
+		}
+	} else if t.Data.MergeColumns { // templates saved before categories could be chosen
 		if err := bs.SetMergeColumns(ctx, a, p.Key, true); err != nil {
 			return Project{}, err
 		}

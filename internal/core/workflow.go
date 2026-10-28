@@ -61,8 +61,10 @@ type Workflow struct {
 	CustomFields []CustomField       `json:"custom_fields"`
 	// ItemTemplates are the names of the project's item templates (see /item-templates for their content).
 	ItemTemplates []string `json:"item_templates"`
-	// MergeColumns shows statuses of one category in one board column.
-	MergeColumns bool `json:"merge_columns"`
+	// MergeColumns is true when any category is merged; MergeCategories names the categories whose
+	// statuses share one board column.
+	MergeColumns    bool     `json:"merge_columns"`
+	MergeCategories []string `json:"merge_categories"`
 	// TimeTracking is on when members may book time on items (ADR-0014).
 	TimeTracking bool `json:"time_tracking"`
 }
@@ -73,7 +75,7 @@ func (s *Service) GetWorkflow(ctx context.Context, a auth.Actor, key string) (Wo
 		return Workflow{}, err
 	}
 	w := Workflow{Project: p.Key, Types: itemTypes, Hierarchy: allowedParents, Transitions: []Transition{}, Labels: []string{}, Milestones: []Milestone{},
-		MergeColumns: p.MergeColumns, TimeTracking: p.TimeTracking}
+		MergeColumns: p.MergeColumns, MergeCategories: p.MergeCategories, TimeTracking: p.TimeTracking}
 
 	if w.Statuses, err = statuses(s.db.R, p.ID); err != nil {
 		return w, err

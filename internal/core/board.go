@@ -20,6 +20,7 @@ var boardFields = []string{"key", "type", "title", "priority", "assignee", "due_
 
 type BoardFilter struct {
 	Type, Priority, Label, Milestone, Q string
+	Category                            string // status category; ignored by the cross-project overview, which has its own columns
 	Assignee                            *int64
 	IncludeArchived                     bool
 	DoneBefore                          *int64 // see ItemFilter
@@ -44,7 +45,7 @@ type Board struct {
 }
 
 func (f BoardFilter) item() ItemFilter {
-	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Milestone: f.Milestone, Q: f.Q, Assignee: f.Assignee,
+	return ItemFilter{Type: f.Type, Priority: f.Priority, Label: f.Label, Milestone: f.Milestone, Q: f.Q, Assignee: f.Assignee, Category: f.Category,
 		IncludeArchived: f.IncludeArchived, DoneBefore: f.DoneBefore, Fields: f.fields()}
 }
 
@@ -88,7 +89,7 @@ func (s *Service) Board(ctx context.Context, a auth.Actor, key string, f BoardFi
 	if err != nil {
 		return Board{}, err
 	}
-	groups := groupStatuses(sts, p.MergeColumns)
+	groups := groupStatuses(sts, p)
 	b := Board{Project: p.Key, Seq: seq, Columns: make([]Column, 0, len(groups))}
 	for _, g := range groups {
 		col, err := s.column(p.ID, g, f, "")
@@ -110,7 +111,7 @@ func (s *Service) BoardColumn(ctx context.Context, a auth.Actor, key string, sta
 	if err != nil {
 		return Column{}, err
 	}
-	for _, g := range groupStatuses(sts, p.MergeColumns) {
+	for _, g := range groupStatuses(sts, p) {
 		if g[0].ID == statusID {
 			return s.column(p.ID, g, f, cursor)
 		}
@@ -120,12 +121,12 @@ func (s *Service) BoardColumn(ctx context.Context, a auth.Actor, key string, sta
 
 // groupStatuses returns the board columns as groups of statuses: one status each, or with merged columns
 // every status of a category together, ordered by the first status of each category.
-func groupStatuses(sts []Status, merge bool) [][]Status {
+func groupStatuses(sts []Status, p Project) [][]Status {
 	groups := make([][]Status, 0, len(sts))
 	byCategory := map[string]int{}
 	for _, st := range sts {
 		i, seen := byCategory[st.Category]
-		if !merge || !seen {
+		if !p.merges(st.Category) || !seen {
 			byCategory[st.Category] = len(groups)
 			groups = append(groups, []Status{st})
 			continue
@@ -426,7 +427,8 @@ func inList(ids []int64) (string, []any) {
 // columns on, every status of the same category (ADR-0011). Ranks are kept per column, so all rank
 // queries use this set.
 func columnOf(q queryer, p Project, statusID int64) []int64 {
-	if !p.MergeColumns {
+	var category string
+	if err := q.QueryRow(`SELECT category FROM project_statuses WHERE id = ?`, statusID).Scan(&category); err != nil || !p.merges(category) {
 		return []int64{statusID}
 	}
 	rows, err := q.Query(`SELECT id FROM project_statuses WHERE project_id = ?
