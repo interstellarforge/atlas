@@ -24,6 +24,7 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `comments` | Human and agent comments (actor stored) |
 | `checklist_items` | item_id, text, done, position |
 | `milestones` | Releases and milestones |
+| `recurrences` | Schedules that create an item (ADR-0021) |
 | `attachments` | Metadata: item_id, filename, mime, size, width, height, path, created_by |
 | `custom_field_definitions` | Typed fields per project: name, type, default, validation |
 | `users`, `project_members` | Users and per-project role (a name in `roles`) |

@@ -24,6 +24,7 @@ import (
 	"github.com/kees/atlas/internal/media"
 	"github.com/kees/atlas/internal/notifications"
 	"github.com/kees/atlas/internal/repo"
+	"github.com/kees/atlas/internal/scheduler"
 	"github.com/kees/atlas/internal/update"
 	"github.com/kees/atlas/migrations"
 	"github.com/kees/atlas/web"
@@ -116,6 +117,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go pruneJournal(ctx, feed, cfg.EventRetention)
+	go scheduler.Every(ctx, time.Minute, func(ctx context.Context) { svc.RunDueRecurrences(ctx) })
 	go (&notifications.Worker{DB: database, Sender: notifications.SMTP{}, Load: svc.MailWorkerSettings}).Run(ctx)
 
 	var updates *update.Checker
