@@ -9,17 +9,30 @@
     type ProjectTemplate,
   } from "./api";
   import EmptyState from "./EmptyState.svelte";
-  import { t } from "./i18n";
+  import { type MessageKey, t } from "./i18n";
   import Icon from "./Icon.svelte";
   import PageHero from "./PageHero.svelte";
   import ProgressBar from "./ProgressBar.svelte";
   import { projectColor, projectCoverName } from "./projectColor";
-  import { toneVar } from "./statusTone";
+  import { statusTone, type Tone, toneVar } from "./statusTone";
 
   let { projects, onchange }: { projects: Project[]; onchange: () => void } =
     $props();
 
-  const CATEGORIES = ["todo", "active", "review", "completed"] as const;
+  const TONES: { tone: Tone; label: MessageKey }[] = [
+    { tone: "backlog", label: "home.backlog" },
+    { tone: "todo", label: "workflow.cat.todo" },
+    { tone: "active", label: "workflow.cat.active" },
+    { tone: "review", label: "workflow.cat.review" },
+    { tone: "done", label: "workflow.cat.completed" },
+  ];
+
+  // Backlog is the first todo status (see statusTone), so it is counted per status, not per category.
+  function toneCounts(p: Progress): Record<Tone, number> {
+    const counts = { backlog: 0, todo: 0, active: 0, review: 0, done: 0 };
+    for (const st of p.statuses) counts[statusTone(st, p.statuses)] += st.count;
+    return counts;
+  }
 
   let creating = $state(false);
   let key = $state("");
@@ -37,7 +50,7 @@
     ),
   );
 
-  // One grouped query per project (ADR-0014); the compact bar shows the split by category.
+  // One grouped query per project (ADR-0014); the compact bar shows the split by status.
   $effect(() => {
     for (const project of projects) {
       if (counts[project.key]) continue;
@@ -167,14 +180,12 @@
               <ProgressBar progress={c} compact />
               <p class="stats">
                 <span><b>{c.total}</b> {t("home.items")}</span>
-                {#each CATEGORIES as cat (cat)}
+                {#each TONES as tone (tone.tone)}
                   <span
-                    ><i
-                      style:background={toneVar(
-                        cat === "completed" ? "done" : cat,
-                      )}
-                    ></i><b>{c.categories[cat]}</b>
-                    {t(`workflow.cat.${cat}`)}</span
+                    ><i style:background={toneVar(tone.tone)}></i><b
+                      >{toneCounts(c)[tone.tone]}</b
+                    >
+                    {t(tone.label)}</span
                   >
                 {/each}
               </p>

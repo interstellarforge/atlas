@@ -44,7 +44,7 @@
   }
 
   const segments = $derived.by((): Segment[] => {
-    const current = compact ? "category" : mode;
+    const current = compact ? "status" : mode;
     let list: Segment[];
     if (current === "category") {
       list = (["todo", "active", "review", "completed"] as const).map((c) => ({
