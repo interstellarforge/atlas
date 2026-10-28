@@ -93,11 +93,29 @@ Hardware: developer Mac (Apple Silicon, arm64, SSD), loopback. **Not representat
 
 `synchronous=FULL` vs `NORMAL` through HTTP with 5 clients: board p95 28-33 ms and update p95 9-10 ms for both (three runs, no consistent difference). At SQLite level (Baseline 1 and `TestBaseline`) NORMAL is faster for writes (update p95 about 0.57 ms vs 0.16 ms in the latest run), but fsync cost on a Mac SSD says little about a server disk: repeat on target hardware before changing the FULL default.
 
-Not measured: low-end hardware, more than 5 clients, container memory with the 10.000-item dataset loaded (the container run used an empty database), sustained write load, import of 20.000 rows, backup duration with many uploads.
+Not measured in this local run: low-end hardware, more than 5 clients, container memory with the 10.000-item dataset loaded (the container run used an empty database), sustained write load, import of 20.000 rows, backup duration with many uploads. The representative server run below closes the low-end hardware gap.
+
+## Representative server validation (REL, 2026-10-28)
+
+Hardware: Debian 13 VM on KVM, 4 vCPU (Intel Core i5-10210U), 1.9 GiB RAM, 4 GiB swap, ext4, Docker 29.9.2. Commit `4c5179475e520298aef3d315aefaf53241c71232`, Go 1.27.3, 10.000 items, 200 context entries. Three repetitions with `benchmarks/server.sh all`; the complete benchmark suite passed in 45.4 seconds.
+
+| Target | Worst observed result over 3 runs | Verdict |
+|---|---|---|
+| Idle RSS <= 100 MB | 27.1 MB | met |
+| Normal use <= 200 MB | 31.3 MB after 2.000 health requests; concurrent benchmark process 106 MB including server, clients and seed | met |
+| Container 384 MB | production limit 384 MiB; 22.6 MiB idle; not OOM-killed | met |
+| Board p95 <= 150 ms | 59.4 ms with 5 concurrent clients | met |
+| Update p95 <= 100 ms | 34.4 ms with 5 concurrent clients | met |
+| >= 5 concurrent clients | 5 clients x 100 rounds, no errors in any run | met |
+| Context p95 < 100 ms and default <= 4 KiB | bootstrap p95 0.87 ms, 3.848 bytes | met |
+
+`synchronous=FULL` remained within target but was slower for writes. Across the three HTTP runs, FULL board p95 was 32.9-59.4 ms and PATCH p95 31.2-34.4 ms; NORMAL board p95 was 38.4-38.8 ms and PATCH p95 12.7-15.7 ms. At SQLite level, item-update p95 was 5.82-6.83 ms with FULL and 0.078-0.089 ms with NORMAL. The durability default remains FULL; these measurements do not change that decision.
+
+The benchmark harness used a 1 GiB limit to leave room for compilation. The production container's 384 MiB limit and idle use were checked separately, so the harness run is not evidence of peak container memory under the production limit.
 
 ## Not measured yet
 
-Low-end hardware, concurrent writers under load, uploads, reparenting large subtrees, large-subtree comparison, MCP calls per user action beyond the two scenarios above.
+More than 5 clients, sustained concurrent writers, uploads on the server, reparenting large subtrees, large-subtree comparison, and MCP calls per user action beyond the two scenarios above.
 
 ## Merged board columns (SET, 2026-10-27)
 
