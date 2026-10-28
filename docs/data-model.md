@@ -24,6 +24,7 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `comments` | Human and agent comments (actor stored) |
 | `checklist_items` | item_id, text, done, position |
 | `milestones` | Releases and milestones |
+| `batch_inverses`, `batch_undos` | Before/after values of every batch operation, and which batches were undone (ADR-0024) |
 | `sprints` | Time-boxed groups of items; `work_items.sprint_id` (ADR-0023) |
 | `recurrences` | Schedules that create an item (ADR-0021) |
 | `webhooks`, `webhook_outbox` | Per-project outgoing webhooks and their queued deliveries (ADR-0022) |

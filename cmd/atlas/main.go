@@ -119,6 +119,7 @@ func run() error {
 	defer stop()
 	go pruneJournal(ctx, feed, cfg.EventRetention)
 	go scheduler.Every(ctx, time.Minute, func(ctx context.Context) { svc.RunDueRecurrences(ctx) })
+	go scheduler.Every(ctx, 24*time.Hour, func(context.Context) { svc.PruneBatchInverses(time.Now().Add(-cfg.EventRetention).UnixMilli()) })
 	go scheduler.Every(ctx, 5*time.Second, func(ctx context.Context) { svc.DeliverWebhooks(ctx) })
 	go (&notifications.Worker{DB: database, Sender: notifications.SMTP{}, Load: svc.MailWorkerSettings}).Run(ctx)
 

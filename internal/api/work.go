@@ -86,6 +86,8 @@ func (s *Server) registerWork(mux *http.ServeMux, protect func(http.HandlerFunc)
 	mux.Handle("POST /api/v1/projects/{key}/webhooks", protect(s.createWebhook))
 	mux.Handle("PATCH /api/v1/projects/{key}/webhooks/{id}", protect(s.patchWebhook))
 	mux.Handle("DELETE /api/v1/projects/{key}/webhooks/{id}", protect(s.deleteWebhook))
+	mux.Handle("GET /api/v1/projects/{key}/batches", protect(s.listBatches))
+	mux.Handle("POST /api/v1/batches/{id}/undo", protect(s.undoBatch))
 	s.registerNotes(mux, protect)
 	s.registerInbox(mux, protect)
 }

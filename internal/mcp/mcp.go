@@ -868,6 +868,27 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 		return result(m)
 	})
 
+	type undoIn struct {
+		BatchID string `json:"batch_id" jsonschema:"batch_id returned by items_write"`
+		Force   bool   `json:"force,omitempty" jsonschema:"also overwrite fields edited after the batch (default: leave them and report a conflict)"`
+
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
+	}
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "batch_undo",
+		Description: "Undo an items_write batch (project admin, once per batch, within the event retention). Restores each changed field to its value before the batch; created items are archived. Fields edited after the batch are left alone and listed as conflicts unless force is set. Board position is not restored.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(true)},
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in undoIn) (*sdk.CallToolResult, any, error) {
+		m, failed := write(ctx, svc, writes, a, 1, "batch_undo", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {
+			res, err := s.UndoBatch(ctx, a, in.BatchID, in.Force)
+			return map[string]any{"batch_id": res.BatchID, "restored": res.Restored, "conflicts": res.Conflicts}, err
+		})
+		if failed != nil {
+			return failed, nil, nil
+		}
+		return result(m)
+	})
+
 	type attachIn struct {
 		Key      string `json:"key" jsonschema:"item key, e.g. EXO-42"`
 		Filename string `json:"filename"`
