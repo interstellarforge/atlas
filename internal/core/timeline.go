@@ -14,7 +14,8 @@ const (
 	activityLimitMax = 200
 )
 
-// TimelineItem is an item with a due date: a bar from its creation to its due date.
+// TimelineItem is an item with a due date: a bar from its creation to its due date. It belongs to a range by
+// its due date; the creation date only sets where the bar starts, so no planned start is invented.
 type TimelineItem struct {
 	Key      string `json:"key"`
 	Type     string `json:"type"`
@@ -29,11 +30,13 @@ type TimelineItem struct {
 type Timeline struct {
 	Milestones []Milestone    `json:"milestones"`
 	Items      []TimelineItem `json:"items"`
+	// Unscheduled lists the open milestones without an expected completion date, so they can be cleaned up.
+	Unscheduled []Milestone `json:"unscheduled_milestones"`
 	// Truncated is true when more items match than the limit allows; narrow the range.
 	Truncated bool `json:"truncated"`
 }
 
-// ProjectTimeline returns the milestones and items that overlap [from, to] (unix ms). Only that range is
+// ProjectTimeline returns the milestones and items due within [from, to] (unix ms). Only that range is
 // loaded, so the view stays cheap on large projects (ADR-0014).
 func (s *Service) ProjectTimeline(ctx context.Context, a auth.Actor, key string, from, to int64, limit int) (Timeline, error) {
 	if to <= from || to-from > maxTimelineRange {
@@ -51,16 +54,19 @@ func (s *Service) ProjectTimeline(ctx context.Context, a auth.Actor, key string,
 	if err != nil {
 		return Timeline{}, err
 	}
-	out := Timeline{Milestones: []Milestone{}, Items: []TimelineItem{}}
+	out := Timeline{Milestones: []Milestone{}, Items: []TimelineItem{}, Unscheduled: []Milestone{}}
 	for _, m := range all {
-		if m.DueAt != nil && *m.DueAt >= from && *m.DueAt <= to {
+		switch {
+		case m.DueAt == nil && m.ReleasedAt == nil:
+			out.Unscheduled = append(out.Unscheduled, m)
+		case m.DueAt != nil && *m.DueAt >= from && *m.DueAt <= to:
 			out.Milestones = append(out.Milestones, m)
 		}
 	}
 	rows, err := s.db.R.Query(`SELECT i.key, i.type, i.title, st.name, st.category, MIN(i.created_at, i.due_at), i.due_at
 		FROM work_items i JOIN project_statuses st ON st.id = i.status_id
 		WHERE i.project_id = ? AND i.archived_at IS NULL AND i.due_at IS NOT NULL
-		  AND i.due_at >= ? AND MIN(i.created_at, i.due_at) <= ?
+		  AND i.due_at >= ? AND i.due_at <= ?
 		ORDER BY i.due_at, i.id LIMIT ?`, p.ID, from, to, limit+1)
 	if err != nil {
 		return Timeline{}, err

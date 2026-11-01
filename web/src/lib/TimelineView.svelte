@@ -1,22 +1,43 @@
 <script lang="ts">
+  import { SvelteSet } from "svelte/reactivity";
+
   import {
     type ActivityEntry,
+    type Card,
     getActivity,
+    getItems,
     getTimeline,
     type Timeline,
+    type Workflow,
   } from "./api";
   import EmptyState from "./EmptyState.svelte";
   import { onChange, onResync } from "./events.svelte";
   import { t } from "./i18n";
+  import Icon from "./Icon.svelte";
   import { actorName } from "./people.svelte";
-  import { itemHref } from "./routes";
+  import { itemHref, viewPath } from "./routes";
+  import TicketRows from "./TicketRows.svelte";
 
-  let { project }: { project: string } = $props();
+  let {
+    project,
+    workflow,
+  }: { project: string; workflow?: Workflow | undefined } = $props();
 
   type Zoom = "week" | "month" | "quarter";
   const DAY = 86_400_000;
   // Days shown per zoom level: four weeks, three months, one year.
   const SPAN: Record<Zoom, number> = { week: 28, month: 90, quarter: 365 };
+  // Pixels per day: the chart is as wide as the period needs and scrolls sideways when the screen is narrower.
+  const PPD: Record<Zoom, number> = { week: 40, month: 14, quarter: 6 };
+  const CHILD_FIELDS = "key,type,title,status,due_at";
+  const CHILD_LIMIT = 100;
+
+  interface Children {
+    items: Card[];
+    more: boolean;
+    failed: boolean;
+    loaded: boolean;
+  }
 
   let tab = $state<"plan" | "activity">("plan");
   let zoom = $state<Zoom>("month");
@@ -27,9 +48,27 @@
   let more = $state(false);
   let error = $state("");
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let planRequest = 0;
+  // Rows whose tickets are unfolded, keyed "i:<item key>" or "m:<milestone id>"; the tickets load on demand.
+  const open = new SvelteSet<string>();
+  let children = $state<Record<string, Children | undefined>>({});
 
   const from = $derived(start);
   const to = $derived(start + SPAN[zoom] * DAY);
+  const trackWidth = $derived(SPAN[zoom] * PPD[zoom]);
+  // The server already returns only what is due in the range; filtering again here keeps a slow answer for an
+  // earlier range from drawing rows that are outside the one on screen.
+  const items = $derived(
+    (timeline?.items ?? []).filter(
+      (it) => it.due_at >= from && it.due_at <= to,
+    ),
+  );
+  const milestones = $derived(
+    (timeline?.milestones ?? []).filter(
+      (m) => m.due_at !== null && m.due_at >= from && m.due_at <= to,
+    ),
+  );
+  const unscheduled = $derived(timeline?.unscheduled_milestones ?? []);
   const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
   const dateTime = new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -74,12 +113,66 @@
   });
 
   async function loadPlan(): Promise<void> {
+    const request = ++planRequest;
     try {
-      timeline = await getTimeline(project, from, to);
+      const result = await getTimeline(project, from, to);
+      if (request !== planRequest) return; // a newer range was requested meanwhile
+      timeline = result;
       error = "";
+      void loadOpenChildren();
     } catch {
-      error = t("timeline.failed");
+      if (request === planRequest) error = t("timeline.failed");
     }
+  }
+
+  function expandable(type: string): boolean {
+    return type === "epic" || type === "story";
+  }
+
+  async function loadChildren(id: string): Promise<void> {
+    const [kind, ref] = [id.slice(0, 1), id.slice(2)];
+    const milestone =
+      kind === "m"
+        ? timeline?.milestones.find((m) => String(m.id) === ref)
+        : undefined;
+    if (kind === "m" && !milestone) return;
+    try {
+      const page = await getItems({
+        project,
+        fields: CHILD_FIELDS,
+        limit: CHILD_LIMIT + 1,
+        ...(milestone ? { milestone: milestone.name } : { under: ref }),
+      });
+      // `under` returns the item itself too.
+      const rows = page.items.filter((c) => c.key !== ref);
+      children[id] = {
+        items: rows.slice(0, CHILD_LIMIT),
+        more: rows.length > CHILD_LIMIT || page.next_cursor !== null,
+        failed: false,
+        loaded: true,
+      };
+    } catch {
+      children[id] = {
+        items: children[id]?.items ?? [],
+        more: false,
+        failed: true,
+        loaded: true,
+      };
+    }
+  }
+
+  // A refresh reloads the unfolded rows but keeps their old tickets on screen until the new ones arrive.
+  async function loadOpenChildren(): Promise<void> {
+    await Promise.all([...open].map((id) => loadChildren(id)));
+  }
+
+  function toggle(id: string): void {
+    if (open.has(id)) {
+      open.delete(id);
+      return;
+    }
+    open.add(id);
+    void loadChildren(id);
   }
 
   async function loadActivity(before = 0): Promise<void> {
@@ -212,71 +305,132 @@
   {#if error}<p class="banner error" role="alert">{error}</p>{/if}
 
   {#if tab === "plan" && timeline}
-    {#if timeline.items.length + timeline.milestones.length === 0}
+    {#if items.length + milestones.length === 0}
       <EmptyState icon="calendar" title={t("timeline.empty")} />
     {:else if chart}
       <p class="muted">{t("timeline.chartHint")}</p>
-      <div class="chart">
-        <div class="plot" aria-hidden="true">
-          {#each ticks as tk (tk.at)}<i class="grid" style:left="{tk.at}%"
-            ></i>{/each}
-          {#if Date.now() >= from && Date.now() <= to}
-            <i class="today" style:left="{pct(Date.now())}%"
-              ><em>{t("timeline.today")}</em></i
-            >
-          {/if}
-        </div>
-        <div class="axis" aria-hidden="true">
-          {#each ticks as tk (tk.at)}<span style:left="{tk.at}%"
-              >{tk.label}</span
-            >{/each}
-        </div>
-        {#each timeline.milestones as m (m.id)}
-          <div class="row">
-            <span class="label milestone"><b>◆</b> {m.name}</span>
-            <div class="track">
-              <i
-                class="diamond"
-                style:left="{pct(m.due_at ?? from)}%"
-                title={t("timeline.milestone", { name: m.name })}
-              ></i>
-            </div>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class="scroller"
+        role="region"
+        aria-label={t("timeline.scrollRegion")}
+        tabindex="0"
+      >
+        <div class="chart" style:--track-w="{trackWidth}px">
+          <div class="plot" aria-hidden="true">
+            {#each ticks as tk (tk.at)}<i class="grid" style:left="{tk.at}%"
+              ></i>{/each}
+            {#if Date.now() >= from && Date.now() <= to}
+              <i class="today" style:left="{pct(Date.now())}%"
+                ><em>{t("timeline.today")}</em></i
+              >
+            {/if}
           </div>
-        {/each}
-        {#each timeline.items as it (it.key)}
-          <div class="row">
-            <a class="label" href={itemHref(it.key)}>
-              <span class="key">{it.key}</span>
-              {it.title}
-            </a>
-            <div class="track">
-              <span
-                class="item {it.category}"
-                style:left="{pct(it.start_at)}%"
-                style:width="max(6px, {pct(it.due_at) - pct(it.start_at)}%)"
-                role="img"
-                aria-label={t("timeline.bar", {
-                  key: it.key,
-                  title: it.title,
-                  start: date.format(it.start_at),
-                  due: date.format(it.due_at),
-                  status: it.status,
-                })}
-              ></span>
-            </div>
+          <div class="axis" aria-hidden="true">
+            {#each ticks as tk (tk.at)}<span style:left="{tk.at}%"
+                >{tk.label}</span
+              >{/each}
           </div>
-        {/each}
+          {#each milestones as m (m.id)}
+            {@const id = `m:${String(m.id)}`}
+            <div class="row">
+              <span class="label milestone">
+                <button
+                  type="button"
+                  class="fold"
+                  aria-expanded={open.has(id)}
+                  aria-controls={`tl-${String(m.id)}-m`}
+                  aria-label={t(
+                    open.has(id) ? "timeline.collapse" : "timeline.expand",
+                    { name: m.name },
+                  )}
+                  onclick={() => {
+                    toggle(id);
+                  }}
+                  ><Icon
+                    name={open.has(id) ? "chevron-down" : "chevron-right"}
+                    size={14}
+                  /></button
+                >
+                <b>◆</b>
+                <a href={`#${viewPath(project, "milestones", m.id)}`}
+                  >{m.name}</a
+                >
+              </span>
+              <div class="track">
+                <i
+                  class="diamond"
+                  style:left="{pct(m.due_at ?? from)}%"
+                  title={t("timeline.milestone", { name: m.name })}
+                ></i>
+              </div>
+            </div>
+            {#if open.has(id)}
+              {@render tickets(id, `tl-${String(m.id)}-m`)}
+            {/if}
+          {/each}
+          {#each items as it (it.key)}
+            {@const id = `i:${it.key}`}
+            <div class="row">
+              <span class="label">
+                {#if expandable(it.type)}
+                  <button
+                    type="button"
+                    class="fold"
+                    aria-expanded={open.has(id)}
+                    aria-controls={`tl-${it.key}-i`}
+                    aria-label={t(
+                      open.has(id) ? "timeline.collapse" : "timeline.expand",
+                      { name: it.key },
+                    )}
+                    onclick={() => {
+                      toggle(id);
+                    }}
+                    ><Icon
+                      name={open.has(id) ? "chevron-down" : "chevron-right"}
+                      size={14}
+                    /></button
+                  >
+                {/if}
+                <a href={itemHref(it.key)}>
+                  <span class="key">{it.key}</span>
+                  {it.title}
+                </a>
+              </span>
+              <div class="track">
+                <span
+                  class="item {it.category}"
+                  style:left="{pct(it.start_at)}%"
+                  style:width="max(6px, {pct(it.due_at) - pct(it.start_at)}%)"
+                  role="img"
+                  aria-label={t("timeline.bar", {
+                    key: it.key,
+                    title: it.title,
+                    start: date.format(it.start_at),
+                    due: date.format(it.due_at),
+                    status: it.status,
+                  })}
+                ></span>
+              </div>
+            </div>
+            {#if open.has(id)}
+              {@render tickets(id, `tl-${it.key}-i`)}
+            {/if}
+          {/each}
+        </div>
       </div>
     {:else}
       <ul class="list">
-        {#each timeline.milestones as m (m.id)}
+        {#each milestones as m (m.id)}
           <li>
             <b>◆</b>
-            {t("timeline.milestone", { name: m.name })}
+            <a href={`#${viewPath(project, "milestones", m.id)}`}
+              >{t("timeline.milestone", { name: m.name })}</a
+            >
             <span class="chip">{date.format(m.due_at ?? from)}</span>
           </li>
         {/each}
-        {#each timeline.items as it (it.key)}
+        {#each items as it (it.key)}
           <li>
             <a href={itemHref(it.key)}
               ><span class="key">{it.key}</span> {it.title}</a
@@ -285,6 +439,18 @@
             <span class="muted"
               >{t("timeline.due", { date: date.format(it.due_at) })}</span
             >
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if unscheduled.length > 0}
+      <h2 class="sub">{t("timeline.unscheduledMilestones")}</h2>
+      <ul class="list">
+        {#each unscheduled as m (m.id)}
+          <li>
+            <b>◆</b>
+            <a href={`#${viewPath(project, "milestones", m.id)}`}>{m.name}</a>
+            <span class="chip">{t("milestones.unscheduled")}</span>
           </li>
         {/each}
       </ul>
@@ -313,6 +479,22 @@
     {/if}
   {/if}
 </section>
+
+{#snippet tickets(id: string, domId: string)}
+  {@const c = children[id]}
+  <div class="children" id={domId}>
+    {#if !c?.loaded}
+      <p class="muted" role="status">…</p>
+    {:else if c.failed}
+      <p class="banner error" role="alert">{t("timeline.ticketsFailed")}</p>
+    {:else if c.items.length === 0}
+      <p class="muted">{t("timeline.noTickets")}</p>
+    {:else}
+      <TicketRows items={c.items} {workflow} indent />
+      {#if c.more}<p class="muted" role="status">{t("tickets.more")}</p>{/if}
+    {/if}
+  </div>
+{/snippet}
 
 <style>
   .timeline {
@@ -364,26 +546,37 @@
     color: var(--color-muted);
     font-size: var(--atlas-fs-sm);
   }
-  .chart {
-    position: relative;
-    display: flex;
-    flex-direction: column;
+  /* The scroller is the only horizontal scroll area; the label column sticks while the period scrolls. */
+  .scroller {
     flex: none;
+    overflow-x: auto;
+    container-type: inline-size;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--atlas-radius-lg);
-    overflow: hidden;
+  }
+  .scroller:focus-visible {
+    outline: 2px solid var(--atlas-primary);
+    outline-offset: 2px;
+  }
+  .chart {
+    --label-w: 220px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: calc(var(--label-w) + var(--track-w));
+    min-width: 100%;
   }
   .axis,
   .row {
     display: grid;
-    grid-template-columns: 28% 1fr;
+    grid-template-columns: var(--label-w) 1fr;
   }
   .axis {
     position: relative;
     display: block;
     height: 32px;
-    margin-left: 28%;
+    margin-left: var(--label-w);
     border-bottom: 1px solid var(--color-border);
   }
   .axis span {
@@ -397,7 +590,7 @@
   /* Grid lines and the today marker live in one overlay aligned with the track column. */
   .plot {
     position: absolute;
-    inset: 0 0 0 28%;
+    inset: 0 0 0 var(--label-w);
     pointer-events: none;
   }
   .grid {
@@ -438,15 +631,60 @@
     background: var(--color-soft);
   }
   .label {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    height: 100%;
     padding: 0 var(--space-3);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    background: var(--color-surface);
+    color: inherit;
+  }
+  .label a {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: inherit;
     text-decoration: none;
   }
-  a.label:hover {
+  .label a:hover {
     text-decoration: underline;
+  }
+  .label a:focus-visible,
+  .fold:focus-visible {
+    outline: 2px solid var(--atlas-primary);
+    outline-offset: 1px;
+  }
+  .fold {
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--atlas-radius-sm);
+    background: transparent;
+    color: var(--color-muted);
+  }
+  .children {
+    position: sticky;
+    left: 0;
+    width: 100cqw;
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-soft);
+  }
+  .sub {
+    margin: var(--space-2) 0 0;
+    font-size: var(--atlas-fs-md);
   }
   .label.milestone {
     font-weight: var(--atlas-fw-semibold);
