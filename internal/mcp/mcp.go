@@ -750,7 +750,8 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 		Action   string `json:"action" jsonschema:"create, update or delete"`
 		Name     string `json:"name" jsonschema:"milestone name (the existing one for update and delete)"`
 		NewName  string `json:"new_name,omitempty" jsonschema:"update: rename"`
-		DueAt    *int64 `json:"due_at,omitempty" jsonschema:"create or update: due date in unix milliseconds"`
+		DueAt    *int64 `json:"due_at,omitempty" jsonschema:"create or update: expected completion in unix milliseconds"`
+		ClearDue bool   `json:"clear_due_at,omitempty" jsonschema:"update: true removes the expected completion"`
 		Released *bool  `json:"released,omitempty" jsonschema:"update: true stamps released, false clears it"`
 
 		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
@@ -788,6 +789,8 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 				}
 				if in.DueAt != nil {
 					patch["due_at"] = *in.DueAt
+				} else if in.ClearDue {
+					patch["due_at"] = nil
 				}
 				if in.Released != nil {
 					patch["released"] = *in.Released

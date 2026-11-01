@@ -40,6 +40,7 @@
     onchange = () => undefined,
     view,
     item,
+    milestone,
   }: {
     project: string;
     name?: string;
@@ -52,6 +53,7 @@
     onchange?: () => void;
     view: ProjectViewName;
     item: string | undefined;
+    milestone?: number | undefined;
   } = $props();
 
   let workflow = $state<Workflow | undefined>();
@@ -291,7 +293,7 @@
         {/if}
       {/if}
       {#if view === "timeline"}
-        <TimelineView {project} />
+        <TimelineView {project} {workflow} />
       {:else if view === "time"}
         <TimeView {project} enabled={workflow.time_tracking} />
       {:else if view === "board" || view === "overview"}
@@ -303,7 +305,7 @@
       {:else if view === "context"}
         <ContextView {project} {role} {user} />
       {:else if view === "milestones"}
-        <MilestonesView {project} />
+        <MilestonesView {project} {workflow} selected={milestone} />
       {:else if view === "issues"}
         <IssuesView {project} {workflow} />
       {:else if view === "readme"}
@@ -328,7 +330,7 @@
           itemKey={item}
           {workflow}
           onclose={() => {
-            navigate(viewPath(project, view));
+            navigate(viewPath(project, view, milestone));
           }}
         />
       {/key}

@@ -1248,6 +1248,7 @@ export interface TimelineItem {
 export interface Timeline {
   milestones: Milestone[];
   items: TimelineItem[];
+  unscheduled_milestones: Milestone[];
   truncated: boolean;
 }
 

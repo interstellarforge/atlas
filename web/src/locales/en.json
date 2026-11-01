@@ -340,8 +340,17 @@
     "deleteBlocked": "Move or clear its items first.",
     "failed": "Could not change the milestone: {message}",
     "adminOnly": "Only project admins can change milestones.",
-    "open": "Open",
-    "items": "Show items"
+    "open": "Open {name}",
+    "items": "Assigned tickets",
+    "back": "All milestones",
+    "noItems": "No tickets are assigned to this milestone.",
+    "notFound": "This milestone no longer exists.",
+    "loadFailed": "Could not load the tickets of this milestone.",
+    "dueEdit": "Expected completion of {name}",
+    "clearDue": "Clear date",
+    "unscheduled": "No expected completion",
+    "onlyUnscheduled": "Show only milestones without expected completion",
+    "saveDue": "Save date"
   },
   "inbox": {
     "title": "Inbox",
@@ -776,7 +785,7 @@
     "due": "due {date}",
     "milestone": "Milestone {name}",
     "bar": "{key} {title}: {start} to {due}, {status}",
-    "chartHint": "Bars run from creation to due date. Milestones are diamonds. Use the list for a text version.",
+    "chartHint": "Bars run from creation to due date. Milestones are diamonds. Expand a row to see its tickets. Use the list for a text version.",
     "activityEmpty": "No activity yet.",
     "more": "Load more",
     "failed": "Could not load the timeline.",
@@ -793,7 +802,13 @@
       "time_update": "{actor} changed a time booking on {target}",
       "time_delete": "{actor} removed a time booking on {target}",
       "other": "{actor}: {operation} {target}"
-    }
+    },
+    "scrollRegion": "Timeline, scroll sideways to see the whole period",
+    "expand": "Show tickets of {name}",
+    "collapse": "Hide tickets of {name}",
+    "noTickets": "No tickets assigned.",
+    "ticketsFailed": "Could not load the tickets.",
+    "unscheduledMilestones": "Milestones without expected completion"
   },
   "context": {
     "title": "Project context",
@@ -913,5 +928,9 @@
     "noStatus": "(unknown)",
     "entries": "{count} bookings",
     "top": "Top 100 tickets by time."
+  },
+  "tickets": {
+    "unscheduled": "Unscheduled",
+    "more": "More tickets than can be shown."
   }
 }

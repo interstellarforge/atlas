@@ -312,6 +312,7 @@
         section={current.section ?? ""}
         onchange={() => void loadProjects()}
         item={current.item}
+        milestone={current.milestone}
       />
     {:else if route.path === "/inbox"}
       <Inbox />

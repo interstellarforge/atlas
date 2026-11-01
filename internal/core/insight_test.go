@@ -113,6 +113,10 @@ func TestTimelineRangeAndActivity(t *testing.T) {
 	due := int64(1_800_000_000_000)
 	e.item(e.admin, core.CreateItem{Project: "EXO", Type: "task", Title: "dated", DueAt: &due})
 	e.item(e.admin, core.CreateItem{Project: "EXO", Type: "task", Title: "undated"})
+	// Created now, due long before or after the range: their bars would cross it, but they are not due in it.
+	past, future := int64(1_000_000_000_000), int64(2_500_000_000_000)
+	e.item(e.admin, core.CreateItem{Project: "EXO", Type: "epic", Title: "past", DueAt: &past})
+	e.item(e.admin, core.CreateItem{Project: "EXO", Type: "epic", Title: "future", DueAt: &future})
 
 	tl, err := e.svc.ProjectTimeline(ctx, e.admin, "EXO", due-1000, due+1000, 0)
 	if err != nil || len(tl.Items) != 1 || tl.Items[0].Title != "dated" {
@@ -131,11 +135,40 @@ func TestTimelineRangeAndActivity(t *testing.T) {
 	e.project("EXOB") // a key sharing a prefix must not leak into EXO's journal
 	e.item(e.admin, core.CreateItem{Project: "EXOB", Type: "task", Title: "other"})
 	log, err := e.svc.ProjectActivity(ctx, e.admin, "EXO", 0, 0)
-	if err != nil || len(log) != 2 {
+	if err != nil || len(log) != 4 {
 		t.Fatalf("activity %+v %v", log, err)
 	}
 	older, err := e.svc.ProjectActivity(ctx, e.admin, "EXO", log[0].ID, 0)
-	if err != nil || len(older) != 1 {
+	if err != nil || len(older) != 3 {
 		t.Fatalf("activity page 2 %+v %v", older, err)
+	}
+}
+
+func TestTimelineMilestonesScheduling(t *testing.T) {
+	e := setup(t)
+	e.project("EXO")
+	due, later := int64(1_800_000_000_000), int64(1_800_000_010_000)
+	for _, m := range []struct {
+		name string
+		due  *int64
+	}{{"scheduled", &due}, {"later", &later}, {"open-undated", nil}, {"done-undated", nil}} {
+		if _, err := e.svc.CreateMilestone(ctx, e.admin, "EXO", m.name, m.due); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, _ := e.svc.ListMilestones(ctx, e.admin, "EXO")
+	for _, m := range list {
+		if m.Name == "done-undated" {
+			if _, err := e.svc.UpdateMilestone(ctx, e.admin, "EXO", m.ID, map[string]any{"released": true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	tl, err := e.svc.ProjectTimeline(ctx, e.admin, "EXO", due-1000, due+1000, 0)
+	if err != nil || len(tl.Milestones) != 1 || tl.Milestones[0].Name != "scheduled" {
+		t.Fatalf("milestones in range: %+v %v", tl.Milestones, err)
+	}
+	if len(tl.Unscheduled) != 1 || tl.Unscheduled[0].Name != "open-undated" {
+		t.Fatalf("unscheduled: %+v", tl.Unscheduled)
 	}
 }
