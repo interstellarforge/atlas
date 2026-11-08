@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kees/atlas/internal/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -96,6 +97,13 @@ func TestAuthorizationMatrix(t *testing.T) {
 	}
 	plain, _ := mk("plain@example.com")
 	_, memberID := mk("member@example.com")
+	orgAdmin, orgAdminID := mk("orgadmin@example.com")
+	id := func(s string) int64 { n, _ := strconv.ParseInt(s, 10, 64); return n }
+	e.orgAdmin(t, id(orgAdminID))
+	noOrg, noOrgID := mk("noorg@example.com") // belongs to no organization at all
+	if err := e.svc.RemoveOrgMember(context.Background(), auth.Actor{Kind: auth.KindHuman, UserID: 1}, "MAIN", id(noOrgID), false); err != nil {
+		t.Fatal(err)
+	}
 	suspended, suspendedID := mk("gone@example.com")
 	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+memberID, map[string]any{"role": "member"}, kees).Code; c != 204 {
 		t.Fatalf("add member: HTTP %d", c)
@@ -126,8 +134,10 @@ func TestAuthorizationMatrix(t *testing.T) {
 			t.Errorf("%s suspended account: HTTP %d, want 401", name, c)
 		}
 		if isAdminRoute(r) {
-			if c := call(plain).Code; c != 403 {
-				t.Errorf("%s non-admin: HTTP %d, want 403", name, c)
+			for who, as := range map[string]func(*http.Request){"plain user": plain, "organization admin": orgAdmin, "user without organization": noOrg} {
+				if c := call(as).Code; c != 403 {
+					t.Errorf("%s %s: HTTP %d, want 403", name, who, c)
+				}
 			}
 			if r.method == "GET" {
 				if c := call(kees).Code; c == 401 || c == 403 {
@@ -137,11 +147,17 @@ func TestAuthorizationMatrix(t *testing.T) {
 			continue
 		}
 		if r.method == "GET" && (strings.Contains(r.path, "/projects/{key}") || strings.Contains(r.path, "/items/{key}")) {
-			hidden := call(plain)
-			ghost := e.do(r.method, r.concrete("NOPE", "NOPE-1"), nil, plain)
-			if hidden.Code != ghost.Code || hidden.Body.String() != ghost.Body.String() {
-				t.Errorf("%s: a project the caller cannot see answers differently (HTTP %d %q) from one that does not exist (HTTP %d %q)",
-					name, hidden.Code, hidden.Body.String(), ghost.Code, ghost.Body.String())
+			for who, as := range map[string]func(*http.Request){"plain user": plain, "user without organization": noOrg} {
+				hidden := call(as)
+				ghost := e.do(r.method, r.concrete("NOPE", "NOPE-1"), nil, as)
+				if hidden.Code != ghost.Code || hidden.Body.String() != ghost.Body.String() {
+					t.Errorf("%s as %s: a project the caller cannot see answers differently (HTTP %d %q) from one that does not exist (HTTP %d %q)",
+						name, who, hidden.Code, hidden.Body.String(), ghost.Code, ghost.Body.String())
+				}
+			}
+			// an organization admin reaches every project of the organization: same answer as the SUPERADMIN
+			if got, want := call(orgAdmin).Code, call(kees).Code; got != want {
+				t.Errorf("%s organization admin: HTTP %d, the SUPERADMIN gets %d", name, got, want)
 			}
 		}
 	}
