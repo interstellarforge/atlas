@@ -114,3 +114,29 @@
 - Tokens: access tokens are normal `api_tokens` (hashed, scoped read/write, 1 hour, revocable). Refresh tokens are hashed, rotate on use, live 30 days; reuse of a used refresh token revokes the whole family. A token cannot mint tokens, so OAuth cannot be used to widen access.
 - Abuse: registration and failed token requests count against a per-address limit (5 per 15 minutes); at most 1000 clients exist. Registered clients are not shown to users beyond their name on the consent page: treat the name as untrusted text (it is escaped).
 - The `resource` parameter, when sent, must equal `<base>/mcp` (RFC 8707). Set `ATLAS_PUBLIC_URL`; without it the metadata is built from the request's Host header.
+
+## Draft: `is_admin` and role inventory for organizations (ATL-473)
+
+Code audit at commit 4e7217b (non-test files). Feeds ATL-475/477 and the authorization ADR (ADR-0029). Data inventory (c, d) needs the live database and is produced by the dry-run command (ATL-428), not guessed here.
+
+### (a) `users.is_admin`, `invites.is_admin`, `Actor.IsAdmin`
+
+| Area | Files | Action in the new model |
+|---|---|---|
+| Actor carrier | `internal/auth/actor.go`; session loader `auth/service.go:202`; token loader `auth/service.go:309` | remove the flag from the Actor; `authz.go` reads status/superadmin/memberships live (fail closed), ATL-435/436 |
+| User create/read | `auth/service.go:115,135,217`; `core/identity.go`; `api/identity.go`; `api/work.go:111` (`CreateUser` takes `is_admin`) | `is_superadmin` never settable via create/body; ATL-437/438 |
+| Invites | `core/policy.go:147-286`; `migrations/0011` | `invites.is_admin` dropped; kinds registration/organization (M3) |
+| Project authz | `core/core.go:163 access`, `core/projects.go` | replaced by `authz.go`, ATL-436 |
+| Bypasses outside `access()` | `core/notifications.go:93`, `core/items.go:465` (assignee/recipient check `is_admin = 1 OR member`) | must route through `authz.go`; easy to miss |
+| Background actor | `core/recurrence.go:263,296` builds an `Actor` from stored `is_admin` | must use live rights / system actor (ADR-0029) |
+| Admin API | `core/admin.go`, `api/admin.go` | SUPERADMIN-only (`/api/v1/admin/*`) |
+| SPA | `web/src/lib/{Admin,Shell,ProjectSettings,ItemTime,ContextView}.svelte`, `App.svelte`, `api.ts` | `is_admin` field becomes `is_superadmin`; UI hiding is convenience only |
+| Schema | `migrations/0001_auth.sql` | ATL-474 |
+
+### (b) Role consumers
+
+`roles`, `role_actions`, `project_members.role`: `core/roles.go` (role CRUD), `core/core.go` (`access`), `core/projects.go` (members, `guardLastAdmin`), `core/identity.go`, `core/items.go`, `core/notifications.go`, `api/admin.go` (`/admin/roles`), `web/src/lib/api.ts` plus the Admin roles UI, migrations 0003, 0012, 0017, 0018. All go away or are rewritten in ATL-478 and ATL-436; `guardLastAdmin` is replaced by the last-organization-ADMIN guard (ATL-490).
+
+### (c), (d) Data inventory and role comparison
+
+Pending: produced by `migrate-orgs --dry-run` (ATL-428) against the real database. Classes: equal, reduction (admin), REVIEW-REQUIRED (viewer, custom). See ADR-0028.
