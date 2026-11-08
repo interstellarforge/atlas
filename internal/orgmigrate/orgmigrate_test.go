@@ -41,15 +41,17 @@ func fixture(t *testing.T) (*db.DB, map[string]int64) {
 		admin bool
 	}{{"super@x.io", true}, {"admin2@x.io", true}, {"gone@x.io", true}, {"projadmin@x.io", false}, {"viewer@x.io", false},
 		{"wide@x.io", false}, {"narrow@x.io", false}, {"same@x.io", false}, {"member@x.io", false}, {"nobody@x.io", false}} {
-		created, err := a.CreateUser(u.email, u.email, "password-123", u.admin)
+		created, err := a.CreateUser(u.email, u.email, "password-123", false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		id[u.email] = created.ID
 	}
 	// The fixture is a pre-organization database: admins carry the legacy is_admin flag, nobody is_superadmin.
-	if _, err := d.W.Exec(`UPDATE users SET is_admin = is_superadmin, is_superadmin = 0`); err != nil {
-		t.Fatal(err)
+	for _, email := range []string{"super@x.io", "admin2@x.io", "gone@x.io"} {
+		if _, err := d.W.Exec(`UPDATE users SET is_admin = 1 WHERE email = ?`, email); err != nil {
+			t.Fatal(err)
+		}
 	}
 	exec := func(q string, args ...any) {
 		t.Helper()

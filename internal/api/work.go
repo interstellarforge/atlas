@@ -21,6 +21,9 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var rule *core.RuleError
 	var conflict *core.ConflictError
 	switch {
+	case core.IsBusy(err):
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusServiceUnavailable, "busy", "the database is busy, nothing was changed: retry")
 	case errors.Is(err, core.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, core.ErrForbidden):

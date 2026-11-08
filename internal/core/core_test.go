@@ -440,6 +440,7 @@ func TestRightsAreResolvedLive(t *testing.T) {
 	if _, err := e.svc.GetProject(ctx, e.admin, "BOB"); err != nil {
 		t.Fatal(err)
 	}
+	mkUserWith(t, e, "second-super@x.io", true) // the last superadmin cannot be demoted, even by SQL
 	if _, err := e.db.W.Exec(`UPDATE users SET is_superadmin = 0 WHERE id = ?`, e.admin.UserID); err != nil {
 		t.Fatal(err)
 	}

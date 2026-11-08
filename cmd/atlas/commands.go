@@ -21,6 +21,7 @@ import (
 //	atlas check paths [--fix]   verify (and optionally repair) the materialized item paths
 //	atlas backup <dir>          write a consistent backup (database, uploads, manifest) while the server may run
 //	atlas restore <dir>         replace the database with a backup; stop the server first (see run in main.go)
+//	atlas superadmin grant <email>   make an active account SUPERADMIN (operator recovery; no HTTP route does this)
 //	atlas migrate-orgs --dry-run|--confirm-report <hash> [--mapping file]   move the data into organizations (ADR-0028)
 func runCommand(svc *core.Service, database *db.DB, dataDir string, args []string) error {
 	if len(args) == 2 && args[0] == "backup" {
@@ -47,10 +48,17 @@ func runCommand(svc *core.Service, database *db.DB, dataDir string, args []strin
 		}
 		return nil
 	}
+	if len(args) == 3 && args[0] == "superadmin" && args[1] == "grant" {
+		if err := svc.GrantSuperadmin(context.Background(), args[2]); err != nil {
+			return err
+		}
+		fmt.Printf("%s is now a SUPERADMIN\n", args[2])
+		return nil
+	}
 	if len(args) >= 1 && args[0] == "migrate-orgs" {
 		return migrateOrgs(database, dataDir, args[1:])
 	}
-	return fmt.Errorf("unknown command %v; available: check paths [--fix], backup <dir>, restore <dir>, migrate-orgs", args)
+	return fmt.Errorf("unknown command %v; available: check paths [--fix], backup <dir>, restore <dir>, superadmin grant <email>, migrate-orgs", args)
 }
 
 // migrateOrgs prints the ADR-0028 report (--dry-run) or performs the migration (--confirm-report <hash>): verified

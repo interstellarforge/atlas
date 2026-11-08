@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -18,6 +20,8 @@ const readPoolSize = 4
 type Options struct {
 	// Synchronous is "FULL" (default) or "NORMAL".
 	Synchronous string
+	// BusyTimeout is how long a connection waits for the write lock (default 5 s). Tests shorten it.
+	BusyTimeout time.Duration
 }
 
 type DB struct {
@@ -32,12 +36,15 @@ func Open(path string, o Options) (*DB, error) {
 	if o.Synchronous == "" {
 		o.Synchronous = "FULL"
 	}
+	if o.BusyTimeout <= 0 {
+		o.BusyTimeout = 5 * time.Second
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
 
-	w, err := sql.Open("sqlite", dsn(abs, o.Synchronous, true))
+	w, err := sql.Open("sqlite", dsn(abs, o, true))
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +54,7 @@ func Open(path string, o Options) (*DB, error) {
 		return nil, fmt.Errorf("open write connection: %w", err)
 	}
 
-	r, err := sql.Open("sqlite", dsn(abs, o.Synchronous, false))
+	r, err := sql.Open("sqlite", dsn(abs, o, false))
 	if err != nil {
 		w.Close()
 		return nil, err
@@ -71,12 +78,12 @@ func (d *DB) Close() error {
 }
 
 // dsn applies the pragmas to every connection the driver opens.
-func dsn(path, synchronous string, write bool) string {
+func dsn(path string, o Options, write bool) string {
 	q := url.Values{}
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "foreign_keys(1)")
-	q.Add("_pragma", "busy_timeout(5000)")
-	q.Add("_pragma", "synchronous("+synchronous+")")
+	q.Add("_pragma", "busy_timeout("+strconv.FormatInt(o.BusyTimeout.Milliseconds(), 10)+")")
+	q.Add("_pragma", "synchronous("+o.Synchronous+")")
 	if write {
 		q.Set("_txlock", "immediate")
 	} else {

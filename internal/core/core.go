@@ -40,6 +40,11 @@ type ConflictError struct {
 
 func (e *ConflictError) Error() string { return e.Msg }
 
+// IsBusy reports that the database could not take the write lock in time: nothing was applied and the caller may retry.
+func IsBusy(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "SQLITE_BUSY"))
+}
+
 func invalid(format string, a ...any) error { return &InvalidError{fmt.Sprintf(format, a...)} }
 func rule(format string, a ...any) error    { return &RuleError{fmt.Sprintf(format, a...)} }
 

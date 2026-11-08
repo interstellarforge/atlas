@@ -24,6 +24,7 @@ type env struct {
 	h    http.Handler
 	auth *auth.Service
 	svc  *core.Service
+	path string // the database file, for tests that need a second handle
 }
 
 // orgAdmin makes a user ADMIN of the main organization (administers every project in it).
@@ -35,9 +36,11 @@ func (e env) orgAdmin(t *testing.T, userID int64) {
 	}
 }
 
-func setup(t *testing.T) env {
+func setup(t *testing.T) env { t.Helper(); return setupWith(t, db.Options{}) }
+
+func setupWith(t *testing.T, opts db.Options) env {
 	t.Helper()
-	d, err := db.Open(filepath.Join(t.TempDir(), "atlas.db"), db.Options{})
+	d, err := db.Open(filepath.Join(t.TempDir(), "atlas.db"), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +71,7 @@ func setup(t *testing.T) env {
 	svc.SetRepoFetcher(fakeRepo{})
 	stats := mcp.NewMetrics()
 	h := api.New(api.Deps{DB: d, Auth: a, Core: svc, Feed: feed, SPA: spa, MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: 500, Metrics: stats}), MCPStats: stats, Media: store, MaxUpload: maxUpload}).Handler()
-	return env{h: h, auth: a, svc: svc}
+	return env{h: h, auth: a, svc: svc, path: d.Path}
 }
 
 func (e env) do(method, path string, body any, mut func(*http.Request)) *httptest.ResponseRecorder {

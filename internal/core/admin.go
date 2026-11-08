@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -67,7 +68,7 @@ func (s *Service) SetUserSuperadmin(ctx context.Context, a auth.Actor, id int64,
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotFound
 		}
-		return s.journal(ctx, tx, a, change{Operation: "user.admin", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{"is_superadmin": admin}})
+		return s.journal(ctx, tx, a, change{Operation: "user.superadmin", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{"is_superadmin": admin}})
 	})
 }
 
@@ -232,4 +233,26 @@ func (s *Service) UpdateUser(ctx context.Context, a auth.Actor, id int64, p Admi
 		return nil
 	})
 	return err
+}
+
+// GrantSuperadmin is the operator path (`atlas superadmin grant <email>`): it needs shell access to the data
+// directory and is the only way to make a SUPERADMIN without an existing one, besides the first-install bootstrap
+// and the data migration. No HTTP route reaches it.
+func (s *Service) GrantSuperadmin(ctx context.Context, email string) error {
+	a := auth.Actor{Kind: auth.KindSystem}
+	return s.tx(func(tx *sql.Tx) error {
+		var id int64
+		err := tx.QueryRow(`SELECT id FROM users WHERE email = ? AND deactivated_at IS NULL`, strings.TrimSpace(email)).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return invalid("no active account has that email")
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE users SET is_superadmin = 1 WHERE id = ?`, id); err != nil {
+			return err
+		}
+		return s.journal(ctx, tx, a, change{Operation: "user.superadmin", Target: userTarget(id), Event: "admin.updated",
+			Changes: map[string]any{"is_superadmin": true, "via": "cli"}})
+	})
 }
