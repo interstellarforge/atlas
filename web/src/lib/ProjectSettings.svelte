@@ -471,7 +471,7 @@
           </div>
         </form>
       </section>
-      {#if user.is_admin}
+      {#if user.is_superadmin}
         <form
           class="panel"
           onsubmit={(e) => {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/kees/atlas/internal/auth"
@@ -232,6 +233,11 @@ func (s *Service) SetOrgMember(ctx context.Context, a auth.Actor, key string, us
 			ON CONFLICT (organization_id, user_id) DO UPDATE SET role = excluded.role`, o.ID, userID, role, s.nowMs(), a.UserID); err != nil {
 			return err
 		}
+		if role == "user" { // a demoted ADMIN keeps only the projects they are a member of
+			if err := s.revokeProjectTokensInOrg(tx, o.ID, userID, true); err != nil {
+				return err
+			}
+		}
 		return s.journal(ctx, tx, a, change{Operation: "org.member.set", Target: orgTarget(o.Key), Event: "admin.updated",
 			Changes: map[string]any{"user_id": userID, "role": role}})
 	})
@@ -254,25 +260,8 @@ func (s *Service) RemoveOrgMember(ctx context.Context, a auth.Actor, key string,
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotFound
 		}
-		rows, err := tx.Query(`SELECT p.key FROM projects p JOIN project_members m ON m.project_id = p.id
-			WHERE p.organization_id = ? AND m.user_id = ?`, o.ID, userID)
-		if err != nil {
+		if err := s.revokeProjectTokensInOrg(tx, o.ID, userID, false); err != nil {
 			return err
-		}
-		var keys []string
-		for rows.Next() {
-			var k string
-			if err := rows.Scan(&k); err != nil {
-				rows.Close()
-				return err
-			}
-			keys = append(keys, k)
-		}
-		rows.Close()
-		for _, k := range keys {
-			if err := s.revokeOwnedProjectTokens(tx, userID, k); err != nil {
-				return err
-			}
 		}
 		if _, err := tx.Exec(`DELETE FROM project_members WHERE user_id = ? AND project_id IN (SELECT id FROM projects WHERE organization_id = ?)`,
 			userID, o.ID); err != nil {
@@ -348,4 +337,110 @@ func guardOrgAdminLoss(q queryer, userID int64) error {
 		}
 	}
 	return nil
+}
+
+// projectOrganization picks the organization a new project goes into and checks the actor may create it there.
+func (s *Service) projectOrganization(tx *sql.Tx, a auth.Actor, orgKey string) (Organization, error) {
+	if orgKey != "" {
+		return s.authorizeOrg(tx, a, orgKey, orgUpdate)
+	}
+	st, err := s.standing(tx, a)
+	if err != nil {
+		return Organization{}, err
+	}
+	if !st.active || a.Projects != nil {
+		return Organization{}, ErrForbidden
+	}
+	q := `SELECT o.key FROM organizations o WHERE o.status = 'active'`
+	args := []any{}
+	if !st.super {
+		q += ` AND EXISTS (SELECT 1 FROM organization_memberships m WHERE m.organization_id = o.id AND m.user_id = ? AND m.role = 'admin')`
+		args = append(args, a.UserID)
+	}
+	rows, err := tx.Query(q+` ORDER BY o.key`, args...)
+	if err != nil {
+		return Organization{}, err
+	}
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			rows.Close()
+			return Organization{}, err
+		}
+		keys = append(keys, k)
+	}
+	rows.Close()
+	switch len(keys) {
+	case 0:
+		return Organization{}, ErrForbidden // only a SUPERADMIN or an organization ADMIN creates projects
+	case 1:
+		return s.authorizeOrg(tx, a, keys[0], orgUpdate)
+	}
+	return Organization{}, invalid("several organizations: say which one the project belongs to")
+}
+
+// revokeProjectTokensInOrg revokes the user's project tokens for the projects of an organization; with onlyWithoutRow
+// it spares projects the user is still an explicit member of.
+func (s *Service) revokeProjectTokensInOrg(tx *sql.Tx, orgID, userID int64, onlyWithoutRow bool) error {
+	q := `SELECT p.key FROM projects p WHERE p.organization_id = ?`
+	if onlyWithoutRow {
+		q += ` AND NOT EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = ?)`
+	}
+	args := []any{orgID}
+	if onlyWithoutRow {
+		args = append(args, userID)
+	}
+	rows, err := tx.Query(q, args...)
+	if err != nil {
+		return err
+	}
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			rows.Close()
+			return err
+		}
+		keys = append(keys, k)
+	}
+	rows.Close()
+	for _, k := range keys {
+		if err := s.revokeOwnedProjectTokens(tx, userID, k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// BootstrapOrganization creates the first organization of a new installation with the first SUPERADMIN as its ADMIN.
+// It does nothing when an organization exists.
+func (s *Service) BootstrapOrganization(ctx context.Context, superadminEmail, key, name string) error {
+	var n int
+	if err := s.db.W.QueryRow(`SELECT COUNT(*) FROM organizations`).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	var id int64
+	if err := s.db.W.QueryRow(`SELECT id FROM users WHERE email = ? AND is_superadmin = 1`, superadminEmail).Scan(&id); err != nil {
+		return err
+	}
+	_, err := s.CreateOrganization(ctx, auth.Actor{Kind: auth.KindHuman, UserID: id}, key, name, 0)
+	return err
+}
+
+// UnmigratedReason says why this database still has to go through `atlas migrate-orgs` (ADR-0028), or "" when it
+// does not. The server refuses to start on such a database: nobody would have rights.
+func (s *Service) UnmigratedReason() (string, error) {
+	var noOrg, users, supers int
+	if err := s.db.R.QueryRow(`SELECT (SELECT COUNT(*) FROM projects WHERE organization_id IS NULL),
+		(SELECT COUNT(*) FROM users), (SELECT COUNT(*) FROM users WHERE is_superadmin = 1)`).Scan(&noOrg, &users, &supers); err != nil {
+		return "", err
+	}
+	switch {
+	case noOrg > 0:
+		return fmt.Sprintf("%d project(s) belong to no organization", noOrg), nil
+	case users > 0 && supers == 0:
+		return "no account is SUPERADMIN", nil
+	}
+	return "", nil
 }

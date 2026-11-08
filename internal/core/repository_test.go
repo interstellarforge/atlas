@@ -48,12 +48,10 @@ func TestRepositoryLink(t *testing.T) {
 	e := setup(t)
 	e.project("EXO")
 	e.project("OTH")
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.aliceID, "member"); err != nil {
+	if err := e.member("EXO", e.aliceID, "member"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.bobID, "viewer"); err != nil {
-		t.Fatal(err)
-	}
+	e.orgUser(e.bobID)
 
 	link(t, e, "EXO")
 	p, _ := e.svc.GetProject(ctx, e.alice, "EXO") // members can read the link

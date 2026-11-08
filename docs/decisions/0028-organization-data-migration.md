@@ -13,7 +13,7 @@ Existing data has global `users.is_admin`, per-project roles in `roles`/`role_ac
 **Preflight (abort on any failure)**
 1. Inventory every `is_admin` account (active, deactivated, anonymized), every role with its action set and member count, project-admin members and project tokens.
 2. `ATLAS_SUPERADMIN_EMAIL` must match exactly one existing, non-deactivated `is_admin` account. Exactly one account becomes `is_superadmin`; the migration promotes nobody else.
-3. Compare every legacy role's actions with the single new project role `member` (view, export, item.create, item.update, comment, import, time.log). Classify: equal; `admin` (reduction, approved here); everything else (viewer, custom) is REVIEW-REQUIRED.
+3. Compare every legacy role's actions with the single new project role `member` (view, export, item.create, item.update, comment, import, time.log, context.write; `context.write` is included because members hold it today). Classify: equal; `admin` (reduction, approved here); everything else (viewer, custom, or an edited built-in member) is REVIEW-REQUIRED, but only when members hold it: an unused role needs no decision.
 4. `migrate-orgs --dry-run` writes nothing and prints the report. Unresolved REVIEW-REQUIRED roles block the real run. The owner resolves each in a mapping file: `member` (approved transition, may expand) or `remove` (approved loss). The real run needs `--confirm-report <hash of reviewed report incl. mapping>` and a verified backup.
 
 **Snapshot check (ATL-428/429/430).** The report hash alone does not prove the database is unchanged since the dry run. The real run therefore, inside its own `BEGIN IMMEDIATE` transaction (no other writer can interleave):

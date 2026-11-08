@@ -73,7 +73,7 @@
     void listRoles()
       .then((r) => {
         if (key !== project) return;
-        actions = user.is_admin
+        actions = user.is_superadmin
           ? r.actions
           : (r.items.find((x) => x.name === role)?.actions ?? []);
       })

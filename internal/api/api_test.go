@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,16 @@ import (
 type env struct {
 	h    http.Handler
 	auth *auth.Service
+	svc  *core.Service
+}
+
+// orgAdmin makes a user ADMIN of the main organization (administers every project in it).
+func (e env) orgAdmin(t *testing.T, userID int64) {
+	t.Helper()
+	root := auth.Actor{Kind: auth.KindHuman, UserID: 1}
+	if err := e.svc.SetOrgMember(context.Background(), root, "MAIN", userID, "admin", false); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func setup(t *testing.T) env {
@@ -40,6 +51,15 @@ func setup(t *testing.T) env {
 	}
 	spa := fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}
 	svc := core.New(d, a)
+	if _, err := svc.CreateOrganization(context.Background(), auth.Actor{Kind: auth.KindHuman, UserID: 1}, "MAIN", "Main", 0); err != nil {
+		t.Fatal(err)
+	}
+	// Every account made by a test joins the main organization as a plain member, like an invited colleague.
+	if _, err := d.W.Exec(`CREATE TRIGGER test_join_main AFTER INSERT ON users BEGIN
+		INSERT INTO organization_memberships (organization_id, user_id, role, created_at)
+		SELECT id, NEW.id, 'user', 0 FROM organizations WHERE key = 'MAIN'; END`); err != nil {
+		t.Fatal(err)
+	}
 	feed := events.New(d, svc)
 	svc.SetNotifier(feed.Hub().Notify)
 	const maxUpload = 200 << 10
@@ -48,7 +68,7 @@ func setup(t *testing.T) env {
 	svc.SetRepoFetcher(fakeRepo{})
 	stats := mcp.NewMetrics()
 	h := api.New(api.Deps{DB: d, Auth: a, Core: svc, Feed: feed, SPA: spa, MCP: mcp.Handler(svc, feed, mcp.Options{WritesPerHour: 500, Metrics: stats}), MCPStats: stats, Media: store, MaxUpload: maxUpload}).Handler()
-	return env{h: h, auth: a}
+	return env{h: h, auth: a, svc: svc}
 }
 
 func (e env) do(method, path string, body any, mut func(*http.Request)) *httptest.ResponseRecorder {

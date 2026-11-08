@@ -105,15 +105,15 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Email    string `json:"email"`
-		Name     string `json:"name"`
-		Password string `json:"password"`
-		IsAdmin  bool   `json:"is_admin"`
+		Email        string `json:"email"`
+		Name         string `json:"name"`
+		Password     string `json:"password"`
+		IsSuperadmin bool   `json:"is_superadmin"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	u, err := s.core.CreateUser(r.Context(), actor(r), in.Email, in.Name, in.Password, in.IsAdmin)
+	u, err := s.core.CreateUser(r.Context(), actor(r), in.Email, in.Name, in.Password, in.IsSuperadmin)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -135,16 +135,22 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		Key      string `json:"key"`
 		Name     string `json:"name"`
 		Template int64  `json:"template"` // id of a project template; 0 = the default workflow
+		// Organization is the key of the organization to create it in; empty means the only one the caller administers.
+		Organization string `json:"organization"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	var p core.Project
 	var err error
-	if in.Template != 0 {
+	switch {
+	case in.Template != 0 && in.Organization != "":
+		writeError(w, http.StatusBadRequest, "invalid", "organization cannot be combined with a template yet")
+		return
+	case in.Template != 0:
 		p, err = s.core.CreateProjectFromTemplate(r.Context(), actor(r), in.Key, in.Name, in.Template)
-	} else {
-		p, err = s.core.CreateProject(r.Context(), actor(r), in.Key, in.Name)
+	default:
+		p, err = s.core.CreateProjectIn(r.Context(), actor(r), in.Organization, in.Key, in.Name)
 	}
 	if err != nil {
 		s.fail(w, r, err)

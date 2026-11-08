@@ -85,7 +85,7 @@
     void load();
     void me().then((u) => {
       userId = u?.id ?? 0;
-      isAdmin = u?.is_admin ?? false;
+      isAdmin = u?.is_superadmin ?? false;
     });
   });
   $effect(() =>

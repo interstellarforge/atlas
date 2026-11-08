@@ -14,7 +14,7 @@ export interface User {
   id: number;
   email: string;
   name: string;
-  is_admin: boolean;
+  is_superadmin: boolean;
   avatar?: boolean;
   totp?: boolean;
   must_change_password?: boolean;
@@ -839,7 +839,7 @@ export async function listAdminUsers(): Promise<AdminUser[]> {
 export function patchAdminUser(
   id: number,
   patch: {
-    is_admin?: boolean;
+    is_superadmin?: boolean;
     active?: boolean;
     reset_totp?: boolean;
     force_password_reset?: boolean;
@@ -852,7 +852,7 @@ export function createUser(body: {
   email: string;
   name: string;
   password: string;
-  is_admin: boolean;
+  is_superadmin: boolean;
 }): Promise<User> {
   return request("POST", "/users", body);
 }
@@ -1165,7 +1165,6 @@ export function sendTestMail(): Promise<undefined> {
 export interface Invite {
   id: number;
   email: string;
-  is_admin: boolean;
   created_at: number;
   expires_at: number;
   used_at: number | null;
@@ -1177,7 +1176,6 @@ export async function listInvites(): Promise<Invite[]> {
 
 export function createInvite(body: {
   email: string;
-  is_admin: boolean;
   days: number;
 }): Promise<{ invite: Invite; code: string }> {
   return request("POST", "/admin/invites", body);

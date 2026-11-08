@@ -33,7 +33,7 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
 }
 
-// adminPatchUser accepts {"is_admin": bool} and/or {"active": bool}.
+// adminPatchUser accepts {"is_superadmin": bool} and/or {"active": bool}.
 func (s *Server) adminPatchUser(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -41,20 +41,20 @@ func (s *Server) adminPatchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		IsAdmin   *bool `json:"is_admin"`
-		Active    *bool `json:"active"`
-		ResetTOTP bool  `json:"reset_totp"`
+		IsSuperadmin *bool `json:"is_superadmin"`
+		Active       *bool `json:"active"`
+		ResetTOTP    bool  `json:"reset_totp"`
 		// ForcePasswordReset ends the user's sessions and makes the next one change the password first.
 		ForcePasswordReset bool `json:"force_password_reset"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.IsAdmin == nil && in.Active == nil && !in.ResetTOTP && !in.ForcePasswordReset {
-		writeError(w, http.StatusBadRequest, "invalid", "give is_admin, active, reset_totp and/or force_password_reset")
+	if in.IsSuperadmin == nil && in.Active == nil && !in.ResetTOTP && !in.ForcePasswordReset {
+		writeError(w, http.StatusBadRequest, "invalid", "give is_superadmin, active, reset_totp and/or force_password_reset")
 		return
 	}
-	if err := s.core.UpdateUser(r.Context(), actor(r), id, core.AdminUserPatch{IsAdmin: in.IsAdmin, Active: in.Active,
+	if err := s.core.UpdateUser(r.Context(), actor(r), id, core.AdminUserPatch{IsSuperadmin: in.IsSuperadmin, Active: in.Active,
 		ResetTOTP: in.ResetTOTP, ForcePasswordReset: in.ForcePasswordReset}); err != nil {
 		s.fail(w, r, err)
 		return

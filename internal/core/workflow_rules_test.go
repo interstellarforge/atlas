@@ -103,7 +103,7 @@ func TestRequiredSteps(t *testing.T) {
 func TestRequiredStepsImportAndPermissions(t *testing.T) {
 	e := setup(t)
 	e.project("EXO")
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.aliceID, "member"); err != nil {
+	if err := e.member("EXO", e.aliceID, "member"); err != nil {
 		t.Fatal(err)
 	}
 	require(t, e, "EXO", "Done", "Review")

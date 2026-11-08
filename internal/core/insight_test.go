@@ -48,11 +48,12 @@ func TestParseDurationRounds(t *testing.T) {
 func TestTimeTrackingRightsAndSummary(t *testing.T) {
 	e := setup(t)
 	e.project("EXO")
-	for id, role := range map[int64]string{e.aliceID: "member", e.bobID: "viewer", e.carolID: "member"} {
-		if err := e.svc.SetMember(ctx, e.admin, "EXO", id, role); err != nil {
+	for _, id := range []int64{e.aliceID, e.carolID} {
+		if err := e.member("EXO", id, "member"); err != nil {
 			t.Fatal(err)
 		}
 	}
+	e.orgUser(e.bobID)
 	it := e.item(e.alice, core.CreateItem{Project: "EXO", Type: "task", Title: "work"})
 
 	if _, err := e.svc.LogTime(ctx, e.alice, it.Key, "1h", "", ""); !isRule(err) {
@@ -64,8 +65,8 @@ func TestTimeTrackingRightsAndSummary(t *testing.T) {
 	if err := e.svc.SetTimeTracking(ctx, e.admin, "EXO", true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.LogTime(ctx, e.bob, it.Key, "1h", "", ""); !errors.Is(err, core.ErrForbidden) {
-		t.Fatalf("viewer booking: %v", err)
+	if _, err := e.svc.LogTime(ctx, e.bob, it.Key, "1h", "", ""); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("org member booking: %v", err)
 	}
 	mine, err := e.svc.LogTime(ctx, e.alice, it.Key, "1h30m", "2026-10-26", "design")
 	if err != nil || mine.Minutes != 90 {
@@ -86,7 +87,7 @@ func TestTimeTrackingRightsAndSummary(t *testing.T) {
 		t.Fatalf("own edit: %+v %v", u, err)
 	}
 
-	sum, err := e.svc.TimeSummary(ctx, e.bob, "EXO", core.TimeFilter{Period: "month"})
+	sum, err := e.svc.TimeSummary(ctx, e.carol, "EXO", core.TimeFilter{Period: "month"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func TestTimeTrackingRightsAndSummary(t *testing.T) {
 		t.Fatalf("summary %+v", sum)
 	}
 	day := e.aliceID
-	sum, err = e.svc.TimeSummary(ctx, e.bob, "EXO", core.TimeFilter{UserID: &day, From: "2026-10-27"})
+	sum, err = e.svc.TimeSummary(ctx, e.carol, "EXO", core.TimeFilter{UserID: &day, From: "2026-10-27"})
 	if err != nil || sum.TotalMinutes != 0 {
 		t.Fatalf("filtered summary %+v %v", sum, err)
 	}

@@ -306,7 +306,7 @@
         repository={projects.find((p) => p.key === current.key)?.repository ??
           null}
         role={projects.find((p) => p.key === current.key)?.role ?? ""}
-        canAdmin={user.is_admin ||
+        canAdmin={user.is_superadmin ||
           projects.find((p) => p.key === current.key)?.role === "admin"}
         view={current.view}
         section={current.section ?? ""}
@@ -319,7 +319,7 @@
     {:else if route.path === "/board"}
       <PageHero title={t("cross.title")} description={t("cross.intro")} />
       <div class="fill"><Board projects={allKeys} /></div>
-    {:else if route.path.startsWith("/admin") && user.is_admin}
+    {:else if route.path.startsWith("/admin") && user.is_superadmin}
       <Admin {user} section={route.path.split("/")[2] ?? "users"} />
     {:else if route.path.startsWith("/settings")}
       <Settings

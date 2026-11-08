@@ -20,7 +20,7 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, email, name, is_admin, must_change_password, deactivated_at, created_at FROM users ORDER BY name`)
+	rows, err := s.db.R.Query(`SELECT id, email, name, is_superadmin, must_change_password, deactivated_at, created_at FROM users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +29,7 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 	for rows.Next() {
 		var u AdminUser
 		var off sql.NullInt64
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.MustChangePassword, &off, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.MustChangePassword, &off, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		if off.Valid {
@@ -40,34 +40,34 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 	return out, rows.Err()
 }
 
-// activeAdmins counts admins that can still sign in, optionally ignoring one user.
-func activeAdmins(tx *sql.Tx, except int64) (int, error) {
+// activeSuperadmins counts admins that can still sign in, optionally ignoring one user.
+func activeSuperadmins(tx *sql.Tx, except int64) (int, error) {
 	var n int
-	err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE is_admin = 1 AND deactivated_at IS NULL AND id <> ?`, except).Scan(&n)
+	err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE is_superadmin = 1 AND deactivated_at IS NULL AND id <> ?`, except).Scan(&n)
 	return n, err
 }
 
-// SetUserAdmin grants or removes global admin. The last active admin cannot be demoted.
-func (s *Service) SetUserAdmin(ctx context.Context, a auth.Actor, id int64, admin bool) error {
+// SetUserSuperadmin grants or removes global admin. The last active admin cannot be demoted.
+func (s *Service) SetUserSuperadmin(ctx context.Context, a auth.Actor, id int64, admin bool) error {
 	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
 		if !admin {
-			if n, err := activeAdmins(tx, id); err != nil {
+			if n, err := activeSuperadmins(tx, id); err != nil {
 				return err
 			} else if n == 0 {
-				return rule("there must be at least one active admin")
+				return rule("there must be at least one active superadmin")
 			}
 		}
-		res, err := tx.Exec(`UPDATE users SET is_admin = ? WHERE id = ?`, admin, id)
+		res, err := tx.Exec(`UPDATE users SET is_superadmin = ? WHERE id = ?`, admin, id)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotFound
 		}
-		return s.journal(ctx, tx, a, change{Operation: "user.admin", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{"is_admin": admin}})
+		return s.journal(ctx, tx, a, change{Operation: "user.admin", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{"is_superadmin": admin}})
 	})
 }
 
@@ -82,17 +82,17 @@ func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, act
 	}
 	return s.tx(func(tx *sql.Tx) error {
 		var admin bool
-		if err := tx.QueryRow(`SELECT is_admin FROM users WHERE id = ?`, id).Scan(&admin); err != nil {
+		if err := tx.QueryRow(`SELECT is_superadmin FROM users WHERE id = ?`, id).Scan(&admin); err != nil {
 			if err == sql.ErrNoRows {
 				return ErrNotFound
 			}
 			return err
 		}
 		if !active && admin {
-			if n, err := activeAdmins(tx, id); err != nil {
+			if n, err := activeSuperadmins(tx, id); err != nil {
 				return err
 			} else if n == 0 {
-				return rule("there must be at least one active admin")
+				return rule("there must be at least one active superadmin")
 			}
 		}
 		if !active {
@@ -199,7 +199,7 @@ func (s *Service) AuditLog(ctx context.Context, a auth.Actor, f AuditFilter) ([]
 
 // AdminUserPatch is a set of administrator changes to one account, applied together.
 type AdminUserPatch struct {
-	IsAdmin            *bool
+	IsSuperadmin       *bool
 	Active             *bool
 	ResetTOTP          bool
 	ForcePasswordReset bool
@@ -221,8 +221,8 @@ func (s *Service) UpdateUser(ctx context.Context, a auth.Actor, id int64, p Admi
 				return err
 			}
 		}
-		if p.IsAdmin != nil {
-			if err := s.SetUserAdmin(ctx, a, id, *p.IsAdmin); err != nil {
+		if p.IsSuperadmin != nil {
+			if err := s.SetUserSuperadmin(ctx, a, id, *p.IsSuperadmin); err != nil {
 				return err
 			}
 		}

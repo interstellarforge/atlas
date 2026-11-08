@@ -52,8 +52,8 @@ func (s *Service) ChangeEmail(ctx context.Context, a auth.Actor, email, password
 			}
 			return err
 		}
-		if err := tx.QueryRow(`SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users WHERE id = ?`, a.UserID).
-			Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Avatar); err != nil {
+		if err := tx.QueryRow(`SELECT id, email, name, is_superadmin, avatar_path IS NOT NULL FROM users WHERE id = ?`, a.UserID).
+			Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.Avatar); err != nil {
 			return err
 		}
 		return s.journal(ctx, tx, a, change{Operation: "account.email", Target: a.String(), Event: "account.updated", Changes: map[string]any{"from": old, "to": email}})
@@ -75,37 +75,18 @@ func (s *Service) DeleteAccount(ctx context.Context, a auth.Actor, password stri
 			return err
 		}
 		var admin bool
-		if err := tx.QueryRow(`SELECT is_admin, avatar_path FROM users WHERE id = ?`, a.UserID).Scan(&admin, &avatar); err != nil {
+		if err := tx.QueryRow(`SELECT is_superadmin, avatar_path FROM users WHERE id = ?`, a.UserID).Scan(&admin, &avatar); err != nil {
 			return err
 		}
 		if admin {
-			if n, err := activeAdmins(tx, a.UserID); err != nil {
+			if n, err := activeSuperadmins(tx, a.UserID); err != nil {
 				return err
 			} else if n == 0 {
-				return rule("you are the only admin; make someone else admin first")
+				return rule("you are the only superadmin; make someone else superadmin first")
 			}
 		}
 		if err := guardOrgAdminLoss(tx, a.UserID); err != nil {
 			return err
-		}
-		rows, err := tx.Query(`SELECT project_id FROM project_members WHERE user_id = ?`, a.UserID)
-		if err != nil {
-			return err
-		}
-		var projects []int64
-		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			projects = append(projects, id)
-		}
-		rows.Close()
-		for _, id := range projects {
-			if err := s.guardLastAdmin(tx, id, a.UserID); err != nil {
-				return rule("you are the only admin of a project; give someone else admin first")
-			}
 		}
 		if err := scrubAuditPII(tx, a); err != nil {
 			return err
@@ -125,7 +106,7 @@ func (s *Service) DeleteAccount(ctx context.Context, a auth.Actor, password stri
 			{`DELETE FROM notifications WHERE user_id = ?`, []any{a.UserID}},
 			{`DELETE FROM recovery_codes WHERE user_id = ?`, []any{a.UserID}},
 			{`UPDATE work_items SET assignee_id = NULL WHERE assignee_id = ?`, []any{a.UserID}},
-			{`UPDATE users SET name = 'Deleted user', email = ?, password_hash = ?, is_admin = 0, deactivated_at = ?, avatar_path = NULL,
+			{`UPDATE users SET name = 'Deleted user', email = ?, password_hash = ?, is_superadmin = 0, deactivated_at = ?, avatar_path = NULL,
 				totp_secret = NULL, totp_pending = NULL, totp_enabled = 0, preferences = '{}' WHERE id = ?`,
 				[]any{"deleted-" + strconv.FormatInt(a.UserID, 10) + "@deleted.invalid", "!" + hex.EncodeToString(junk), now, a.UserID}},
 		}
@@ -213,7 +194,10 @@ func (s *Service) AvatarThumb(ctx context.Context, a auth.Actor, userID int64) (
 		return "", ErrForbidden
 	}
 	if a.Kind == auth.KindToken {
-		q, args := s.sharedUsersQuery(a, s.IsSuperadmin(a))
+		q, args, err := s.sharedUsersQuery(a)
+		if err != nil {
+			return "", err
+		}
 		var n int
 		if err := s.db.R.QueryRow(`SELECT COUNT(*) FROM (`+q+`) WHERE id = ?`, append(args, userID)...).Scan(&n); err != nil || n == 0 {
 			return "", ErrNotFound

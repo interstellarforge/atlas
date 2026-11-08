@@ -66,7 +66,6 @@
   let policy = $state<Policy | undefined>();
   let invites = $state<Invite[]>([]);
   let inviteEmail = $state("");
-  let inviteAdmin = $state(false);
   let inviteDays = $state(7);
   let inviteLink = $state("");
   let itemTemplates = $state<ItemTemplate[]>([]);
@@ -233,7 +232,8 @@
           {#if u.deactivated_at}<span class="chip warn"
               >{t("admin.deactivated")}</span
             >{/if}
-          {#if u.is_admin}<span class="chip type">{t("admin.admin")}</span>{/if}
+          {#if u.is_superadmin}<span class="chip type">{t("admin.admin")}</span
+            >{/if}
           {#if u.must_change_password}<span class="chip warn"
               >{t("admin.mustChange")}</span
             >{/if}
@@ -241,10 +241,10 @@
             type="button"
             onclick={() =>
               void run(t("settings.saved"), async () => {
-                await patchAdminUser(u.id, { is_admin: !u.is_admin });
+                await patchAdminUser(u.id, { is_superadmin: !u.is_superadmin });
                 await loadUsers();
               })}
-            >{u.is_admin
+            >{u.is_superadmin
               ? t("admin.removeAdmin")
               : t("admin.makeAdmin")}</button
           >
@@ -287,7 +287,7 @@
     onsubmit={(e) => {
       e.preventDefault();
       void run(t("admin.userCreated"), async () => {
-        await createUser({ email, name, password, is_admin: isAdmin });
+        await createUser({ email, name, password, is_superadmin: isAdmin });
         email = "";
         name = "";
         password = "";
@@ -414,8 +414,6 @@
                   })}</span
             >
           </div>
-          {#if inv.is_admin}<span class="chip type">{t("admin.admin")}</span
-            >{/if}
           {#if !inv.used_at}
             <button
               type="button"
@@ -436,12 +434,10 @@
         void run(t("admin.inviteCreated"), async () => {
           const made = await createInvite({
             email: inviteEmail,
-            is_admin: inviteAdmin,
             days: inviteDays,
           });
           inviteLink = `${location.origin}/#/register?invite=${made.code}`;
           inviteEmail = "";
-          inviteAdmin = false;
           invites = await listInvites();
         });
       }}
@@ -459,11 +455,6 @@
         aria-label={t("admin.inviteDays")}
         bind:value={inviteDays}
       />
-      <label class="check"
-        ><input type="checkbox" bind:checked={inviteAdmin} />{t(
-          "admin.admin",
-        )}</label
-      >
       <button class="primary" type="submit">{t("admin.createInvite")}</button>
     </form>
   </section>

@@ -3,27 +3,70 @@ package core
 import (
 	"database/sql"
 	"errors"
+	"slices"
+	"strings"
 
 	"github.com/kees/atlas/internal/auth"
 )
 
-// Authorization decisions (ADR-0029). The Actor carries identity only; account status and global rights are read
-// from the database on every decision, so revoking or suspending applies to open sessions and tokens at once.
+// Authorization decisions (ADR-0029). The Actor carries identity only; account status and rights are read from
+// the database on every decision, so revoking or suspending applies to open sessions and tokens at once.
 //
-// shortcut: until the ORG 2 data migration the global-admin source is the legacy users.is_admin column and project
-// rights still come from role_actions. ORG 2 switches this file to is_superadmin, organization membership and the
-// single member role; no other file may decide on those columns.
+// Levels on a project: SUPERADMIN and the ADMIN of the project's organization hold every action without any
+// membership; a USER needs both a membership of the organization and a project_members row and holds
+// MemberActions. A project without organization (not yet migrated) is reachable by a SUPERADMIN only.
+// No other file may decide on is_superadmin or the membership tables.
+
+// MemberActions is the fixed action set of the single project role "member" (ADR-0029). Organization ADMINs and
+// SUPERADMINs hold every action in Actions. context.write is included because members hold it today.
+var MemberActions = []string{"view", "export", "item.create", "item.update", "comment", "import", "time.log", "context.write"}
+
+func memberAllows(act action) bool { return slices.Contains(MemberActions, string(act)) }
 
 // standing is the live state of the actor's account.
 type standing struct{ active, super bool }
 
 func (s *Service) standing(q queryer, a auth.Actor) (standing, error) {
 	var st standing
-	err := q.QueryRow(`SELECT deactivated_at IS NULL, is_admin = 1 FROM users WHERE id = ?`, a.UserID).Scan(&st.active, &st.super)
+	err := q.QueryRow(`SELECT deactivated_at IS NULL, is_superadmin = 1 FROM users WHERE id = ?`, a.UserID).Scan(&st.active, &st.super)
 	if errors.Is(err, sql.ErrNoRows) {
 		return standing{}, nil // unknown account: fail closed
 	}
 	return st, err
+}
+
+type level int
+
+const (
+	levelNone level = iota
+	levelMember
+	levelAdmin
+)
+
+// projectLevel is what the user may do on a project, from the tables as they are now.
+func projectLevel(q queryer, userID int64, st standing, orgID sql.NullInt64, projectID int64) (level, error) {
+	if !st.active {
+		return levelNone, nil
+	}
+	if st.super {
+		return levelAdmin, nil
+	}
+	if !orgID.Valid {
+		return levelNone, nil
+	}
+	var orgRole string
+	var member bool
+	err := q.QueryRow(`SELECT COALESCE((SELECT role FROM organization_memberships WHERE organization_id = ? AND user_id = ?), ''),
+		EXISTS (SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?)`, orgID.Int64, userID, projectID, userID).Scan(&orgRole, &member)
+	switch {
+	case err != nil:
+		return levelNone, err
+	case orgRole == "admin":
+		return levelAdmin, nil
+	case orgRole != "" && member:
+		return levelMember, nil
+	}
+	return levelNone, nil
 }
 
 // IsSuperadmin reports whether the actor is an active global administrator acting through a user session.
@@ -44,26 +87,59 @@ func (s *Service) adminOnly(a auth.Actor) error {
 	return nil
 }
 
-// canRead reports whether a user can see a project: active global admin or member.
+// canRead reports whether a user can see a project by key.
 func (s *Service) canRead(q queryer, userID int64, projectKey string) (bool, error) {
-	var ok int
-	err := q.QueryRow(`SELECT 1 FROM users u WHERE u.id = ? AND u.deactivated_at IS NULL AND (u.is_admin = 1 OR EXISTS (
-		SELECT 1 FROM project_members m JOIN projects p ON p.id = m.project_id WHERE m.user_id = u.id AND p.key = ?))`, userID, projectKey).Scan(&ok)
+	var id int64
+	err := q.QueryRow(`SELECT id FROM projects WHERE key = ?`, projectKey).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	return canReachProject(q, userID, id)
 }
 
-// canReachProject is canRead by project id.
+// canReachProject reports whether a user can see a project by id (assignees, notification recipients).
 func canReachProject(q queryer, userID, projectID int64) (bool, error) {
-	var ok int
-	err := q.QueryRow(`SELECT 1 FROM users u WHERE u.id = ? AND u.deactivated_at IS NULL AND (u.is_admin = 1 OR
-		EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = ? AND m.user_id = u.id))`, userID, projectID).Scan(&ok)
+	var org sql.NullInt64
+	var archived bool
+	err := q.QueryRow(`SELECT p.organization_id, COALESCE(o.status = 'archived', 0) FROM projects p
+		LEFT JOIN organizations o ON o.id = p.organization_id WHERE p.id = ?`, projectID).Scan(&org, &archived)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	var st standing
+	if err := q.QueryRow(`SELECT deactivated_at IS NULL, is_superadmin = 1 FROM users WHERE id = ?`, userID).Scan(&st.active, &st.super); errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if archived && !st.super {
+		return false, nil
+	}
+	lvl, err := projectLevel(q, userID, st, org, projectID)
+	return lvl != levelNone, err
+}
+
+// sharedUsersQuery selects the users that are members of a project the actor can read (token limits included).
+func (s *Service) sharedUsersQuery(a auth.Actor) (string, []any, error) {
+	readable, err := s.readableProjects(s.db.R, a)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(readable) == 0 {
+		return `SELECT id, email, name, is_superadmin, avatar_path IS NOT NULL FROM users WHERE 1 = 0`, nil, nil
+	}
+	args := make([]any, 0, len(readable))
+	for id := range readable {
+		args = append(args, id)
+	}
+	return `SELECT id, email, name, is_superadmin, avatar_path IS NOT NULL FROM users WHERE id IN (
+		SELECT user_id FROM project_members WHERE project_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(args)), ",") + `)) ORDER BY name`, args, nil
 }
 
 // orgAction is what an actor wants to do inside an organization. Creating and archiving organizations is

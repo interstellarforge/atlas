@@ -20,7 +20,7 @@ Authorization today is `core.Service.access` (internal/core/core.go) reading `Ac
 6. **Initial ADMIN.** Creating an organization requires an initial ADMIN (ADR-0027) and the migration assigns one (ADR-0028), so the last-ADMIN guard never starts violated.
 
 ### Actions
-- Member set: `view`, `export`, `item.create`, `item.update`, `comment`, `import`, `time.log`.
+- Member set (`core.MemberActions`): `view`, `export`, `item.create`, `item.update`, `comment`, `import`, `time.log`, `context.write`. `context.verify` and every management action belong to ADMIN and SUPERADMIN.
 - Organization/project management (ADMIN of that organization, SUPERADMIN): `workflow`, `project.update`, `members`, `tokens`, `webhooks`, `project.create`, `project.archive`, `org.update`, `org.members`, `org.admins` (never grants SUPERADMIN), `org.audit`.
 - Server (SUPERADMIN only): `server.settings`, `server.users`, `server.audit`, `org.create`, `org.archive`, `org.any` (open any organization without membership).
 - Everyone active: read own organizations, assigned projects and own effective access. Another user's effective access: SUPERADMIN, or ADMIN for members of their organizations.
@@ -61,6 +61,12 @@ Errors: `ErrUnauthorized` (401), `ErrForbidden` (403), `ErrNotFound` (404), nil.
 - Lock not acquired within `busy_timeout`: 503, nothing applied, no audit or event, guard never skipped.
 - One transaction covers the change, revocation of sessions/tokens, audit and change_event. Events go out after commit.
 - Status transitions and invitation acceptance are compare-and-set (`WHERE status = expected`, check rows affected).
+
+## Implementation (M1)
+
+- `internal/core/authz.go` decides; the Actor has no privilege flag; `is_admin`, `role_actions` and the roles tables are read only by the data migration (`TestLegacyAuthorizationIsNotRead`).
+- Only a SUPERADMIN or an organization ADMIN creates projects; the creator no longer becomes a project admin. `Project.role` is `admin` for inherited management and `member` for explicit members.
+- A project without organization is reachable by a SUPERADMIN only; the server refuses to start on an unmigrated database.
 
 ## Consequences
 

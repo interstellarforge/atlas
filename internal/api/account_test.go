@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -154,16 +155,15 @@ func TestProjectTokens(t *testing.T) {
 			t.Fatalf("member: %d %s", w.Code, w.Body)
 		}
 	}
-	member("EXO", ann.ID, "admin")
+	e.orgAdmin(t, ann.ID) // administers every project of the organization
 	member("EXO", bob.ID, "member")
-	member("OTH", ann.ID, "member")
 	annS, bobS := loginAs(e, t, "ann@example.com", "password-123"), loginAs(e, t, "bob@example.com", "password-123")
 
 	if w := e.do("POST", "/api/v1/projects/EXO/tokens", map[string]any{"name": "ci"}, bobS); w.Code != 403 {
 		t.Fatalf("member created a project token: %d", w.Code)
 	}
-	if w := e.do("POST", "/api/v1/projects/OTH/tokens", map[string]any{"name": "ci"}, annS); w.Code != 403 {
-		t.Fatalf("non-admin of OTH created a token: %d", w.Code)
+	if w := e.do("POST", "/api/v1/projects/OTH/tokens", map[string]any{"name": "ci"}, bobS); w.Code != 404 {
+		t.Fatalf("a user outside OTH created a token there: %d", w.Code)
 	}
 	w := e.do("POST", "/api/v1/projects/EXO/tokens", map[string]any{"name": "ci", "write": false}, annS)
 	if w.Code != 201 {
@@ -194,9 +194,9 @@ func TestProjectTokens(t *testing.T) {
 		t.Fatalf("list: %+v", list)
 	}
 
-	// The owner leaves the project: the token is revoked and stops working.
-	if w := e.do("DELETE", "/api/v1/projects/EXO/members/"+strconv.FormatInt(ann.ID, 10), nil, kees); w.Code != 204 {
-		t.Fatalf("remove member: %d %s", w.Code, w.Body)
+	// The owner leaves the organization: the token is revoked and stops working.
+	if err := e.svc.RemoveOrgMember(context.Background(), auth.Actor{Kind: auth.KindHuman, UserID: 1}, "MAIN", ann.ID, false); err != nil {
+		t.Fatalf("remove member: %v", err)
 	}
 	if w := e.do("GET", "/api/v1/items?project=EXO", nil, bearer); w.Code != 401 {
 		t.Fatalf("token of a removed owner still works: %d", w.Code)

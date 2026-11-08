@@ -61,14 +61,14 @@ func TestAdminOnlyAndDeactivation(t *testing.T) {
 	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"active": false}, kees); w.Code != 422 {
 		t.Fatalf("self-deactivation: %d", w.Code)
 	}
-	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"is_admin": false}, kees); w.Code != 422 {
+	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"is_superadmin": false}, kees); w.Code != 422 {
 		t.Fatalf("demoting the last admin: %d", w.Code)
 	}
 	// With a second admin the first can step down.
-	if w := e.do("PATCH", "/api/v1/admin/users/"+id, map[string]any{"is_admin": true}, kees); w.Code != 204 {
+	if w := e.do("PATCH", "/api/v1/admin/users/"+id, map[string]any{"is_superadmin": true}, kees); w.Code != 204 {
 		t.Fatalf("promote: %d", w.Code)
 	}
-	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"is_admin": false}, kees); w.Code != 204 {
+	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"is_superadmin": false}, kees); w.Code != 204 {
 		t.Fatalf("demote with another admin around: %d", w.Code)
 	}
 }
@@ -104,12 +104,16 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 	e.do("PUT", "/api/v1/projects/EXO/time-tracking", map[string]any{"enabled": true}, kees)
 	e.do("POST", "/api/v1/projects/EXO/context", map[string]any{"key": "seed", "category": "pitfall", "title": "Seed", "summary": "s"}, kees)
 	roles := map[string]func(*http.Request){}
-	for _, r := range []string{"viewer", "member", "admin"} {
+	for _, r := range []string{"member", "admin"} { // admin = ADMIN of the organization (inherited)
 		u, err := e.auth.CreateUser(r+"@example.com", r, "password-123", false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(u.ID, 10), map[string]any{"role": r}, kees)
+		if r == "admin" {
+			e.orgAdmin(t, u.ID)
+		} else {
+			e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(u.ID, 10), map[string]any{"role": "member"}, kees)
+		}
 		roles[r] = loginAs(e, t, r+"@example.com", "password-123")
 	}
 	try := map[string]func(role string, as func(*http.Request)) int{
@@ -137,7 +141,7 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 			return e.do("PATCH", "/api/v1/projects/EXO", map[string]any{"name": "EXO"}, as).Code
 		},
 		"members": func(_ string, as func(*http.Request)) int {
-			return e.do("PUT", "/api/v1/projects/EXO/members/1", map[string]any{"role": "admin"}, as).Code
+			return e.do("PUT", "/api/v1/projects/EXO/members/1", map[string]any{"role": "member"}, as).Code
 		},
 		"time.log": func(_ string, as func(*http.Request)) int {
 			return e.do("POST", "/api/v1/items/EXO-1/time", map[string]any{"duration": "5m"}, as).Code
@@ -156,7 +160,7 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 		Items   []core.Role
 		Actions []string
 	}](t, e.do("GET", "/api/v1/roles", nil, kees))
-	if len(matrix.Items) != 3 {
+	if len(matrix.Items) != 1 || matrix.Items[0].Name != "member" {
 		t.Fatalf("roles: %+v", matrix.Items)
 	}
 	for _, act := range matrix.Actions {
@@ -164,11 +168,11 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 		if !ok {
 			t.Fatalf("action %q has no check", act)
 		}
-		for _, role := range matrix.Items {
-			want := slices.Contains(role.Actions, act)
-			code := f(role.Name, roles[role.Name])
+		for _, who := range []string{"member", "admin"} {
+			want := who == "admin" || slices.Contains(matrix.Items[0].Actions, act)
+			code := f(who, roles[who])
 			if allowed := code < 300; allowed != want {
-				t.Errorf("%s as %s: matrix says %v, got HTTP %d", act, role.Name, want, code)
+				t.Errorf("%s as %s: matrix says %v, got HTTP %d", act, who, want, code)
 			}
 		}
 	}
@@ -192,8 +196,11 @@ func TestRolesAreNotEditable(t *testing.T) {
 	}
 	e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "member"}, kees)
 	member := loginAs(e, t, "m@example.com", "password-123")
-	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "admin"}, member).Code; c != 403 {
-		t.Errorf("self-promotion to admin: HTTP %d, want 403", c)
+	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "admin"}, member).Code; c != 400 {
+		t.Errorf("a role that does not exist: HTTP %d, want 400", c)
+	}
+	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "member"}, member).Code; c != 403 {
+		t.Errorf("a member managing members: HTTP %d, want 403", c)
 	}
 }
 

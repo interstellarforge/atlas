@@ -119,19 +119,21 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 		Name string `json:"name"`
 		// Template is a name from project_templates_list; empty uses the default workflow.
 		Template string `json:"template,omitempty" jsonschema:"name of a project template (see project_templates_list)"`
+		// Organization is the organization key; empty means the only organization the token owner administers.
+		Organization string `json:"organization,omitempty" jsonschema:"organization key; optional when you administer exactly one"`
 
 		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"a retry with the same key returns the first result"`
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "project_create",
-		Description: "Create a project, optionally from a project template (workflow, labels, item templates); the token's owner becomes its admin. Tokens limited to specific projects cannot create new ones.",
+		Description: "Create a project, optionally from a project template (workflow, labels, item templates); only a SUPERADMIN or an organization ADMIN may create projects. Tokens limited to specific projects cannot create new ones.",
 		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in projectCreateIn) (*sdk.CallToolResult, any, error) {
 		out, failed := write(ctx, svc, writes, a, 1, "project_create", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {
 			var p core.Project
 			var err error
 			if in.Template == "" {
-				p, err = s.CreateProject(ctx, a, in.Key, in.Name)
+				p, err = s.CreateProjectIn(ctx, a, in.Organization, in.Key, in.Name)
 			} else {
 				var id int64
 				if id, err = projectTemplateID(ctx, s, a, in.Template); err == nil {

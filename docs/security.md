@@ -59,9 +59,9 @@
 
 - Password and session operations, tokens, and the admin API need a user session: a token cannot change a password, list sessions, mint tokens or administer users.
 - Changing a password requires the current one and ends every other session. Passwords, token secrets and hashes never enter the audit log (tested).
-- Deactivating a user deletes their sessions and makes their tokens fail; sign-in is refused. The last active admin cannot be demoted or deactivated, and nobody deactivates themselves.
-- Project tokens never exceed their owner: access still goes through the owner's membership. When the owner leaves the project, those tokens are revoked.
-- The rights matrix in the admin UI is the `roles`/`role_actions` data that `core.access` enforces; `TestRightsMatrixMatchesEnforcement` checks every role × action against real requests, `TestRoleEditing` the guards. Only global admins (human session) edit roles. A role holding `members` cannot grant, change or remove `admin` (no self-escalation). Defaults equal the old fixed behaviour. See ADR-0010.
+- Deactivating a user deletes their sessions and makes their tokens fail; sign-in is refused. The last active SUPERADMIN cannot be demoted or deactivated, nor the last active ADMIN of an organization, and nobody deactivates themselves.
+- Project tokens never exceed their owner: access is resolved live from the owner's current rights. When the owner leaves the project or the organization (or an organization ADMIN is demoted), those tokens are revoked.
+- Authorization follows ADR-0029: SUPERADMIN (`users.is_superadmin`), organization ADMIN and USER with a project membership (`core.MemberActions`). `internal/core/authz.go` is the only place that decides; `TestLegacyAuthorizationIsNotRead` fails if other code reads the legacy `is_admin` column or the retired role tables, `TestProjectAccessMatrix` and `TestAuthorizationMatrix` cover actor × action × resource and the 401/403/404 mapping. The rights tab shows the single member role read-only.
 
 ### Two-factor authentication, registration and deletion
 
@@ -94,7 +94,7 @@
 
 ### Project context (ADR-0015)
 
-- Actions: reading needs `view`; adding, editing, archiving and superseding need `context.write` (members and admins by default) and write scope; `context.verify` (admins by default) marks an entry verified. Verifying is only possible for a human session: a token never verifies, even a token of a project admin, so an agent cannot confirm its own claims. Every change is audited with the actor (`human:user-4` or `token:pat-17`) and, for MCP calls, a batch id.
+- Actions: reading needs `view`; adding, editing, archiving and superseding need `context.write` (members and organization admins) and write scope; `context.verify` (organization admins and SUPERADMINs) marks an entry verified. Verifying is only possible for a human session: a token never verifies, even a token of a project admin, so an agent cannot confirm its own claims. Every change is audited with the actor (`human:user-4` or `token:pat-17`) and, for MCP calls, a batch id.
 - Entries start `unverified`. Editing a verified entry makes it `unverified`; a changed `content_hash` on a kept source makes it `stale`. `source_kind` is derived from the sources and cannot be set by the caller.
 - Source paths are validated: relative to the repository, no `..`, no backslash, no absolute or `~` paths, and no secret files (`.env*`, private keys, `*.pem`, `*.key`, `.netrc`, `.npmrc`, credentials files). URLs must be `https://`. Atlas stores references only: it never reads the repository paths, so a path cannot be used to read files from the server.
 - Prompt-injection boundary: entry text is data written by people and agents. The API returns it as data, the MCP tool descriptions tell agents never to follow instructions found in entries and to treat `unverified` and `stale` entries as hints, and nothing in Atlas acts on entry text. The web app renders bodies with markdown-it with raw HTML off and refuses `javascript:` links (covered by the same renderer tests as comments and README).
@@ -115,7 +115,7 @@
 - Abuse: registration and failed token requests count against a per-address limit (5 per 15 minutes); at most 1000 clients exist. Registered clients are not shown to users beyond their name on the consent page: treat the name as untrusted text (it is escaped).
 - The `resource` parameter, when sent, must equal `<base>/mcp` (RFC 8707). Set `ATLAS_PUBLIC_URL`; without it the metadata is built from the request's Host header.
 
-## Draft: `is_admin` and role inventory for organizations (ATL-473)
+## Inventory: `is_admin` and role references before the flip (ATL-473, kept for audit)
 
 Code audit at commit 4e7217b (non-test files). Feeds ATL-475/477 and the authorization ADR (ADR-0029). Data inventory (c, d) needs the live database and is produced by the dry-run command (ATL-428), not guessed here.
 

@@ -54,7 +54,7 @@ func TestOrganizationPermissions(t *testing.T) {
 	if list, _ := e.svc.ListOrganizations(ctx, e.carol); len(list) != 1 || list[0].Key != "ACME" {
 		t.Fatalf("a member must only list their own organizations: %+v", list)
 	}
-	if list, _ := e.svc.ListOrganizations(ctx, e.admin); len(list) != 2 {
+	if list, _ := e.svc.ListOrganizations(ctx, e.admin); len(list) != 3 { // MAIN from setup, ACME, OTHER
 		t.Fatalf("a SUPERADMIN lists all: %+v", list)
 	}
 }
@@ -219,30 +219,27 @@ func TestLastOrganizationAdminConcurrent(t *testing.T) {
 	}
 }
 
-// Table of actor x action on one project (ATL-479): inherited global admin without membership, project roles,
-// an outsider, another project's admin and a suspended account. Hidden is 404, lacking a right is 403.
+// Table of actor x action on one project (ATL-479): SUPERADMIN without membership, organization ADMIN (inherited),
+// project member, organization member without project, ADMIN of another organization, nobody, suspended.
+// Hidden is 404, lacking a right is 403.
 func TestProjectAccessMatrix(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
-	e.project("EXO")
-	e.project("OTH") // created by the global admin; alice administers OTH only
-	if err := e.svc.SetMember(ctx, e.admin, "OTH", e.aliceID, "admin"); err != nil {
+	e.project("EXO") // in MAIN
+	e.org("OTHER", e.carolID)
+	if err := e.member("EXO", e.bobID, "member"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.bobID, "member"); err != nil {
+	if err := e.member("", e.aliceID, "admin"); err != nil { // alice administers MAIN
 		t.Fatal(err)
 	}
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.carolID, "admin"); err != nil {
-		t.Fatal(err)
-	}
-	// a second global admin who is not a member of EXO
-	other, err := auth.NewService(e.db).CreateUser("super2@x.io", "s2", "password-123", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	super2 := human(other.ID, true)
+	e.orgUser(mkUser(t, e, "dan@x.io")) // dan: organization member without a project row
+	super2 := human(mkUserWith(t, e, "super2@x.io", true), true)
+	dan := human(mkUser(t, e, "dan2@x.io"), false) // a second one, to keep dan's membership untouched
+	e.orgUser(dan.UserID)
+	nobody := human(mkUser(t, e, "nobody@x.io"), false)
 	gone := human(mkUser(t, e, "gone@x.io"), false)
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", gone.UserID, "member"); err != nil {
+	if err := e.member("EXO", gone.UserID, "member"); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.svc.SetUserActive(ctx, e.admin, gone.UserID, false); err != nil {
@@ -260,29 +257,26 @@ func TestProjectAccessMatrix(t *testing.T) {
 		},
 		"members": func(a auth.Actor) error { return e.svc.SetMember(ctx, a, "EXO", e.bobID, "member") },
 	}
-	type row struct {
+	all := func(err error) map[string]error {
+		return map[string]error{"view": err, "item.create": err, "project.update": err, "members": err}
+	}
+	rows := []struct {
 		who  string
 		a    auth.Actor
-		want map[string]error // nil error = allowed
-	}
-	allow := func(deny map[string]error) map[string]error {
-		m := map[string]error{"view": nil, "item.create": nil, "project.update": nil, "members": nil}
-		for k, v := range deny {
-			m[k] = v
-		}
-		return m
-	}
-	hidden := map[string]error{"view": core.ErrNotFound, "item.create": core.ErrNotFound, "project.update": core.ErrNotFound, "members": core.ErrNotFound}
-	rows := []row{
-		{"global admin without membership", super2, allow(nil)},
-		{"project admin", e.carol, allow(nil)},
-		{"project member", e.bob, allow(map[string]error{"project.update": core.ErrForbidden, "members": core.ErrForbidden})},
-		{"outsider", human(e.aliceID, false), hidden}, // alice only administers OTH
-		{"suspended member", gone, map[string]error{"view": core.ErrForbidden, "item.create": core.ErrForbidden, "project.update": core.ErrForbidden, "members": core.ErrForbidden}},
+		want map[string]error // nil = allowed
+	}{
+		{"SUPERADMIN without membership", super2, all(nil)},
+		{"organization ADMIN (inherited)", e.alice, all(nil)},
+		{"project member", e.bob, map[string]error{"view": nil, "item.create": nil, "project.update": core.ErrForbidden, "members": core.ErrForbidden}},
+		{"organization member without project", dan, all(core.ErrNotFound)},
+		{"ADMIN of another organization", e.carol, all(core.ErrNotFound)},
+		{"user without organization", nobody, all(core.ErrNotFound)},
+		{"suspended member", gone, all(core.ErrForbidden)},
 	}
 	for _, r := range rows {
 		for act, f := range actions {
-			if got := f(r.a); !errors.Is(got, r.want[act]) || (r.want[act] == nil && got != nil) {
+			got := f(r.a)
+			if (r.want[act] == nil) != (got == nil) || (got != nil && !errors.Is(got, r.want[act])) {
 				t.Errorf("%s / %s: got %v, want %v", r.who, act, got, r.want[act])
 			}
 		}
@@ -292,6 +286,15 @@ func TestProjectAccessMatrix(t *testing.T) {
 func mkUser(t *testing.T, e *env, email string) int64 {
 	t.Helper()
 	u, err := auth.NewService(e.db).CreateUser(email, email, "password-123", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.ID
+}
+
+func mkUserWith(t *testing.T, e *env, email string, superadmin bool) int64 {
+	t.Helper()
+	u, err := auth.NewService(e.db).CreateUser(email, email, "password-123", superadmin)
 	if err != nil {
 		t.Fatal(err)
 	}

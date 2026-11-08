@@ -202,19 +202,18 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 			return Project{}, "", ErrNotFound // an archived organization hides its projects
 		}
 	}
-	role, allowed := "admin", true
-	if !st.super {
-		err := q.QueryRow(`SELECT m.role, EXISTS (SELECT 1 FROM role_actions r WHERE r.role = m.role AND r.action = ?)
-			FROM project_members m WHERE m.project_id = ? AND m.user_id = ?`, string(act), p.ID, a.UserID).Scan(&role, &allowed)
-		if errors.Is(err, sql.ErrNoRows) {
-			return Project{}, "", ErrNotFound
-		}
-		if err != nil {
-			return Project{}, "", err
-		}
+	lvl, err := projectLevel(q, a.UserID, st, p.OrganizationID, p.ID)
+	if err != nil {
+		return Project{}, "", err
 	}
-	if !allowed {
+	role := "member"
+	switch {
+	case lvl == levelNone:
+		return Project{}, "", ErrNotFound
+	case lvl == levelMember && !memberAllows(act):
 		return Project{}, "", ErrForbidden
+	case lvl == levelAdmin:
+		role = "admin"
 	}
 	p.Role = role
 	return p, role, nil
@@ -235,9 +234,11 @@ func (s *Service) readableProjects(q queryer, a auth.Actor) (map[int64]string, e
 	query := `SELECT id, key FROM projects`
 	args := []any{}
 	if !st.super {
-		query = `SELECT p.id, p.key FROM projects p JOIN project_members m ON m.project_id = p.id WHERE m.user_id = ?
-			AND NOT EXISTS (SELECT 1 FROM organizations o WHERE o.id = p.organization_id AND o.status = 'archived')`
-		args = append(args, a.UserID)
+		query = `SELECT p.id, p.key FROM projects p
+			JOIN organizations o ON o.id = p.organization_id AND o.status = 'active'
+			JOIN organization_memberships om ON om.organization_id = o.id AND om.user_id = ?
+			WHERE om.role = 'admin' OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = ?)`
+		args = append(args, a.UserID, a.UserID)
 	}
 	rows, err := q.Query(query, args...)
 	if err != nil {

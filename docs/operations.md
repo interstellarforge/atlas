@@ -31,6 +31,21 @@ curl -H "Authorization: Bearer $TOKEN" -X POST --data-binary @exo.json "$URL/api
 
 Always dry-run first. The report lists duplicates, row errors and the source-to-new key mapping. Import is all-or-nothing. There is no UI for export/import yet.
 
+## Move existing data into organizations (ADR-0028)
+
+Only for a database from before organizations. The server refuses to start on such a database ("predates organizations"). A new installation needs nothing: the first admin (`ATLAS_ADMIN_EMAIL`) becomes SUPERADMIN and ADMIN of a default organization (`ATLAS_DEFAULT_ORG_KEY`, `ATLAS_DEFAULT_ORG_NAME`).
+
+```bash
+ATLAS_SUPERADMIN_EMAIL=you@example.com atlas migrate-orgs --dry-run --mapping mapping.json
+ATLAS_SUPERADMIN_EMAIL=you@example.com atlas migrate-orgs --confirm-report <hash from the report> --mapping mapping.json
+```
+
+- `ATLAS_SUPERADMIN_EMAIL` must match one active account that is a legacy admin; it becomes the only SUPERADMIN and ADMIN of the default organization (`ATLAS_DEFAULT_ORG_KEY`, default `DEFAULT`; `ATLAS_DEFAULT_ORG_NAME`).
+- `mapping.json`: `{"admins": {"email": "admin|user|none"}, "roles": {"role": "member|remove"}}`. Other active legacy admins become ADMIN of the default organization unless the mapping says otherwise. A viewer or custom role that members hold needs a decision (`member` may widen access, `remove` takes it away). Project admins become members.
+- The report lists every change per user and project as approved reduction, approved expansion or UNEXPECTED, and the hash of the whole report. Anything UNEXPECTED, an unresolved role or a wrong superadmin makes the command fail.
+- The real run (`--confirm-report`) takes the reviewed hash, writes a backup (kept in `backups/pre-org-migration-<time>`), restores it into a temporary directory and compares its report, then re-plans inside one `BEGIN IMMEDIATE` transaction, aborts if the report changed, applies, verifies both directions and commits. Failure changes nothing. To roll back after success, restore the backup (`atlas restore <dir>`); there is no down-migration.
+- Rehearsal on the seeded dataset: `go run ./cmd/atlas-seed -data-dir ./data -legacy-access`, then `ATLAS_BENCH=1 go test ./benchmarks -run OrgMigration -v`.
+
 ## Other commands
 
 `atlas check paths [--fix]` verifies the materialized item paths.

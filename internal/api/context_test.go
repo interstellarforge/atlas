@@ -32,16 +32,15 @@ func TestRESTContextFlowAndRights(t *testing.T) {
 		e.do("POST", "/api/v1/projects", map[string]any{"key": k, "name": k}, kees)
 	}
 	member, _ := e.auth.CreateUser("member@x.io", "Member", "password-123", false)
-	viewer, _ := e.auth.CreateUser("viewer@x.io", "Viewer", "password-123", false)
+	_, _ = e.auth.CreateUser("viewer@x.io", "Viewer", "password-123", false) // joins the organization only
 	e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(member.ID, 10), map[string]any{"role": "member"}, kees)
-	e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(viewer.ID, 10), map[string]any{"role": "viewer"}, kees)
 	asMember := loginAs(e, t, "member@x.io", "password-123")
 	asViewer := loginAs(e, t, "viewer@x.io", "password-123")
 
 	body := map[string]any{"category": "architecture", "title": "Session handling", "summary": "Cookies plus CSRF header.", "pinned": true,
 		"sources": []any{map[string]any{"type": "file", "path": "docs/security.md"}}}
-	if w := e.do("POST", "/api/v1/projects/EXO/context", body, asViewer); w.Code != 403 {
-		t.Fatalf("viewer create: %d", w.Code)
+	if w := e.do("POST", "/api/v1/projects/EXO/context", body, asViewer); w.Code != 404 {
+		t.Fatalf("org member without project create: %d", w.Code)
 	}
 	w := e.do("POST", "/api/v1/projects/EXO/context", body, asMember)
 	if w.Code != 201 {
@@ -65,9 +64,12 @@ func TestRESTContextFlowAndRights(t *testing.T) {
 		}
 	}
 
-	// Reading: viewer yes, anything outside the project 404, reserved words are not entries.
-	if w := e.do("GET", "/api/v1/projects/EXO/context/session-handling", nil, asViewer); w.Code != 200 || w.Header().Get("ETag") != `"1"` {
-		t.Fatalf("viewer read: %d etag %q", w.Code, w.Header().Get("ETag"))
+	// Reading: a member yes, an organization member without the project 404, reserved words are not entries.
+	if w := e.do("GET", "/api/v1/projects/EXO/context/session-handling", nil, asMember); w.Code != 200 || w.Header().Get("ETag") != `"1"` {
+		t.Fatalf("member read: %d etag %q", w.Code, w.Header().Get("ETag"))
+	}
+	if w := e.do("GET", "/api/v1/projects/EXO/context/session-handling", nil, asViewer); w.Code != 404 {
+		t.Fatalf("org member without the project read: %d", w.Code)
 	}
 	if w := e.do("GET", "/api/v1/projects/OTH/context/session-handling", nil, asMember); w.Code != 404 {
 		t.Fatalf("other project: %d", w.Code)
@@ -133,14 +135,14 @@ func TestRESTContextFlowAndRights(t *testing.T) {
 	if w := e.do("POST", "/api/v1/projects/EXO/context", map[string]any{"category": "pitfall", "title": "Pinned and unverified", "summary": "s", "pinned": true}, asMember); w.Code != 201 {
 		t.Fatalf("second entry: %d", w.Code)
 	}
-	w = e.do("GET", "/api/v1/projects/EXO/context/bootstrap?max_bytes=4096", nil, asViewer)
+	w = e.do("GET", "/api/v1/projects/EXO/context/bootstrap?max_bytes=4096", nil, asMember)
 	if w.Code != 200 || w.Body.Len() > 4096 || strings.Contains(w.Body.String(), `"body"`) || !strings.Contains(w.Body.String(), `"state":"unverified"`) {
 		t.Fatalf("bootstrap: %d %s", w.Code, w.Body)
 	}
-	if w := e.do("GET", "/api/v1/projects/EXO/context/search", nil, asViewer); w.Code != 400 {
+	if w := e.do("GET", "/api/v1/projects/EXO/context/search", nil, asMember); w.Code != 400 {
 		t.Fatalf("search without q: %d", w.Code)
 	}
-	w = e.do("GET", "/api/v1/projects/EXO/context/search?q=rotation", nil, asViewer)
+	w = e.do("GET", "/api/v1/projects/EXO/context/search?q=rotation", nil, asMember)
 	if !strings.Contains(w.Body.String(), `"snippet"`) || !strings.Contains(w.Body.String(), "file:docs/security.md") {
 		t.Fatalf("search: %s", w.Body)
 	}
@@ -152,8 +154,8 @@ func TestRESTContextFlowAndRights(t *testing.T) {
 	if w := e.do("POST", "/api/v1/projects/EXO/context/session-handling/supersede", map[string]any{"by": "only-once"}, asMember); w.Code != 200 {
 		t.Fatalf("supersede: %d %s", w.Code, w.Body)
 	}
-	if w := e.do("DELETE", "/api/v1/projects/EXO/context/only-once", nil, asViewer); w.Code != 403 {
-		t.Fatalf("viewer archive: %d", w.Code)
+	if w := e.do("DELETE", "/api/v1/projects/EXO/context/only-once", nil, asViewer); w.Code != 404 {
+		t.Fatalf("org member without the project archived: %d", w.Code)
 	}
 	if w := e.do("DELETE", "/api/v1/projects/EXO/context/only-once", nil, asMember); w.Code != 200 {
 		t.Fatalf("archive: %d", w.Code)
