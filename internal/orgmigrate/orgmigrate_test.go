@@ -1,6 +1,7 @@
 package orgmigrate_test
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kees/atlas/internal/auth"
+	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/db"
 	"github.com/kees/atlas/internal/orgmigrate"
 	"github.com/kees/atlas/migrations"
@@ -280,5 +282,44 @@ func TestUnusedReviewRequiredRoleDoesNotBlock(t *testing.T) {
 	rep, err := orgmigrate.Plan(d.R, cfg, orgmigrate.Mapping{})
 	if err != nil || len(rep.Blocking) != 0 {
 		t.Fatalf("unused roles blocked the migration: %v %v", err, rep.Blocking)
+	}
+}
+
+// Verify re-implements what the new model grants; this checks that against the real authorization code, so the
+// verification is not self-referential: after the migration every user sees and administers exactly the projects
+// the migrated tables say.
+func TestMigratedAccessMatchesAuthorization(t *testing.T) {
+	d, id := fixture(t)
+	rep, _ := orgmigrate.Plan(d.R, cfg, mapping)
+	if _, err := orgmigrate.Run(d, cfg, mapping, rep.Hash(), orgmigrate.Options{UploadsDir: t.TempDir(), BackupDir: filepath.Join(t.TempDir(), "b")}); err != nil {
+		t.Fatal(err)
+	}
+	svc := core.New(d, auth.NewService(d))
+	ctx := context.Background()
+	want := map[string]map[string]string{ // email -> project -> "admin" | "member" | ""
+		"super@x.io":     {"P1": "admin", "P2": "admin"},
+		"admin2@x.io":    {"P1": "admin", "P2": "admin"},
+		"gone@x.io":      {},
+		"projadmin@x.io": {"P1": "member"},
+		"viewer@x.io":    {"P1": "member"},
+		"wide@x.io":      {},
+		"narrow@x.io":    {"P2": "member"},
+		"same@x.io":      {"P2": "member"},
+		"member@x.io":    {"P1": "member", "P2": "member"},
+		"nobody@x.io":    {},
+	}
+	for email, projects := range want {
+		a := auth.Actor{Kind: auth.KindHuman, UserID: id[email]}
+		for _, key := range []string{"P1", "P2"} {
+			p, err := svc.GetProject(ctx, a, key)
+			switch level := projects[key]; {
+			case level == "" && !errors.Is(err, core.ErrNotFound) && !errors.Is(err, core.ErrForbidden):
+				t.Errorf("%s sees %s (%v)", email, key, err)
+			case level != "" && err != nil:
+				t.Errorf("%s cannot see %s: %v", email, key, err)
+			case level != "" && p.Role != level:
+				t.Errorf("%s on %s: role %q, want %q", email, key, p.Role, level)
+			}
+		}
 	}
 }
