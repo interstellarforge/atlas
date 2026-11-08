@@ -46,7 +46,7 @@
 ## Audit hardening (epic SEC, ADR-0017)
 
 - Creating users is a human-admin session action, journaled like other mutations (`user.create`); tokens, also admin tokens, get `forbidden`.
-- A token lists only users who share a project it may access, without the global admin flag; avatars follow the same rule.
+- People are visible only through a shared organization or project (`visibleUsersQuery`); tokens list only users who share a project they may access; nobody but a SUPERADMIN sees the SUPERADMIN flag; avatars follow the same rule (`TestUserListingIsScoped`, `TestUserListingIsScopedToOrganizations`).
 - Login and registration throttles key on the connection address. Behind a reverse proxy set `ATLAS_TRUSTED_PROXIES`; only then is `X-Forwarded-For` read, from the right, skipping trusted hops.
 - The HTTP server has a 2 minute `ReadTimeout`; JSON bodies must hold exactly one document.
 - The CSP forbids inline scripts; the theme bootstrap is `/theme-init.js`.

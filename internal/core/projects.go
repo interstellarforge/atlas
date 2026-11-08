@@ -186,19 +186,17 @@ type Member struct {
 	Role   string `json:"role"`
 }
 
-// ListUsers lists everyone for a signed-in person (assignee pickers). A token only sees people who share a
-// project it may access, without the global admin flag.
+// ListUsers lists the people the actor may see (assignee pickers; see visibleUsersQuery). Only a SUPERADMIN
+// session sees who else is SUPERADMIN.
 func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 	if !a.Can(auth.ScopeRead) {
 		return nil, ErrForbidden
 	}
-	q, args := `SELECT id, email, name, is_superadmin, avatar_path IS NOT NULL FROM users ORDER BY name`, []any(nil)
-	if a.Kind == auth.KindToken {
-		var err error
-		if q, args, err = s.sharedUsersQuery(a); err != nil {
-			return nil, err
-		}
+	q, args, err := s.visibleUsersQuery(a)
+	if err != nil {
+		return nil, err
 	}
+	showFlag := s.IsSuperadmin(a)
 	rows, err := s.db.R.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -210,7 +208,7 @@ func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.Avatar); err != nil {
 			return nil, err
 		}
-		if a.Kind == auth.KindToken {
+		if !showFlag {
 			u.IsSuperadmin = false
 		}
 		out = append(out, u)

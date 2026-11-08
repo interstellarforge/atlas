@@ -125,6 +125,36 @@ func canReachProject(q queryer, userID, projectID int64) (bool, error) {
 	return lvl != levelNone, err
 }
 
+// visibleUsersQuery selects the people the actor may see (ADR-0027: users outside shared organizations are
+// invisible). A SUPERADMIN session sees everyone. Any other person sees themselves, the members of the
+// organizations they administer, the ADMINs of the organizations they belong to (who administer their projects)
+// and everyone who shares a project with them. A token sees the members of the projects it may read.
+func (s *Service) visibleUsersQuery(a auth.Actor) (string, []any, error) {
+	if a.Kind == auth.KindToken {
+		return s.sharedUsersQuery(a)
+	}
+	st, err := s.standing(s.db.R, a)
+	if err != nil {
+		return "", nil, err
+	}
+	if !st.active {
+		return "", nil, ErrForbidden
+	}
+	const cols = `SELECT id, email, name, is_superadmin, avatar_path IS NOT NULL FROM users`
+	if st.super {
+		return cols + ` ORDER BY name`, nil, nil
+	}
+	return cols + ` WHERE id = ?
+		OR id IN (SELECT m.user_id FROM organization_memberships m
+			JOIN organizations o ON o.id = m.organization_id AND o.status = 'active'
+			WHERE m.organization_id IN (SELECT organization_id FROM organization_memberships WHERE user_id = ? AND role = 'admin'))
+		OR id IN (SELECT m.user_id FROM organization_memberships m
+			JOIN organizations o ON o.id = m.organization_id AND o.status = 'active'
+			WHERE m.role = 'admin' AND m.organization_id IN (SELECT organization_id FROM organization_memberships WHERE user_id = ?))
+		OR id IN (SELECT user_id FROM project_members WHERE project_id IN (SELECT project_id FROM project_members WHERE user_id = ?))
+		ORDER BY name`, []any{a.UserID, a.UserID, a.UserID, a.UserID}, nil
+}
+
 // sharedUsersQuery selects the users that are members of a project the actor can read (token limits included).
 func (s *Service) sharedUsersQuery(a auth.Actor) (string, []any, error) {
 	readable, err := s.readableProjects(s.db.R, a)

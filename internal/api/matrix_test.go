@@ -147,6 +147,35 @@ func TestAuthorizationMatrix(t *testing.T) {
 	}
 }
 
+// TestUserListingIsScoped: a person without a shared project sees neither the others' accounts nor their pictures
+// (ATL-493); a missing user and a hidden one look the same.
+func TestUserListingIsScoped(t *testing.T) {
+	e := setup(t)
+	kees := sessionOf(e, t)
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
+	mk := func(email string) (func(*http.Request), int64) {
+		u, err := e.auth.CreateUser(email, email, "password-123", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return loginAs(e, t, email, "password-123"), u.ID
+	}
+	plain, _ := mk("plain@example.com")
+	_, memberID := mk("member@example.com")
+	list := func(as func(*http.Request)) string { return e.do("GET", "/api/v1/users", nil, as).Body.String() }
+	if body := list(plain); strings.Contains(body, "member@example.com") {
+		t.Fatalf("a stranger lists another account: %s", body)
+	}
+	if body := list(kees); !strings.Contains(body, "member@example.com") || !strings.Contains(body, "plain@example.com") {
+		t.Fatalf("a SUPERADMIN must see everyone: %s", body)
+	}
+	hidden := e.do("GET", "/api/v1/users/"+strconv.FormatInt(memberID, 10)+"/avatar", nil, plain)
+	ghost := e.do("GET", "/api/v1/users/99999/avatar", nil, plain)
+	if hidden.Code != ghost.Code || hidden.Body.String() != ghost.Body.String() {
+		t.Fatalf("hidden user answers %d %q, missing user %d %q", hidden.Code, hidden.Body.String(), ghost.Code, ghost.Body.String())
+	}
+}
+
 // mcpToolKinds classifies every MCP tool. A new tool must be added here on purpose (ATL-446).
 var mcpToolKinds = map[string]string{
 	"projects_list": "read", "project_create": "write", "project_templates_list": "read", "workflow_get": "read",

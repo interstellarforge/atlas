@@ -187,21 +187,18 @@ func (s *Service) RemoveAvatar(ctx context.Context, a auth.Actor) error {
 	return err
 }
 
-// AvatarThumb returns the thumbnail path of a user's picture; any signed-in person may see it (people are listed
-// anyway), a token only for people it can list.
+// AvatarThumb returns the thumbnail path of a user's picture, only for people the actor can list.
 func (s *Service) AvatarThumb(ctx context.Context, a auth.Actor, userID int64) (string, error) {
 	if !a.Can(auth.ScopeRead) || s.media == nil {
 		return "", ErrForbidden
 	}
-	if a.Kind == auth.KindToken {
-		q, args, err := s.sharedUsersQuery(a)
-		if err != nil {
-			return "", err
-		}
-		var n int
-		if err := s.db.R.QueryRow(`SELECT COUNT(*) FROM (`+q+`) WHERE id = ?`, append(args, userID)...).Scan(&n); err != nil || n == 0 {
-			return "", ErrNotFound
-		}
+	q, args, err := s.visibleUsersQuery(a)
+	if err != nil {
+		return "", err
+	}
+	var n int
+	if err := s.db.R.QueryRow(`SELECT COUNT(*) FROM (`+q+`) WHERE id = ?`, append(args, userID)...).Scan(&n); err != nil || n == 0 {
+		return "", ErrNotFound
 	}
 	var p sql.NullString
 	if err := s.db.R.QueryRow(`SELECT avatar_path FROM users WHERE id = ?`, userID).Scan(&p); err != nil || !p.Valid {

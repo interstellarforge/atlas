@@ -300,3 +300,61 @@ func mkUserWith(t *testing.T, e *env, email string, superadmin bool) int64 {
 	}
 	return u.ID
 }
+
+// ATL-493: people are visible only through a shared organization or project (ADR-0027).
+func TestUserListingIsScopedToOrganizations(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.project("EXO")                                           // MAIN: admin = the SUPERADMIN
+	if err := e.member("EXO", e.bobID, "member"); err != nil { // bob works on EXO
+		t.Fatal(err)
+	}
+	e.orgUser(e.carolID)                                    // carol: MAIN member, no shared project with bob
+	e.org("ACME", e.aliceID)                                // alice administers ACME, a different organization
+	stranger := human(mkUser(t, e, "stranger@x.io"), false) // belongs to nothing
+	sees := func(a auth.Actor) map[string]bool {
+		list, err := e.svc.ListUsers(ctx, a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]bool{}
+		for _, u := range list {
+			m[u.Email] = true
+			if u.IsSuperadmin && a.UserID != e.admin.UserID {
+				t.Errorf("%d sees who is SUPERADMIN", a.UserID)
+			}
+		}
+		return m
+	}
+	for name, c := range map[string]struct {
+		who  auth.Actor
+		want []string
+		not  []string
+	}{
+		"member sees self and the organization's admin": {e.bob, []string{"bob@x.io", "admin@x.io"}, []string{"carol@x.io", "alice@x.io", "stranger@x.io"}},
+		"organization member without a shared project":  {e.carol, []string{"carol@x.io", "admin@x.io"}, []string{"bob@x.io", "alice@x.io"}},
+		"admin of another organization":                 {e.alice, []string{"alice@x.io"}, []string{"bob@x.io", "carol@x.io", "admin@x.io"}},
+		"nobody":                                        {stranger, []string{"stranger@x.io"}, []string{"bob@x.io", "alice@x.io", "admin@x.io"}},
+		"SUPERADMIN":                                    {e.admin, []string{"bob@x.io", "alice@x.io", "stranger@x.io", "carol@x.io"}, nil},
+	} {
+		got := sees(c.who)
+		for _, w := range c.want {
+			if !got[w] {
+				t.Errorf("%s: %s is missing", name, w)
+			}
+		}
+		for _, n := range c.not {
+			if got[n] {
+				t.Errorf("%s: %s must not be visible", name, n)
+			}
+		}
+	}
+	// the organization's ADMIN sees every member of it
+	e.orgUser(e.bobID)
+	if err := e.member("", e.carolID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if got := sees(e.carol); !got["bob@x.io"] || got["alice@x.io"] {
+		t.Errorf("an organization admin sees its members only: %v", got)
+	}
+}
