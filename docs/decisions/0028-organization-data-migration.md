@@ -1,6 +1,6 @@
 # ADR-0028: Data migration to organizations, `is_superadmin` and permission-expansion review
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-08
 - Tickets: ATL-449 (story ATL-472); implemented by ATL-405 (ORG 2)
 

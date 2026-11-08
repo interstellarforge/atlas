@@ -20,11 +20,10 @@ type Policy struct {
 	Registration      string `json:"registration"`        // closed (admins create accounts), invite or open
 	AllowedDomain     string `json:"allowed_domain"`      // open registration only: e.g. example.com; empty = any
 	SessionDays       int    `json:"session_days"`        // 1-90
-	DefaultRole       string `json:"default_role"`        // project role used when a member is added without one
 	DoneVisibleDays   int    `json:"done_visible_days"`   // 0-3650: lists hide completed items not updated for this long; 0 = never
 }
 
-var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14, DefaultRole: "member", DoneVisibleDays: 14}
+var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14, DoneVisibleDays: 14}
 
 func loadPolicy(q queryer) Policy {
 	p := defaultPolicy
@@ -47,8 +46,6 @@ func loadPolicy(q queryer) Policy {
 			p.AllowedDomain = v
 		case "session_days":
 			p.SessionDays, _ = strconv.Atoi(v)
-		case "default_role":
-			p.DefaultRole = v
 		case "done_visible_days":
 			if n, err := strconv.Atoi(v); err == nil {
 				p.DoneVisibleDays = n
@@ -79,14 +76,14 @@ func (s *Service) ApplyPolicy() {
 }
 
 func (s *Service) GetPolicy(ctx context.Context, a auth.Actor) (Policy, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return Policy{}, err
 	}
 	return s.Policy(), nil
 }
 
 func (s *Service) SetPolicy(ctx context.Context, a auth.Actor, p Policy) (Policy, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return Policy{}, err
 	}
 	p.AllowedDomain = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(p.AllowedDomain), "@"))
@@ -94,19 +91,9 @@ func (s *Service) SetPolicy(ctx context.Context, a auth.Actor, p Policy) (Policy
 		!slices.Contains([]string{"closed", "invite", "open"}, p.Registration) || strings.ContainsAny(p.AllowedDomain, " @/") {
 		return Policy{}, invalid("min_password_length 8-128, session_days 1-90, done_visible_days 0-3650, registration closed, invite or open, allowed_domain like example.com")
 	}
-	if p.DefaultRole == "" {
-		p.DefaultRole = defaultPolicy.DefaultRole
-	}
 	err := s.tx(func(tx *sql.Tx) error {
-		var known int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM roles WHERE name = ?`, p.DefaultRole).Scan(&known); err != nil {
-			return err
-		}
-		if known == 0 {
-			return invalid("unknown default_role")
-		}
 		for k, v := range map[string]string{"min_password_length": strconv.Itoa(p.MinPasswordLength), "registration": p.Registration,
-			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays), "default_role": p.DefaultRole,
+			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays),
 			"done_visible_days": strconv.Itoa(p.DoneVisibleDays)} {
 			if _, err := tx.Exec(`INSERT INTO instance_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, k, v); err != nil {
 				return err
@@ -153,7 +140,7 @@ type Invite struct {
 // CreateInvite returns the invite code once; only its hash is stored. An invite with an email can only be
 // redeemed with that email. With email set up (ADR-0012) the invite is also mailed; otherwise the admin passes the code on.
 func (s *Service) CreateInvite(ctx context.Context, a auth.Actor, email string, admin bool, days int) (Invite, string, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return Invite{}, "", err
 	}
 	if email = strings.TrimSpace(email); email != "" {
@@ -194,7 +181,7 @@ func (s *Service) CreateInvite(ctx context.Context, a auth.Actor, email string, 
 }
 
 func (s *Service) ListInvites(ctx context.Context, a auth.Actor) ([]Invite, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.R.Query(`SELECT id, email, is_admin, created_at, expires_at, used_at FROM invites ORDER BY id DESC LIMIT 200`)
@@ -218,7 +205,7 @@ func (s *Service) ListInvites(ctx context.Context, a auth.Actor) ([]Invite, erro
 }
 
 func (s *Service) RevokeInvite(ctx context.Context, a auth.Actor, id int64) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {

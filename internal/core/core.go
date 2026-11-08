@@ -130,12 +130,14 @@ func batchFrom(ctx context.Context) any {
 // ---- authorization ----
 
 type Project struct {
-	ID         int64  `json:"-"`
-	Key        string `json:"key"`
-	Name       string `json:"name"`
-	ArchivedAt *int64 `json:"archived_at"`
-	CreatedAt  int64  `json:"created_at"`
-	Role       string `json:"role,omitempty"`
+	ID int64 `json:"-"`
+	// OrganizationID is NULL until the data migration assigns the project (ADR-0028).
+	OrganizationID sql.NullInt64 `json:"-"`
+	Key            string        `json:"key"`
+	Name           string        `json:"name"`
+	ArchivedAt     *int64        `json:"archived_at"`
+	CreatedAt      int64         `json:"created_at"`
+	Role           string        `json:"role,omitempty"`
 	// MergeColumns is true when any category is merged; MergeCategories names them (ADR-0011, ADR-0020).
 	MergeColumns    bool     `json:"merge_columns"`
 	MergeCategories []string `json:"merge_categories"`
@@ -171,8 +173,8 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	var p Project
 	var archived sql.NullInt64
 	var repoURL, repoBranch, merged string
-	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_categories, repo_url, repo_branch, time_tracking FROM projects WHERE key = ?`, key).
-		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &merged, &repoURL, &repoBranch, &p.TimeTracking)
+	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_categories, repo_url, repo_branch, time_tracking, organization_id FROM projects WHERE key = ?`, key).
+		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &merged, &repoURL, &repoBranch, &p.TimeTracking, &p.OrganizationID)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !a.CanProject(p.Key)) {
 		return Project{}, "", ErrNotFound
 	}
@@ -185,8 +187,23 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	p.Repository = linkedRepo(repoURL, repoBranch)
 	p.setMerged(merged)
 
+	st, err := s.standing(q, a)
+	if err != nil {
+		return Project{}, "", err
+	}
+	if !st.active {
+		return Project{}, "", ErrForbidden
+	}
+	if !st.super {
+		var hidden bool
+		if err := q.QueryRow(`SELECT EXISTS (SELECT 1 FROM organizations WHERE id = ? AND status = 'archived')`, p.OrganizationID).Scan(&hidden); err != nil {
+			return Project{}, "", err
+		} else if hidden {
+			return Project{}, "", ErrNotFound // an archived organization hides its projects
+		}
+	}
 	role, allowed := "admin", true
-	if !a.IsAdmin {
+	if !st.super {
 		err := q.QueryRow(`SELECT m.role, EXISTS (SELECT 1 FROM role_actions r WHERE r.role = m.role AND r.action = ?)
 			FROM project_members m WHERE m.project_id = ? AND m.user_id = ?`, string(act), p.ID, a.UserID).Scan(&role, &allowed)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -208,10 +225,18 @@ func (s *Service) readableProjects(q queryer, a auth.Actor) (map[int64]string, e
 	if !a.Can(auth.ScopeRead) {
 		return nil, ErrForbidden
 	}
+	st, err := s.standing(q, a)
+	if err != nil {
+		return nil, err
+	}
+	if !st.active {
+		return nil, ErrForbidden
+	}
 	query := `SELECT id, key FROM projects`
 	args := []any{}
-	if !a.IsAdmin {
-		query = `SELECT p.id, p.key FROM projects p JOIN project_members m ON m.project_id = p.id WHERE m.user_id = ?`
+	if !st.super {
+		query = `SELECT p.id, p.key FROM projects p JOIN project_members m ON m.project_id = p.id WHERE m.user_id = ?
+			AND NOT EXISTS (SELECT 1 FROM organizations o WHERE o.id = p.organization_id AND o.status = 'archived')`
 		args = append(args, a.UserID)
 	}
 	rows, err := q.Query(query, args...)

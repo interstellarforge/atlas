@@ -10,7 +10,7 @@
 ## Authorization
 
 - An admin can force a password change (`must_change_password`): sessions end, the next one may only reach `/auth/me`, logout and `/me/password`. Tokens are not touched. See ADR-0010.
-- Roles per project via `project_members`: built-in `admin` (fixed, all actions), `member` and `viewer` (editable) plus custom roles. Each role is a set of actions in `role_actions` (ADR-0010); every project check in `core` names an action through `Service.access`.
+- Roles per project via `project_members`: built-in `admin`, `member` and `viewer` plus any custom roles that already exist. Roles are frozen: they can no longer be edited (ADR-0029, which supersedes ADR-0010) and are replaced by the organization model in the ORG 2 migration. Each role is a set of actions in `role_actions`; every project check in `core` names an action through `Service.access`, and all account-level decisions live in `internal/core/authz.go`. `/api/v1/admin/*` is refused with 403 before the body is read. `internal/api/matrix_test.go` runs every registered route and MCP tool as each actor; an unclassified route or tool fails the test.
 - Token scopes: `read` and `write` separately, optionally limited to projects. A token never exceeds its owner's rights.
 - Enforced in `core` services, not only in handlers. SSE and `changes_since` filter by permission.
 - Required tests: permission matrix for read/write/other-project access, token scope, revoked token.

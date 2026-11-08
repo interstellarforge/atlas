@@ -9,7 +9,6 @@
     createUser,
     deleteInstanceItemTemplate,
     deleteProjectTemplate,
-    deleteRole,
     getAudit,
     getInstance,
     getMailSettings,
@@ -31,7 +30,6 @@
     saveInstanceItemTemplate,
     saveMailSettings,
     saveProjectTemplate,
-    saveRole,
     sendTestMail,
     setPolicy,
     type UpdateStatus,
@@ -85,7 +83,6 @@
   let users = $state<AdminUser[]>([]);
   let roles = $state<Role[]>([]);
   let roleActions = $state<string[]>([]);
-  let newRole = $state("");
   let settings = $state<Record<string, string | number | boolean>>({});
   let update = $state<UpdateStatus | undefined>();
   let audit = $state<AuditEntry[]>([]);
@@ -113,16 +110,6 @@
     } catch {
       error = t("admin.loadFailed");
     }
-  }
-
-  function toggleAction(r: Role, action: string, on: boolean): Promise<void> {
-    const actions = on
-      ? [...r.actions, action]
-      : r.actions.filter((x) => x !== action);
-    return run(t("admin.roleSaved"), async () => {
-      await saveRole(r.name, actions);
-      await loadRoles();
-    });
   }
 
   async function run(
@@ -196,7 +183,6 @@
       void loadUsers().catch(() => (error = t("admin.loadFailed")));
     if (active === "access") {
       void getPolicy().then((p) => (policy = p));
-      void loadRoles();
       void listInvites().then((l) => (invites = l));
     }
     if (active === "templates")
@@ -401,15 +387,6 @@
         />
         <span class="hint">{t("admin.doneVisibleDaysHint")}</span>
       </label>
-      <label>
-        {t("admin.defaultRole")}
-        <select bind:value={policy.default_role}>
-          {#each roles as r (r.name)}
-            <option value={r.name}>{roleLabel(r.name)}</option>
-          {/each}
-        </select>
-      </label>
-      <p class="muted hint">{t("admin.defaultRoleHint")}</p>
       <div>
         <button class="primary" type="submit">{t("settings.save")}</button>
       </div>
@@ -649,19 +626,7 @@
         <tr>
           <th scope="col">{t("admin.action")}</th>
           {#each roles as r (r.name)}
-            <th scope="col"
-              >{roleLabel(r.name)}
-              {#if !r.builtin}
-                <button
-                  type="button"
-                  onclick={() =>
-                    void run(t("admin.roleDeleted"), async () => {
-                      await deleteRole(r.name);
-                      await loadRoles();
-                    })}>{t("admin.deleteRole")}</button
-                >
-              {/if}</th
-            >
+            <th scope="col">{roleLabel(r.name)}</th>
           {/each}
         </tr>
       </thead>
@@ -678,12 +643,10 @@
                 ><input
                   type="checkbox"
                   checked={r.actions.includes(action)}
-                  disabled={r.name === "admin" || action === "view"}
+                  disabled
                   aria-label="{roleLabel(r.name)}: {t(
                     `admin.actions.${action.replace('.', '_')}` as 'admin.actions.view',
                   )}"
-                  onchange={(e) =>
-                    void toggleAction(r, action, e.currentTarget.checked)}
                 /></td
               >
             {/each}
@@ -691,26 +654,6 @@
         {/each}
       </tbody>
     </table>
-    <form
-      class="inline"
-      onsubmit={(e) => {
-        e.preventDefault();
-        void run(t("admin.roleSaved"), async () => {
-          await saveRole(newRole.trim(), ["view"]);
-          newRole = "";
-          await loadRoles();
-        });
-      }}
-    >
-      <input
-        aria-label={t("admin.roleName")}
-        placeholder={t("admin.roleName")}
-        bind:value={newRole}
-        required
-        maxlength="32"
-      />
-      <button class="primary" type="submit">{t("admin.addRole")}</button>
-    </form>
     <p class="muted hint">{t("admin.rightsTokens")}</p>
   </section>
 {:else if active === "audit"}

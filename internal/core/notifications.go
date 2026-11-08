@@ -87,17 +87,6 @@ func (s *Service) fanOut(tx *sql.Tx, a auth.Actor, c change) error {
 	return nil
 }
 
-// canRead reports whether a user can see a project: global admin or member.
-func (s *Service) canRead(q queryer, userID int64, projectKey string) (bool, error) {
-	var ok int
-	err := q.QueryRow(`SELECT 1 FROM users u WHERE u.id = ? AND (u.is_admin = 1 OR EXISTS (
-		SELECT 1 FROM project_members m JOIN projects p ON p.id = m.project_id WHERE m.user_id = u.id AND p.key = ?))`, userID, projectKey).Scan(&ok)
-	if err == sql.ErrNoRows {
-		return false, nil
-	}
-	return err == nil, err
-}
-
 // statusCategory returns the category (todo, active, review, completed) of a status id.
 func statusCategory(q queryer, id int64) (string, error) {
 	var c string

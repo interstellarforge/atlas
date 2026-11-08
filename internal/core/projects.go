@@ -188,7 +188,7 @@ func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 	}
 	q, args := `SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users ORDER BY name`, []any(nil)
 	if a.Kind == auth.KindToken {
-		q, args = s.sharedUsersQuery(a)
+		q, args = s.sharedUsersQuery(a, s.IsSuperadmin(a))
 	}
 	rows, err := s.db.R.Query(q, args...)
 	if err != nil {
@@ -210,11 +210,11 @@ func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 }
 
 // sharedUsersQuery selects the users that are members of a project the token owner can reach and the token may use.
-func (s *Service) sharedUsersQuery(a auth.Actor) (string, []any) {
+func (s *Service) sharedUsersQuery(a auth.Actor, super bool) (string, []any) {
 	q := `SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users WHERE id IN (
 		SELECT m.user_id FROM project_members m JOIN projects p ON p.id = m.project_id WHERE 1 = 1`
 	var args []any
-	if !a.IsAdmin {
+	if !super {
 		q += ` AND p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)`
 		args = append(args, a.UserID)
 	}
@@ -229,7 +229,7 @@ func (s *Service) sharedUsersQuery(a auth.Actor) (string, []any) {
 
 // CreateUser is an instance-administration action: human admins only, journaled like every mutation.
 func (s *Service) CreateUser(ctx context.Context, a auth.Actor, email, name, password string, admin bool) (User, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return User{}, err
 	}
 	email = strings.TrimSpace(email)
@@ -282,10 +282,10 @@ func (s *Service) ListMembers(ctx context.Context, a auth.Actor, key string) ([]
 	return out, rows.Err()
 }
 
-// SetMember adds or updates a member. An empty roleName means the instance's default role.
+// SetMember adds or updates a member. An empty roleName means member.
 func (s *Service) SetMember(ctx context.Context, a auth.Actor, key string, userID int64, roleName string) error {
 	if roleName == "" {
-		roleName = s.Policy().DefaultRole
+		roleName = "member"
 	}
 	return s.tx(func(tx *sql.Tx) error {
 		p, mine, err := s.access(tx, a, key, actMembers)
@@ -308,6 +308,16 @@ func (s *Service) SetMember(ctx context.Context, a auth.Actor, key string, userI
 		}
 		if exists == 0 {
 			return invalid("unknown user")
+		}
+		if p.OrganizationID.Valid { // ADR-0027: a project member belongs to the project's organization
+			var inOrg bool
+			if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = ? AND user_id = ?)`,
+				p.OrganizationID.Int64, userID).Scan(&inOrg); err != nil {
+				return err
+			}
+			if !inOrg {
+				return invalid("the user is not a member of the project's organization")
+			}
 		}
 		if roleName != "admin" {
 			if err := s.guardLastAdmin(tx, p.ID, userID); err != nil {

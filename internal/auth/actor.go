@@ -23,7 +23,6 @@ type Actor struct {
 	Kind    ActorKind
 	UserID  int64
 	TokenID int64
-	IsAdmin bool
 	// Scopes and Projects only apply to tokens; humans (sessions) have the user's full rights.
 	Scopes []string
 	// Projects limits a token to these project keys; nil means all the owner can access.

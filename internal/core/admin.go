@@ -9,14 +9,6 @@ import (
 	"github.com/kees/atlas/internal/auth"
 )
 
-// Instance administration: global admins only, through a user session (never a token).
-func adminOnly(a auth.Actor) error {
-	if a.Kind != auth.KindHuman || !a.IsAdmin {
-		return ErrForbidden
-	}
-	return nil
-}
-
 type AdminUser struct {
 	User
 	MustChangePassword bool   `json:"must_change_password"`
@@ -25,7 +17,7 @@ type AdminUser struct {
 }
 
 func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.R.Query(`SELECT id, email, name, is_admin, must_change_password, deactivated_at, created_at FROM users ORDER BY name`)
@@ -57,7 +49,7 @@ func activeAdmins(tx *sql.Tx, except int64) (int, error) {
 
 // SetUserAdmin grants or removes global admin. The last active admin cannot be demoted.
 func (s *Service) SetUserAdmin(ctx context.Context, a auth.Actor, id int64, admin bool) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
@@ -82,7 +74,7 @@ func (s *Service) SetUserAdmin(ctx context.Context, a auth.Actor, id int64, admi
 // SetUserActive deactivates (sessions end at once, tokens stop working) or reactivates a user.
 // Nobody can deactivate themselves, and the last active admin stays.
 func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, active bool) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	if !active && id == a.UserID {
@@ -101,6 +93,11 @@ func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, act
 				return err
 			} else if n == 0 {
 				return rule("there must be at least one active admin")
+			}
+		}
+		if !active {
+			if err := guardOrgAdminLoss(tx, id); err != nil {
+				return err
 			}
 		}
 		var at any
@@ -122,7 +119,7 @@ func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, act
 // ForcePasswordReset signs the user out everywhere; their next session can only change the password.
 // Tokens keep working: they are separate credentials the user or an admin revokes on their own.
 func (s *Service) ForcePasswordReset(ctx context.Context, a auth.Actor, id int64) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
@@ -160,7 +157,7 @@ type AuditFilter struct {
 
 // AuditLog lists audit entries newest first (admins only). Filters are exact, except Operation which is a prefix.
 func (s *Service) AuditLog(ctx context.Context, a auth.Actor, f AuditFilter) ([]AuditEntry, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
 	if f.Limit <= 0 || f.Limit > 200 {
@@ -210,7 +207,7 @@ type AdminUserPatch struct {
 
 // UpdateUser applies every requested change in one transaction: all of them take effect or none does.
 func (s *Service) UpdateUser(ctx context.Context, a auth.Actor, id int64, p AdminUserPatch) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	_, err := s.Idempotent(ctx, a, "", nil, nil, func(ctx context.Context, s *Service) error {

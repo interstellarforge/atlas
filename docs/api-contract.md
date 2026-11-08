@@ -32,8 +32,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | PATCH | `/admin/users/{id}` | `{"is_admin"?, "active"?, "reset_totp"?, "force_password_reset"?}` (forcing ends the user's sessions; the next session may only change the password, error `password_change_required` elsewhere); no self-deactivation, the last active admin stays; deactivating ends sessions, tokens stop working |
 | GET | `/admin/audit` | Audit log newest first; filters `actor`, `operation` (prefix), `target`, `before` (id), `limit` (max 200) |
 | GET | `/admin/instance` | Effective instance settings (read-only, from the environment) |
-| GET | `/roles` | Project roles with their actions, the list of action names and `default_role` |
-| PUT, DELETE | `/admin/roles/{name}` | Global admin only. PUT `{"actions":[...]}` creates a custom role or replaces the actions of viewer, member or a custom role (`admin` is fixed, `view` is mandatory). DELETE refuses built-ins and roles still assigned |
+| GET | `/roles` | Project roles with their actions and the list of action names (read-only) |
 | POST | `/auth/register` | `{"email","name","password","invite"?}`: with a valid invite, or when the instance policy is `open` (optionally one email domain). Refusals count against the login rate limiter. Closed instance without invite: 403 |
 | GET | `/auth/policy` | Public: `registration` (closed/invite/open), `min_password_length`, `allowed_domain` |
 | POST | `/auth/login` | Also accepts `code` (authenticator code or recovery code). With 2FA on and no code the answer is 401 `totp_required`; a used code cannot be reused |
@@ -43,7 +42,7 @@ Base: `/api/v1`. JSON. UI, REST and MCP call the same `core` services.
 | GET | `/users/{id}/avatar` | 320 px JPEG thumbnail for any signed-in reader (metadata such as EXIF is dropped); 404 without a picture |
 | GET | `/me/security` | `{totp, recovery_remaining}` |
 | POST | `/me/totp/setup`, `/me/totp/enable`, `/me/totp/disable` | Enrol: setup returns `secret` and `otpauth` `uri`; enable `{"code"}` returns 10 recovery codes once; disable `{"password","code"}` (a code or recovery code) |
-| GET, PUT | `/admin/policy` | `{"min_password_length": 8-128, "registration", "allowed_domain", "session_days": 1-90, "default_role", "done_visible_days": 0-3650 (default 14, 0 = never hide)}` (global admin; default_role must exist, used when a member is added without a role) |
+| GET, PUT | `/admin/policy` | `{"min_password_length": 8-128, "registration", "allowed_domain", "session_days": 1-90, "done_visible_days": 0-3650 (default 14, 0 = never hide)}` (global admin; a member added without a role becomes `member`) |
 | GET, POST, DELETE | `/admin/invites[/{id}]` | POST `{"email"?,"is_admin","days"}` returns the `code` once; single use; with an email only that address may redeem it |
 | GET | `/admin/audit/export` | CSV (default) or `?format=json` (JSON lines) with the filters of `/admin/audit`; at most 50.000 entries per download (continue with `before`) |
 | GET, POST, DELETE | `/item-templates[/{id}]` | Instance-wide item templates (read: any user; write: global admin); usable in every project, a project template of the same name wins |

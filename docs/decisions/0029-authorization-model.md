@@ -1,6 +1,6 @@
 # ADR-0029: Authorization model, retired roles tables and 401/403/404 semantics
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-08
 - Supersedes: ADR-0010 (configurable rights and custom roles), once accepted
 - Tickets: ATL-491 and ATL-434 (stories ATL-472, ATL-407)

@@ -828,19 +828,8 @@ export interface Role {
 export function listRoles(): Promise<{
   items: Role[];
   actions: string[];
-  default_role: string;
 }> {
   return request("GET", "/roles");
-}
-
-export function saveRole(name: string, actions: string[]): Promise<Role> {
-  return request("PUT", `/admin/roles/${encodeURIComponent(name)}`, {
-    actions,
-  });
-}
-
-export function deleteRole(name: string): Promise<undefined> {
-  return request("DELETE", `/admin/roles/${encodeURIComponent(name)}`);
 }
 
 export async function listAdminUsers(): Promise<AdminUser[]> {
@@ -1126,7 +1115,6 @@ export interface Policy {
   registration: "closed" | "invite" | "open";
   allowed_domain: string;
   session_days: number;
-  default_role: string;
   done_visible_days: number;
 }
 

@@ -23,7 +23,7 @@ type env struct {
 }
 
 func human(id int64, admin bool) auth.Actor {
-	return auth.Actor{Kind: auth.KindHuman, UserID: id, IsAdmin: admin}
+	return auth.Actor{Kind: auth.KindHuman, UserID: id}
 }
 
 func setup(t *testing.T) *env {
@@ -379,5 +379,39 @@ func TestImportCommentKeepsAuthorAndTimeForAdminsOnly(t *testing.T) {
 	}
 	if _, err := e.svc.ImportComment(ctx, e.admin, it.Key, "old", "", 1); !isInvalid(err) {
 		t.Fatalf("missing author: %v", err)
+	}
+}
+
+// ADR-0029: the Actor holds no privilege; losing admin or being deactivated applies to an open session at once.
+func TestRightsAreResolvedLive(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.project("EXO")
+	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.aliceID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.GetProject(ctx, e.alice, "EXO"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.W.Exec(`UPDATE users SET deactivated_at = 1 WHERE id = ?`, e.aliceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.GetProject(ctx, e.alice, "EXO"); err == nil {
+		t.Fatal("a deactivated member kept project access with an open session")
+	}
+	if _, err := e.svc.CreateProject(ctx, e.bob, "BOB", "Bob"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.GetProject(ctx, e.admin, "BOB"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.W.Exec(`UPDATE users SET is_admin = 0 WHERE id = ?`, e.admin.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.ListAdminUsers(ctx, e.admin); !errors.Is(err, core.ErrForbidden) {
+		t.Fatal("a demoted admin kept instance administration with an open session")
+	}
+	if _, err := e.svc.GetProject(ctx, e.admin, "BOB"); err == nil {
+		t.Fatal("a demoted admin kept implicit project access with an open session")
 	}
 }

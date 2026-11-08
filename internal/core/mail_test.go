@@ -100,7 +100,7 @@ func TestMailSettingsKeepThePasswordSecret(t *testing.T) {
 func TestMailSettingsPermissionsAndValidation(t *testing.T) {
 	e, _, _ := mailEnv(t)
 	in := core.MailInput{Host: "smtp.x.io", Port: 587, Security: "starttls", FromAddr: "atlas@x.io"}
-	token := auth.Actor{Kind: auth.KindToken, UserID: e.admin.UserID, IsAdmin: true, Scopes: []string{"write"}}
+	token := auth.Actor{Kind: auth.KindToken, UserID: e.admin.UserID, Scopes: []string{"write"}}
 	for name, a := range map[string]auth.Actor{"member": e.alice, "token": token} {
 		if _, err := e.svc.SetMailSettings(ctx, a, in); !errors.Is(err, core.ErrForbidden) {
 			t.Fatalf("%s saving: %v", name, err)

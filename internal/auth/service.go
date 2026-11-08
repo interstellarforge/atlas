@@ -199,9 +199,9 @@ func (s *Service) Logout(session string) error {
 func (s *Service) SessionActor(session string) (Actor, error) {
 	var a Actor
 	var exp int64
-	err := s.db.R.QueryRow(`SELECT s.user_id, u.is_admin, s.csrf_token, s.expires_at, s.rowid, u.must_change_password
+	err := s.db.R.QueryRow(`SELECT s.user_id, s.csrf_token, s.expires_at, s.rowid, u.must_change_password
 		FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(session)).
-		Scan(&a.UserID, &a.IsAdmin, &a.CSRF, &exp, &a.SessionID, &a.MustChangePassword)
+		Scan(&a.UserID, &a.CSRF, &exp, &a.SessionID, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && exp < time.Now().UnixMilli()) {
 		return Actor{}, ErrUnauthenticated
 	}
@@ -306,9 +306,9 @@ func (s *Service) TokenActor(plain string) (Actor, error) {
 	var scopes string
 	var projects sql.NullString
 	var exp, rev sql.NullInt64
-	err := s.db.R.QueryRow(`SELECT t.id, t.user_id, u.is_admin, t.scopes, t.projects, t.expires_at, t.revoked_at
+	err := s.db.R.QueryRow(`SELECT t.id, t.user_id, t.scopes, t.projects, t.expires_at, t.revoked_at
 		FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(plain)).
-		Scan(&a.TokenID, &a.UserID, &a.IsAdmin, &scopes, &projects, &exp, &rev)
+		Scan(&a.TokenID, &a.UserID, &scopes, &projects, &exp, &rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Actor{}, ErrUnauthenticated
 	}

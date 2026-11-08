@@ -260,8 +260,8 @@ func (s *Service) DeleteRecurrence(ctx context.Context, a auth.Actor, key string
 // and a concurrent runner finds the claim taken.
 func (s *Service) RunDueRecurrences(ctx context.Context) int {
 	now := s.now()
-	rows, err := s.db.R.Query(`SELECT r.`+strings.ReplaceAll(recurrenceCols, ", ", ", r.")+`, p.key, r.created_by, u.is_admin
-		FROM recurrences r JOIN projects p ON p.id = r.project_id JOIN users u ON u.id = r.created_by
+	rows, err := s.db.R.Query(`SELECT r.`+strings.ReplaceAll(recurrenceCols, ", ", ", r.")+`, p.key, r.created_by
+		FROM recurrences r JOIN projects p ON p.id = r.project_id
 		WHERE r.active = 1 AND r.next_run_at <= ? AND p.archived_at IS NULL ORDER BY r.next_run_at LIMIT 50`, now.UnixMilli())
 	if err != nil {
 		slog.Error("recurrences: list due", "error", err)
@@ -278,9 +278,8 @@ func (s *Service) RunDueRecurrences(ctx context.Context) int {
 		var labels string
 		var wd, md, last sql.NullInt64
 		var user int64
-		var admin bool
 		r := &d.r
-		if err := rows.Scan(&r.ID, &r.Title, &r.Type, &r.Description, &r.Priority, &labels, &r.Parent, &r.Freq, &r.Interval, &wd, &md, &r.AtMinute, &r.NextRunAt, &last, &r.LastError, &r.Active, &d.project, &user, &admin); err != nil {
+		if err := rows.Scan(&r.ID, &r.Title, &r.Type, &r.Description, &r.Priority, &labels, &r.Parent, &r.Freq, &r.Interval, &wd, &md, &r.AtMinute, &r.NextRunAt, &last, &r.LastError, &r.Active, &d.project, &user); err != nil {
 			slog.Error("recurrences: scan", "error", err)
 			continue
 		}
@@ -293,7 +292,7 @@ func (s *Service) RunDueRecurrences(ctx context.Context) int {
 			v := int(md.Int64)
 			r.MonthDay = &v
 		}
-		d.actor = auth.Actor{Kind: auth.KindHuman, UserID: user, IsAdmin: admin}
+		d.actor = auth.Actor{Kind: auth.KindHuman, UserID: user}
 		list = append(list, d)
 	}
 	rows.Close()

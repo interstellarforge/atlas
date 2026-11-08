@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/core"
 	"github.com/kees/atlas/internal/logbuf"
 	"github.com/kees/atlas/internal/update"
@@ -23,8 +22,6 @@ func (s *Server) registerAdmin(mux *http.ServeMux, protect func(http.HandlerFunc
 	mux.Handle("DELETE /api/v1/admin/mail", protect(s.adminClearMail))
 	mux.Handle("POST /api/v1/admin/mail/test", protect(s.adminTestMail))
 	mux.Handle("GET /api/v1/roles", protect(s.roles))
-	mux.Handle("PUT /api/v1/admin/roles/{name}", protect(s.adminSaveRole))
-	mux.Handle("DELETE /api/v1/admin/roles/{name}", protect(s.adminDeleteRole))
 }
 
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +77,7 @@ func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
 
 // adminInstance shows the effective, read-only instance settings (they come from the environment).
 func (s *Server) adminInstance(w http.ResponseWriter, r *http.Request) {
-	if a := actor(r); !a.IsAdmin || a.Kind != "human" {
+	if a := actor(r); !s.core.IsSuperadmin(a) {
 		writeError(w, http.StatusForbidden, "forbidden", "not allowed")
 		return
 	}
@@ -89,7 +86,7 @@ func (s *Server) adminInstance(w http.ResponseWriter, r *http.Request) {
 
 // adminUpdate reports whether a newer release exists; with the check disabled it reports nothing available.
 func (s *Server) adminUpdate(w http.ResponseWriter, r *http.Request) {
-	if a := actor(r); !a.IsAdmin || a.Kind != "human" {
+	if a := actor(r); !s.core.IsSuperadmin(a) {
 		writeError(w, http.StatusForbidden, "forbidden", "not allowed")
 		return
 	}
@@ -107,31 +104,7 @@ func (s *Server) roles(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": list, "actions": core.Actions, "default_role": s.core.Policy().DefaultRole})
-}
-
-// adminSaveRole creates a custom role or edits viewer, member or a custom role: {"actions": [...]}.
-func (s *Server) adminSaveRole(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Actions []string `json:"actions"`
-	}
-	if !decode(w, r, &in) {
-		return
-	}
-	role, err := s.core.SaveRole(r.Context(), actor(r), r.PathValue("name"), in.Actions)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, role)
-}
-
-func (s *Server) adminDeleteRole(w http.ResponseWriter, r *http.Request) {
-	if err := s.core.DeleteRole(r.Context(), actor(r), r.PathValue("name")); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "actions": core.Actions})
 }
 
 func (s *Server) adminMail(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +149,7 @@ func (s *Server) adminTestMail(w http.ResponseWriter, r *http.Request) {
 
 // adminLogs serves the recent server log (newest first): ?level=debug|info|warn|error, ?q= text, ?limit=.
 func (s *Server) adminLogs(w http.ResponseWriter, r *http.Request) {
-	if a := actor(r); a.Kind != auth.KindHuman || !a.IsAdmin {
+	if a := actor(r); !s.core.IsSuperadmin(a) {
 		writeError(w, http.StatusForbidden, "forbidden", "administrators only")
 		return
 	}

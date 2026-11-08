@@ -12,7 +12,7 @@ import (
 
 func TestCreateUserIsHumanAdminOnlyAndJournaled(t *testing.T) {
 	e, ctx := setup(t), context.Background()
-	pat := auth.Actor{Kind: auth.KindToken, UserID: e.admin.UserID, TokenID: 1, IsAdmin: true, Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}
+	pat := auth.Actor{Kind: auth.KindToken, UserID: e.admin.UserID, TokenID: 1, Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}
 	if _, err := e.svc.CreateUser(ctx, pat, "evil@x.io", "Evil", "password-123", true); !errors.Is(err, core.ErrForbidden) {
 		t.Fatalf("token created a user: %v", err)
 	}

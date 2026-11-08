@@ -32,7 +32,7 @@ Subtree reads use a range scan on `path`, see ADR-0003.
 | `attachments` | Metadata: item_id, filename, mime, size, width, height, path, created_by |
 | `custom_field_definitions` | Typed fields per project: name, type, default, validation |
 | `users`, `project_members` | Users and per-project role (a name in `roles`) |
-| `roles`, `role_actions` | Project roles and the actions each grants (built-ins seeded, custom roles added by admins) |
+| `roles`, `role_actions` | Project roles and the actions each grants (built-ins seeded; no longer editable through the API or UI, frozen until the organization data migration retires them, ADR-0029) |
 | `change_events` | Sync journal: seq (autoincrement), type, project, key, actor, ts |
 | `audit_entries` | Actor, operation, target, changes (JSON), batch_id, ts |
 | `notifications`, `item_follows` | Per-user inbox (kept until read or deleted) and followed items. `change_events.target_user` limits a signal to one user |
@@ -98,7 +98,7 @@ Status category enum: `todo`, `active`, `review`, `completed` (`review` since mi
 ## Accounts, policy and templates (migration 0011)
 
 - `users`: `avatar_path`, `totp_secret`, `totp_pending`, `totp_enabled`, `totp_last_step` (replay protection). `recovery_codes` holds SHA-256 hashes, single use.
-- `instance_settings` (key/value): `min_password_length`, `registration`, `allowed_domain`, `session_days`, `default_role`, `done_visible_days`; absent keys use the defaults in `core/policy.go`. The environment-only settings (`ATLAS_*`) are unchanged.
+- `instance_settings` (key/value): `min_password_length`, `registration`, `allowed_domain`, `session_days`, `done_visible_days` (a stored `default_role` row is ignored); absent keys use the defaults in `core/policy.go`. The environment-only settings (`ATLAS_*`) are unchanged.
 - `invites`: code hash, optional email, admin flag, expiry, used_at/used_by.
 - `item_templates.project_id` is nullable (NULL = instance wide), `subitems` holds the JSON tree. A unique index on `(COALESCE(project_id, 0), name)` replaces the old unique constraint.
 
@@ -128,3 +128,11 @@ Status category enum: `todo`, `active`, `review`, `completed` (`review` since mi
 - `project_context_entries(id, project_id, key, category, title, summary, body, status, superseded_by, verification_state, source_kind, pinned, version, created_by, updated_by, created_at, updated_at, verified_at, verified_by)`, `UNIQUE(project_id, key)`, STRICT with CHECKs on category (`architecture`, `decision`, `convention`, `pitfall`, `dependency`, `reference`), status (`active`, `superseded`, `archived`), verification state (`verified`, `unverified`, `stale`), source kind (`manual`, `repository`, `ticket`, `derived`) and lengths. Timestamps are unix ms; `created_by`, `updated_by` and `verified_by` are audit actor strings (`human:user-4`, `token:pat-17`). Cascade on project; `superseded_by` is set null when the replacing entry goes.
 - `project_context_sources(id, entry_id, source_type, repository, file_path, commit_sha, ticket_key, url, content_hash, note, verified_at)`; cascade on entry. Only the fields of the type are filled.
 - Actions `context.write` (member, admin) and `context.verify` (admin) are granted by the migration. See ADR-0015.
+
+## Organizations (migrations 0027, 0028; ADR-0027, ADR-0029)
+
+- `organizations` (key unique, case-insensitive; status `active|archived`) and `organization_memberships` (PK organization + user; role `admin|user`; index on `user_id`). Membership rows grant nothing for non-active accounts.
+- `users.is_superadmin` (0/1, default 0) is new and separate from `is_admin`; nobody is promoted by the migration. `is_admin` is dropped by the data migration (ADR-0028).
+- `projects.organization_id` (migration 0029) is nullable and indexed. The data migration (ADR-0028) fills it and rebuilds the table to NOT NULL in its own transaction (ATL-425).
+- Not yet: `users.status`, invite kinds.
+- Core (`internal/core/orgs.go`): organization CRUD/archive (SUPERADMIN creates and archives; ADMIN renames and manages members), membership with the last-active-ADMIN guard in the mutating `BEGIN IMMEDIATE` transaction (demote, remove, suspend, delete account; `allow_orphan` SUPERADMIN only, flagged as `no_active_admin`). Removing a member also removes their project rows in that organization. Archived organizations hide their projects from everyone but SUPERADMIN. No REST/MCP/UI adapter yet. DB triggers for the last-ADMIN rule were evaluated and deferred: `allow_orphan` must bypass it, so the core check plus tests is the default (ADR-0029).

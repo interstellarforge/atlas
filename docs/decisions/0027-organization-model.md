@@ -1,6 +1,6 @@
 # ADR-0027: Organization model and project key uniqueness
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-08
 - Tickets: ATL-448 (story ATL-472)
 
