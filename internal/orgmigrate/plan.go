@@ -144,7 +144,8 @@ func Plan(q Reader, cfg Config, m Mapping) (Report, error) {
 		return rep, err
 	}
 	if orgs > 0 || owned > 0 {
-		block("the database already has organizations or projects assigned to one")
+		block("already migrated: the database has organizations or projects assigned to one")
+		return rep, nil // a migrated database has no legacy columns left to read
 	}
 	if cfg.OrgKey == "" || cfg.OrgName == "" {
 		block("default organization key and name are required")
@@ -264,6 +265,7 @@ func Plan(q Reader, cfg Config, m Mapping) (Report, error) {
 			if _, ok := m.Admins[u.email]; ok {
 				rep.Warnings = append(rep.Warnings, fmt.Sprintf("mapping for suspended admin %s is ignored", u.email))
 			}
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("suspended admin %s gets no organization role: assign one after reactivating the account", u.email))
 		default:
 			row.Decision = "admin"
 			if d, ok := lookup(m.Admins, u.email); ok {

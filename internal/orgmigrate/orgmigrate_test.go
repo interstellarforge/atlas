@@ -204,11 +204,23 @@ func TestRunMigratesAndVerifies(t *testing.T) {
 	if n := count(t, d, `SELECT COUNT(*) FROM legacy_role_actions`); n == 0 {
 		t.Error("the legacy role actions were lost")
 	}
-	if n := count(t, d, `SELECT COUNT(*) FROM invites WHERE is_admin = 1 AND used_at IS NULL AND expires_at = 9999999999999`); n != 0 {
+	if n := count(t, d, `SELECT COUNT(*) FROM invites WHERE code_hash = 'h1' AND expires_at = 9999999999999`); n != 0 {
 		t.Error("the unused admin invite was not revoked")
 	}
 	if n := count(t, d, `SELECT COUNT(*) FROM invites WHERE used_at IS NOT NULL AND expires_at = 9999999999999`); n != 1 {
 		t.Error("a used invite was touched")
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'is_admin'`) + count(t, d, `SELECT COUNT(*) FROM pragma_table_info('invites') WHERE name = 'is_admin'`); n != 0 {
+		t.Error("the legacy is_admin columns are still there")
+	}
+	if _, err := d.W.Exec(`INSERT INTO projects (key, name, created_at) VALUES ('NOORG', 'x', 0)`); err == nil {
+		t.Error("a project without organization was accepted after the migration")
+	}
+	if _, err := d.W.Exec(`UPDATE projects SET organization_id = NULL WHERE key = 'P1'`); err == nil {
+		t.Error("a project lost its organization")
+	}
+	if rep2, err := orgmigrate.Plan(d.R, cfg, mapping); err != nil || len(rep2.Blocking) == 0 {
+		t.Errorf("planning a migrated database must report it, not fail: %v %v", err, rep2.Blocking)
 	}
 	var stored string
 	d.R.QueryRow(`SELECT value FROM meta WHERE key = 'org_migration_hash'`).Scan(&stored)
@@ -323,5 +335,53 @@ func TestMigratedAccessMatchesAuthorization(t *testing.T) {
 				t.Errorf("%s on %s: role %q, want %q", email, key, p.Role, level)
 			}
 		}
+	}
+}
+
+// A fresh database has no legacy data: Finalize enforces project organizations, drops the legacy flags and can be
+// run again.
+func TestFinalizeFreshDatabase(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "atlas.db"), db.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	if err := d.Migrate(migrations.FS, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := orgmigrate.Finalize(d); err != nil {
+			t.Fatalf("run %d: %v", i+1, err)
+		}
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'is_admin'`); n != 0 {
+		t.Error("users.is_admin is still there")
+	}
+	if _, err := d.W.Exec(`INSERT INTO projects (key, name, created_at) VALUES ('NOORG', 'x', 0)`); err == nil {
+		t.Error("a project without organization was accepted")
+	}
+	if _, err := d.W.Exec(`INSERT INTO organizations (id, key, name, created_at) VALUES (1, 'A', 'A', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.W.Exec(`INSERT INTO projects (key, name, created_at, organization_id) VALUES ('OK', 'x', 0, 1)`); err != nil {
+		t.Errorf("a project with an organization was refused: %v", err)
+	}
+}
+
+// Finalize refuses a database that still has to be migrated: it would drop the flags the migration reads.
+func TestFinalizeRefusesUnmigratedDatabase(t *testing.T) {
+	d, _ := fixture(t) // legacy: projects without organization, admins only by is_admin
+	if err := orgmigrate.Finalize(d); err == nil {
+		t.Fatal("Finalize ran on an unmigrated database")
+	}
+	if n := count(t, d, `SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'is_admin'`); n != 1 {
+		t.Fatal("the legacy column was dropped")
+	}
+	// users without any SUPERADMIN count as unmigrated too, even when no project exists
+	if _, err := d.W.Exec(`DELETE FROM project_members; DELETE FROM projects`); err != nil {
+		t.Fatal(err)
+	}
+	if err := orgmigrate.Finalize(d); err == nil {
+		t.Fatal("Finalize ran on a database with users but no SUPERADMIN")
 	}
 }

@@ -42,6 +42,12 @@ Existing data has global `users.is_admin`, per-project roles in `roles`/`role_ac
 **Backup and rollback**
 Before the real run: automatic backup (ADR-0006) and a restore test into a temporary directory (integrity check, row counts, identical dry-run report). Kept until the owner closes the migration. A failed run changes nothing (single transaction). An unwanted successful run is undone by restoring the backup. No down-migration.
 
+## Implementation notes (M1)
+
+- NOT NULL on `projects.organization_id` is enforced by triggers (installed in the migration transaction and by `orgmigrate.Finalize` on fresh or migrated databases), not by a table rebuild.
+- `users.is_admin` and `invites.is_admin` are dropped in the same transaction (after the old-permission snapshot and the plan were taken). The stored report keeps the legacy facts. `Finalize` also drops them on a fresh or already migrated database at startup; an unmigrated database is refused before that.
+- Planning an already migrated database reports "already migrated" instead of reading the dropped columns.
+
 ## Consequences
 
 - The owner must read the report and resolve REVIEW-REQUIRED roles before the real run; this is deliberate friction.

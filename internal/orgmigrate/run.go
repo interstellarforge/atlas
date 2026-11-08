@@ -144,8 +144,10 @@ func Apply(tx *sql.Tx, rep Report, now int64) error {
 		"org:"+rep.OrgKey, fmt.Sprintf(`{"report_hash":%q}`, rep.Hash()), now); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO change_events (type, project, item_key, actor, ts) VALUES ('admin.updated', '', '', 'system:migrate-orgs', ?)`, now)
-	return err
+	if _, err = tx.Exec(`INSERT INTO change_events (type, project, item_key, actor, ts) VALUES ('admin.updated', '', '', 'system:migrate-orgs', ?)`, now); err != nil {
+		return err
+	}
+	return finalizeTx(tx) // projects keep their organization, the legacy admin flags go
 }
 
 // Verify checks the written result in both directions and returns every problem; an empty list means it holds.

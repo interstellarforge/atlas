@@ -24,6 +24,7 @@ import (
 	"github.com/kees/atlas/internal/mcp"
 	"github.com/kees/atlas/internal/media"
 	"github.com/kees/atlas/internal/notifications"
+	"github.com/kees/atlas/internal/orgmigrate"
 	"github.com/kees/atlas/internal/repo"
 	"github.com/kees/atlas/internal/scheduler"
 	"github.com/kees/atlas/internal/update"
@@ -119,6 +120,9 @@ func run() error {
 		return err
 	} else if reason != "" {
 		return fmt.Errorf("this database predates organizations (%s); run `atlas migrate-orgs --dry-run`, review the report and follow the runbook in docs/operations.md", reason)
+	}
+	if err := orgmigrate.Finalize(database); err != nil { // fresh or migrated: enforce project organizations, drop legacy flags
+		return err
 	}
 	feed := events.New(database, svc)
 	svc.SetNotifier(feed.Hub().Notify)

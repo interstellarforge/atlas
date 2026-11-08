@@ -12,7 +12,7 @@ import (
 // ADR-0029: authorization never reads the legacy admin flag or the legacy role tables. Only the data migration, its
 // report and the rehearsal seed may mention them; everything else decides through authz.go.
 func TestLegacyAuthorizationIsNotRead(t *testing.T) {
-	legacy := regexp.MustCompile(`is_admin|role_actions|\b(FROM|JOIN|INTO|UPDATE)\s+roles\b|legacy_role`)
+	legacy := regexp.MustCompile(`(?i)is_admin|role_actions|\b(FROM|JOIN|INTO|UPDATE)\s+roles\b|legacy_role`)
 	allowed := []string{"internal/orgmigrate/", "benchmarks/seed/"}
 	root := "../.."
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
