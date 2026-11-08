@@ -147,3 +147,5 @@ Issues are items of type `bug`: list them with `GET /items?project=KEY&type=bug`
 | PATCH / DELETE | `/projects/{key}/time/{id}` | Change `{duration?, date?, note?}` / delete a booking; owner or project admin; `time.log`. |
 | GET | `/projects/{key}/time?from&to&user&item&period` | Dates `YYYY-MM-DD`, `period` day, week (default) or month. `{total_minutes, entries, items, people, statuses, periods}`, each bucket `{key, label, minutes}`; items top 100. `view`. |
 | GET | `/projects/{key}/time/export?...` | Same filters, CSV (`date,item,title,person,status,minutes,note`), at most 10.000 rows; `export` action. |
+
+A write that cannot get the database lock in time answers `503` with `Retry-After: 1` and `{"error":{"code":"busy"}}`; nothing was changed and the request may be repeated.

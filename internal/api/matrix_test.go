@@ -257,3 +257,84 @@ func TestMCPToolMatrix(t *testing.T) {
 		}
 	}
 }
+
+// ATL-375: a fresh active account without any project reaches nothing of another project, on any surface: items,
+// search, export, attachments and the change feed answer exactly as for a project that does not exist.
+func TestFreshAccountReachesNothing(t *testing.T) {
+	e := setup(t)
+	kees := sessionOf(e, t)
+	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
+	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "secret roadmap"}, kees)
+	e.do("POST", "/api/v1/items/EXO-1/comments", map[string]any{"body": "internal comment"}, kees)
+	up := upload(e, "EXO-1", "plan.png", pngBytes(t, 10, 10), kees)
+	if up.Code != 201 {
+		t.Fatalf("upload: %d %s", up.Code, up.Body)
+	}
+	attID := strconv.Itoa(decodeBody[struct{ ID int }](t, up).ID)
+
+	fresh := func(email string, leaveOrg bool) func(*http.Request) {
+		u, err := e.auth.CreateUser(email, email, "password-123", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if leaveOrg {
+			if err := e.svc.RemoveOrgMember(context.Background(), auth.Actor{Kind: auth.KindHuman, UserID: 1}, "MAIN", u.ID, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return loginAs(e, t, email, "password-123")
+	}
+	for name, as := range map[string]func(*http.Request){
+		"organization member without project": fresh("fresh@example.com", false),
+		"account without organization":        fresh("lonely@example.com", true),
+	} {
+		for _, p := range []string{
+			"/api/v1/items?project=%s", "/api/v1/items?project=%s&q=secret", "/api/v1/projects/%s", "/api/v1/projects/%s/export",
+			"/api/v1/projects/%s/workflow", "/api/v1/projects/%s/members", "/api/v1/projects/%s/context", "/api/v1/projects/%s/milestones",
+		} {
+			hidden := e.do("GET", fmt.Sprintf(p, "EXO"), nil, as)
+			ghost := e.do("GET", fmt.Sprintf(p, "NOPE"), nil, as)
+			if hidden.Code != 404 || hidden.Code != ghost.Code || hidden.Body.String() != ghost.Body.String() {
+				t.Errorf("%s: GET %s answers %d %q, a missing project %d %q", name, p, hidden.Code, hidden.Body, ghost.Code, ghost.Body)
+			}
+		}
+		for _, p := range []string{"/api/v1/items/%s-1", "/api/v1/items/%s-1/comments", "/api/v1/items/%s-1/attachments", "/api/v1/items/%s-1/links"} {
+			hidden := e.do("GET", fmt.Sprintf(p, "EXO"), nil, as)
+			ghost := e.do("GET", fmt.Sprintf(p, "NOPE"), nil, as)
+			if hidden.Code != 404 || hidden.Code != ghost.Code || hidden.Body.String() != ghost.Body.String() {
+				t.Errorf("%s: GET %s answers %d %q, a missing item %d %q", name, p, hidden.Code, hidden.Body, ghost.Code, ghost.Body)
+			}
+		}
+		for _, p := range []string{"/api/v1/attachments/" + attID, "/api/v1/attachments/" + attID + "/thumb"} {
+			hidden, ghost := e.do("GET", p, nil, as), e.do("GET", "/api/v1/attachments/99999", nil, as)
+			if hidden.Code != 404 || hidden.Code != ghost.Code {
+				t.Errorf("%s: GET %s answers %d, a missing attachment %d", name, p, hidden.Code, ghost.Code)
+			}
+		}
+		feed := e.do("GET", "/api/v1/changes?since=0", nil, as).Body.String()
+		for _, leak := range []string{"EXO", "secret roadmap", "internal comment"} {
+			if strings.Contains(feed, leak) {
+				t.Errorf("%s: the change feed leaks %q: %s", name, leak, feed)
+			}
+		}
+		if c := e.do("GET", "/api/v1/admin/users", nil, as).Code; c != 403 {
+			t.Errorf("%s: /admin/users answers %d, want 403", name, c)
+		}
+		if list := e.do("GET", "/api/v1/projects", nil, as).Body.String(); strings.Contains(list, "EXO") {
+			t.Errorf("%s: the project list shows EXO: %s", name, list)
+		}
+	}
+}
+
+// ATL-374: docs/security.md lists every registered route, so the audit matrix cannot silently fall behind.
+func TestSecurityDocListsEveryRoute(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/security.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range routesFromSource(t) {
+		if !strings.Contains(string(doc), "`"+r.String()+"`") {
+			t.Errorf("docs/security.md does not list %s", r)
+		}
+	}
+}

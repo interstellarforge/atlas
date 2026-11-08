@@ -46,6 +46,16 @@ ATLAS_SUPERADMIN_EMAIL=you@example.com atlas migrate-orgs --confirm-report <hash
 - The real run (`--confirm-report`) takes the reviewed hash, writes a backup (kept in `backups/pre-org-migration-<time>`), restores it into a temporary directory and compares its report, then re-plans inside one `BEGIN IMMEDIATE` transaction, aborts if the report changed, applies, verifies both directions and commits. Failure changes nothing. To roll back after success, restore the backup (`atlas restore <dir>`); there is no down-migration.
 - Rehearsal on the seeded dataset: `go run ./cmd/atlas-seed -data-dir ./data -legacy-access`, then `ATLAS_BENCH=1 go test ./benchmarks -run OrgMigration -v`.
 
+## Lost SUPERADMIN
+
+If no active SUPERADMIN is left (the application refuses to remove the last one, but an operator or a restore can leave none), make an active account SUPERADMIN from the shell:
+
+```bash
+atlas superadmin grant you@example.com
+```
+
+It works on an active account only and is audited as `system:cli`. No HTTP route can do this.
+
 ## Other commands
 
 `atlas check paths [--fix]` verifies the materialized item paths.
