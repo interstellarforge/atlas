@@ -37,7 +37,7 @@ func TestMergedBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := core.New(d, a)
-	actor := auth.Actor{Kind: auth.KindHuman, UserID: u.ID, IsAdmin: true}
+	actor := auth.Actor{Kind: auth.KindHuman, UserID: u.ID}
 	var project string
 	if err := d.R.QueryRow(`SELECT key FROM projects ORDER BY id LIMIT 1`).Scan(&project); err != nil {
 		t.Fatal(err)

@@ -33,11 +33,11 @@ var (
 )
 
 type User struct {
-	ID      int64  `json:"id"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	IsAdmin bool   `json:"is_admin"`
-	Avatar  bool   `json:"avatar"`
+	ID           int64  `json:"id"`
+	Email        string `json:"email"`
+	Name         string `json:"name"`
+	IsSuperadmin bool   `json:"is_superadmin"`
+	Avatar       bool   `json:"avatar"`
 	// MustChangePassword is set by an admin: the session may only change the password until it is done.
 	MustChangePassword bool `json:"must_change_password,omitempty"`
 	// TOTP is true when two-factor authentication is on (shown to the user themselves only).
@@ -112,13 +112,13 @@ func (s *Service) CreateUser(email, name, password string, admin bool) (User, er
 	if err != nil {
 		return User{}, err
 	}
-	res, err := s.db.W.Exec(`INSERT INTO users (email, name, password_hash, is_admin, created_at)
+	res, err := s.db.W.Exec(`INSERT INTO users (email, name, password_hash, is_superadmin, created_at)
 		VALUES (?, ?, ?, ?, ?)`, email, name, hash, admin, time.Now().UnixMilli())
 	if err != nil {
 		return User{}, err
 	}
 	id, _ := res.LastInsertId()
-	return User{ID: id, Email: email, Name: name, IsAdmin: admin}, nil
+	return User{ID: id, Email: email, Name: name, IsSuperadmin: admin}, nil
 }
 
 // Login verifies credentials and returns a new session token (cookie value) and CSRF token.
@@ -132,9 +132,9 @@ func (s *Service) Login(email, password, code, clientKey string) (user User, ses
 	var totpOn bool
 	var totpSecret sql.NullString
 	var lastStep int64
-	err = s.db.R.QueryRow(`SELECT id, email, name, is_admin, password_hash, avatar_path IS NOT NULL, totp_enabled, totp_secret, totp_last_step, must_change_password
+	err = s.db.R.QueryRow(`SELECT id, email, name, is_superadmin, password_hash, avatar_path IS NOT NULL, totp_enabled, totp_secret, totp_last_step, must_change_password
 		FROM users WHERE email = ? AND deactivated_at IS NULL`, email).
-		Scan(&user.ID, &user.Email, &user.Name, &user.IsAdmin, &hash, &user.Avatar, &totpOn, &totpSecret, &lastStep, &user.MustChangePassword)
+		Scan(&user.ID, &user.Email, &user.Name, &user.IsSuperadmin, &hash, &user.Avatar, &totpOn, &totpSecret, &lastStep, &user.MustChangePassword)
 	ok := false
 	if err == nil {
 		ok, _ = VerifyPassword(password, hash)
@@ -199,9 +199,9 @@ func (s *Service) Logout(session string) error {
 func (s *Service) SessionActor(session string) (Actor, error) {
 	var a Actor
 	var exp int64
-	err := s.db.R.QueryRow(`SELECT s.user_id, u.is_admin, s.csrf_token, s.expires_at, s.rowid, u.must_change_password
+	err := s.db.R.QueryRow(`SELECT s.user_id, s.csrf_token, s.expires_at, s.rowid, u.must_change_password
 		FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(session)).
-		Scan(&a.UserID, &a.IsAdmin, &a.CSRF, &exp, &a.SessionID, &a.MustChangePassword)
+		Scan(&a.UserID, &a.CSRF, &exp, &a.SessionID, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && exp < time.Now().UnixMilli()) {
 		return Actor{}, ErrUnauthenticated
 	}
@@ -214,8 +214,8 @@ func (s *Service) SessionActor(session string) (Actor, error) {
 
 func (s *Service) User(id int64) (User, error) {
 	var u User
-	err := s.db.R.QueryRow(`SELECT id, email, name, is_admin, avatar_path IS NOT NULL, totp_enabled, must_change_password FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Avatar, &u.TOTP, &u.MustChangePassword)
+	err := s.db.R.QueryRow(`SELECT id, email, name, is_superadmin, avatar_path IS NOT NULL, totp_enabled, must_change_password FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.Avatar, &u.TOTP, &u.MustChangePassword)
 	return u, err
 }
 
@@ -306,9 +306,9 @@ func (s *Service) TokenActor(plain string) (Actor, error) {
 	var scopes string
 	var projects sql.NullString
 	var exp, rev sql.NullInt64
-	err := s.db.R.QueryRow(`SELECT t.id, t.user_id, u.is_admin, t.scopes, t.projects, t.expires_at, t.revoked_at
+	err := s.db.R.QueryRow(`SELECT t.id, t.user_id, t.scopes, t.projects, t.expires_at, t.revoked_at
 		FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(plain)).
-		Scan(&a.TokenID, &a.UserID, &a.IsAdmin, &scopes, &projects, &exp, &rev)
+		Scan(&a.TokenID, &a.UserID, &scopes, &projects, &exp, &rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Actor{}, ErrUnauthenticated
 	}

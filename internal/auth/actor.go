@@ -16,6 +16,8 @@ type ActorKind string
 const (
 	KindHuman ActorKind = "human"
 	KindToken ActorKind = "token"
+	// KindSystem is the operator at the command line (atlas superadmin grant): never created by a request.
+	KindSystem ActorKind = "system"
 )
 
 // Actor is who performs an operation. Every mutation carries one.
@@ -23,7 +25,6 @@ type Actor struct {
 	Kind    ActorKind
 	UserID  int64
 	TokenID int64
-	IsAdmin bool
 	// Scopes and Projects only apply to tokens; humans (sessions) have the user's full rights.
 	Scopes []string
 	// Projects limits a token to these project keys; nil means all the owner can access.
@@ -40,6 +41,9 @@ type Actor struct {
 func (a Actor) String() string {
 	if a.Kind == KindToken {
 		return fmt.Sprintf("token:pat-%d", a.TokenID)
+	}
+	if a.Kind == KindSystem {
+		return "system:cli"
 	}
 	return fmt.Sprintf("human:user-%d", a.UserID)
 }

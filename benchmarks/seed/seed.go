@@ -15,6 +15,10 @@ type Options struct {
 	Seed     uint64
 	// ContextEntries adds that many project context entries (ADR-0015) to the first project.
 	ContextEntries int
+	// LegacyAccess adds accounts and roles as they exist before the organization migration (ADR-0028): three
+	// admins (one deactivated), a project admin, viewer, custom roles wider than, narrower than and equal to
+	// member, 50 members and a user without membership. The password hash is a placeholder: nobody can log in.
+	LegacyAccess bool
 }
 
 var statusSpecs = []struct {
@@ -121,6 +125,11 @@ func Run(w *sql.DB, o Options) error {
 			}
 		}
 	}
+	if o.LegacyAccess {
+		if err := legacyAccess(tx, now); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -152,4 +161,75 @@ func seedContext(tx *sql.Tx, projectID int64, n int, rng *rand.Rand, now int64) 
 	}
 	_, err := tx.Exec(`UPDATE projects SET context_version = ? WHERE id = ?`, n, projectID)
 	return err
+}
+
+func legacyAccess(tx *sql.Tx, now int64) error {
+	exec := func(q string, args ...any) error { _, err := tx.Exec(q, args...); return err }
+	user := func(email string, admin int) (int64, error) {
+		res, err := tx.Exec(`INSERT INTO users (email, name, password_hash, is_admin, created_at) VALUES (?, ?, '!seed', ?, ?)`, email, email, admin, now)
+		if err != nil {
+			return 0, err
+		}
+		return res.LastInsertId()
+	}
+	for _, q := range []string{
+		`INSERT INTO roles (name, builtin) VALUES ('wide', 0), ('narrow', 0), ('same', 0)`,
+		`INSERT INTO role_actions (role, action) SELECT 'same', action FROM role_actions WHERE role = 'member'`,
+		`INSERT INTO role_actions (role, action) SELECT 'wide', action FROM role_actions WHERE role = 'member'`,
+		`INSERT INTO role_actions (role, action) VALUES ('wide', 'workflow'), ('narrow', 'view'), ('narrow', 'comment')`,
+	} {
+		if err := exec(q); err != nil {
+			return err
+		}
+	}
+	rows, err := tx.Query(`SELECT id FROM projects ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var pids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		pids = append(pids, id)
+	}
+	rows.Close()
+	for _, a := range []struct {
+		email string
+		admin int
+	}{{"super@seed.test", 1}, {"admin2@seed.test", 1}, {"gone@seed.test", 1}} {
+		id, err := user(a.email, a.admin)
+		if err != nil {
+			return err
+		}
+		if a.email == "gone@seed.test" {
+			if err := exec(`UPDATE users SET deactivated_at = ? WHERE id = ?`, now, id); err != nil {
+				return err
+			}
+		}
+	}
+	for i, role := range []string{"admin", "viewer", "wide", "narrow", "same", "member"} {
+		id, err := user(role+"@seed.test", 0)
+		if err != nil {
+			return err
+		}
+		if err := exec(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)`, pids[i%len(pids)], id, role); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < 50; i++ {
+		id, err := user(fmt.Sprintf("member%02d@seed.test", i), 0)
+		if err != nil {
+			return err
+		}
+		if err := exec(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'member')`, pids[i%len(pids)], id); err != nil {
+			return err
+		}
+	}
+	if _, err := user("nobody@seed.test", 0); err != nil {
+		return err
+	}
+	return exec(`INSERT INTO invites (code_hash, is_admin, created_at, expires_at) VALUES ('seed-admin-invite', 1, ?, ?)`, now, now+86_400_000)
 }

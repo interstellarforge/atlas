@@ -100,7 +100,7 @@ func TestMailSettingsKeepThePasswordSecret(t *testing.T) {
 func TestMailSettingsPermissionsAndValidation(t *testing.T) {
 	e, _, _ := mailEnv(t)
 	in := core.MailInput{Host: "smtp.x.io", Port: 587, Security: "starttls", FromAddr: "atlas@x.io"}
-	token := auth.Actor{Kind: auth.KindToken, UserID: e.admin.UserID, IsAdmin: true, Scopes: []string{"write"}}
+	token := auth.Actor{Kind: auth.KindToken, UserID: e.admin.UserID, Scopes: []string{"write"}}
 	for name, a := range map[string]auth.Actor{"member": e.alice, "token": token} {
 		if _, err := e.svc.SetMailSettings(ctx, a, in); !errors.Is(err, core.ErrForbidden) {
 			t.Fatalf("%s saving: %v", name, err)
@@ -161,14 +161,14 @@ func outbox(e *env) (n int, subject, body string) {
 func TestInviteMail(t *testing.T) {
 	e, _, _ := mailEnv(t)
 	// Not configured: behaviour is unchanged, nothing queued.
-	if _, _, err := e.svc.CreateInvite(ctx, e.admin, "new@x.io", false, 7); err != nil {
+	if _, _, err := e.svc.CreateInvite(ctx, e.admin, "new@x.io", 7); err != nil {
 		t.Fatal(err)
 	}
 	if n, _, _ := outbox(e); n != 0 {
 		t.Fatalf("%d mails queued without configuration", n)
 	}
 	saveMail(t, e, nil)
-	_, code, err := e.svc.CreateInvite(ctx, e.admin, "other@x.io", false, 7)
+	_, code, err := e.svc.CreateInvite(ctx, e.admin, "other@x.io", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestInviteMail(t *testing.T) {
 		t.Fatalf("queued: %d %q %q", n, subject, body)
 	}
 	// An invite without an address is not mailed.
-	if _, _, err := e.svc.CreateInvite(ctx, e.admin, "", false, 7); err != nil {
+	if _, _, err := e.svc.CreateInvite(ctx, e.admin, "", 7); err != nil {
 		t.Fatal(err)
 	}
 	if n, _, _ := outbox(e); n != 1 {
@@ -188,7 +188,7 @@ func TestInviteMail(t *testing.T) {
 func TestNotificationMailFollowsThePreference(t *testing.T) {
 	e, _, _ := mailEnv(t)
 	e.project("EXO")
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.aliceID, "member"); err != nil {
+	if err := e.member("EXO", e.aliceID, "member"); err != nil {
 		t.Fatal(err)
 	}
 	saveMail(t, e, nil)

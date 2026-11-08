@@ -3,6 +3,7 @@ package core_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,7 +24,7 @@ type env struct {
 }
 
 func human(id int64, admin bool) auth.Actor {
-	return auth.Actor{Kind: auth.KindHuman, UserID: id, IsAdmin: admin}
+	return auth.Actor{Kind: auth.KindHuman, UserID: id}
 }
 
 func setup(t *testing.T) *env {
@@ -48,12 +49,41 @@ func setup(t *testing.T) *env {
 	adminID := mk("admin@x.io", true)
 	e.aliceID, e.bobID, e.carolID = mk("alice@x.io", false), mk("bob@x.io", false), mk("carol@x.io", false)
 	e.admin, e.alice, e.bob, e.carol = human(adminID, true), human(e.aliceID, false), human(e.bobID, false), human(e.carolID, false)
+	if _, err := e.svc.CreateOrganization(context.Background(), e.admin, "MAIN", "Main", 0); err != nil {
+		t.Fatal(err)
+	}
 	return e
+}
+
+// orgUser makes a user a plain member of the main organization: no project access.
+func (e *env) orgUser(id int64) {
+	e.t.Helper()
+	if err := e.svc.SetOrgMember(context.Background(), e.admin, "MAIN", id, "user", false); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// member puts a user in the main organization and, for role "admin", makes them its ADMIN; any other role adds the
+// user to the project as member. There is no viewer role (ADR-0029).
+func (e *env) member(key string, id int64, role string) error {
+	ctx := context.Background()
+	if e.count(`SELECT COUNT(*) FROM organization_memberships WHERE user_id = ?`, id) == 0 {
+		if err := e.svc.SetOrgMember(ctx, e.admin, "MAIN", id, "user", false); err != nil {
+			return err
+		}
+	}
+	switch role {
+	case "admin":
+		return e.svc.SetOrgMember(ctx, e.admin, "MAIN", id, "admin", false)
+	case "member", "":
+		return e.svc.SetMember(ctx, e.admin, key, id, "member")
+	}
+	return fmt.Errorf("role %q no longer exists", role)
 }
 
 func (e *env) project(key string) {
 	e.t.Helper()
-	if _, err := e.svc.CreateProject(context.Background(), e.admin, key, key+" project"); err != nil {
+	if _, err := e.svc.CreateProjectIn(context.Background(), e.admin, "MAIN", key, key+" project"); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -127,11 +157,10 @@ func TestPermissions(t *testing.T) {
 	e := setup(t)
 	e.project("EXO")
 	e.project("OTH")
-	for id, role := range map[int64]string{e.aliceID: "member", e.bobID: "viewer"} {
-		if err := e.svc.SetMember(ctx, e.admin, "EXO", id, role); err != nil {
-			t.Fatal(err)
-		}
+	if err := e.member("EXO", e.aliceID, "member"); err != nil {
+		t.Fatal(err)
 	}
+	e.orgUser(e.bobID) // organization membership alone gives no project access
 	it := e.item(e.alice, core.CreateItem{Project: "EXO", Type: "story", Title: "visible"})
 
 	// Not a member: the project does not exist for carol.
@@ -141,15 +170,15 @@ func TestPermissions(t *testing.T) {
 	if ps, _ := e.svc.ListProjects(ctx, e.carol); len(ps) != 0 {
 		t.Fatalf("carol sees %d projects", len(ps))
 	}
-	// Viewer reads but cannot write.
-	if _, err := e.svc.GetItem(ctx, e.bob, it.Key); err != nil {
-		t.Fatalf("viewer read: %v", err)
+	// An organization member without a project row sees nothing of the project.
+	if _, err := e.svc.GetItem(ctx, e.bob, it.Key); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("org member read: %v", err)
 	}
-	if _, err := e.svc.UpdateItem(ctx, e.bob, it.Key, it.Version, map[string]any{"title": "x"}); !errors.Is(err, core.ErrForbidden) {
-		t.Fatalf("viewer write: %v", err)
+	if _, err := e.svc.UpdateItem(ctx, e.bob, it.Key, it.Version, map[string]any{"title": "x"}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("org member write: %v", err)
 	}
-	if _, err := e.svc.CreateItem(ctx, e.bob, core.CreateItem{Project: "EXO", Type: "task", Title: "x"}); !errors.Is(err, core.ErrForbidden) {
-		t.Fatalf("viewer create: %v", err)
+	if _, err := e.svc.CreateItem(ctx, e.bob, core.CreateItem{Project: "EXO", Type: "task", Title: "x"}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("org member create: %v", err)
 	}
 	// Members cannot administer the project.
 	if _, err := e.svc.AddStatus(ctx, e.alice, "EXO", "Blocked", "active", nil); !errors.Is(err, core.ErrForbidden) {
@@ -170,9 +199,12 @@ func TestPermissions(t *testing.T) {
 		t.Fatalf("token outside its project list: %v", err)
 	}
 
-	// The last admin cannot be removed.
-	if err := e.svc.RemoveMember(ctx, e.admin, "EXO", e.admin.UserID); !isRule(err) {
-		t.Fatalf("remove last admin: %v", err)
+	// Removing someone who is not a member is not found; a member cannot remove members.
+	if err := e.svc.RemoveMember(ctx, e.admin, "EXO", e.bobID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("remove a non-member: %v", err)
+	}
+	if err := e.svc.RemoveMember(ctx, e.alice, "EXO", e.aliceID); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("member removing members: %v", err)
 	}
 }
 
@@ -362,7 +394,7 @@ func TestCustomFieldsValidation(t *testing.T) {
 func TestImportCommentKeepsAuthorAndTimeForAdminsOnly(t *testing.T) {
 	e := setup(t)
 	e.project("EXO")
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.aliceID, "member"); err != nil {
+	if err := e.member("EXO", e.aliceID, "member"); err != nil {
 		t.Fatal(err)
 	}
 	it := e.item(e.alice, core.CreateItem{Project: "EXO", Type: "story", Title: "migrated"})
@@ -379,5 +411,50 @@ func TestImportCommentKeepsAuthorAndTimeForAdminsOnly(t *testing.T) {
 	}
 	if _, err := e.svc.ImportComment(ctx, e.admin, it.Key, "old", "", 1); !isInvalid(err) {
 		t.Fatalf("missing author: %v", err)
+	}
+}
+
+// ADR-0029: the Actor holds no privilege; losing admin or being deactivated applies to an open session at once.
+func TestRightsAreResolvedLive(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.project("EXO")
+	if err := e.member("EXO", e.aliceID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.GetProject(ctx, e.alice, "EXO"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.W.Exec(`UPDATE users SET deactivated_at = 1 WHERE id = ?`, e.aliceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.GetProject(ctx, e.alice, "EXO"); err == nil {
+		t.Fatal("a deactivated member kept project access with an open session")
+	}
+	if err := e.member("", e.bobID, "admin"); err != nil { // bob administers the organization
+		t.Fatal(err)
+	}
+	if _, err := e.svc.CreateProject(ctx, e.bob, "BOB", "Bob"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.GetProject(ctx, e.admin, "BOB"); err != nil {
+		t.Fatal(err)
+	}
+	mkUserWith(t, e, "second-super@x.io", true) // the last superadmin cannot be demoted, even by SQL
+	if _, err := e.db.W.Exec(`UPDATE users SET is_superadmin = 0 WHERE id = ?`, e.admin.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.ListAdminUsers(ctx, e.admin); !errors.Is(err, core.ErrForbidden) {
+		t.Fatal("a demoted admin kept instance administration with an open session")
+	}
+	// still ADMIN of the organization: project access stays, until that goes too
+	if _, err := e.svc.GetProject(ctx, e.admin, "BOB"); err != nil {
+		t.Fatalf("an organization admin lost project access: %v", err)
+	}
+	if _, err := e.db.W.Exec(`DELETE FROM organization_memberships WHERE user_id = ?`, e.admin.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.GetProject(ctx, e.admin, "BOB"); err == nil {
+		t.Fatal("a removed organization admin kept project access with an open session")
 	}
 }

@@ -39,7 +39,7 @@ func (s *Service) UpdateProfile(ctx context.Context, a auth.Actor, name string) 
 		if _, err := tx.Exec(`UPDATE users SET name = ? WHERE id = ?`, name, a.UserID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(`SELECT id, email, name, is_admin FROM users WHERE id = ?`, a.UserID).Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin); err != nil {
+		if err := tx.QueryRow(`SELECT id, email, name, is_superadmin FROM users WHERE id = ?`, a.UserID).Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin); err != nil {
 			return err
 		}
 		return s.journal(ctx, tx, a, change{Operation: "account.profile", Target: a.String(), Event: "account.updated", Changes: map[string]any{"name": name}})

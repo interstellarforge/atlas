@@ -20,11 +20,10 @@ type Policy struct {
 	Registration      string `json:"registration"`        // closed (admins create accounts), invite or open
 	AllowedDomain     string `json:"allowed_domain"`      // open registration only: e.g. example.com; empty = any
 	SessionDays       int    `json:"session_days"`        // 1-90
-	DefaultRole       string `json:"default_role"`        // project role used when a member is added without one
 	DoneVisibleDays   int    `json:"done_visible_days"`   // 0-3650: lists hide completed items not updated for this long; 0 = never
 }
 
-var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14, DefaultRole: "member", DoneVisibleDays: 14}
+var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14, DoneVisibleDays: 14}
 
 func loadPolicy(q queryer) Policy {
 	p := defaultPolicy
@@ -47,8 +46,6 @@ func loadPolicy(q queryer) Policy {
 			p.AllowedDomain = v
 		case "session_days":
 			p.SessionDays, _ = strconv.Atoi(v)
-		case "default_role":
-			p.DefaultRole = v
 		case "done_visible_days":
 			if n, err := strconv.Atoi(v); err == nil {
 				p.DoneVisibleDays = n
@@ -79,14 +76,14 @@ func (s *Service) ApplyPolicy() {
 }
 
 func (s *Service) GetPolicy(ctx context.Context, a auth.Actor) (Policy, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return Policy{}, err
 	}
 	return s.Policy(), nil
 }
 
 func (s *Service) SetPolicy(ctx context.Context, a auth.Actor, p Policy) (Policy, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return Policy{}, err
 	}
 	p.AllowedDomain = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(p.AllowedDomain), "@"))
@@ -94,19 +91,9 @@ func (s *Service) SetPolicy(ctx context.Context, a auth.Actor, p Policy) (Policy
 		!slices.Contains([]string{"closed", "invite", "open"}, p.Registration) || strings.ContainsAny(p.AllowedDomain, " @/") {
 		return Policy{}, invalid("min_password_length 8-128, session_days 1-90, done_visible_days 0-3650, registration closed, invite or open, allowed_domain like example.com")
 	}
-	if p.DefaultRole == "" {
-		p.DefaultRole = defaultPolicy.DefaultRole
-	}
 	err := s.tx(func(tx *sql.Tx) error {
-		var known int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM roles WHERE name = ?`, p.DefaultRole).Scan(&known); err != nil {
-			return err
-		}
-		if known == 0 {
-			return invalid("unknown default_role")
-		}
 		for k, v := range map[string]string{"min_password_length": strconv.Itoa(p.MinPasswordLength), "registration": p.Registration,
-			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays), "default_role": p.DefaultRole,
+			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays),
 			"done_visible_days": strconv.Itoa(p.DoneVisibleDays)} {
 			if _, err := tx.Exec(`INSERT INTO instance_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, k, v); err != nil {
 				return err
@@ -144,7 +131,6 @@ func validEmail(email string) (string, error) {
 type Invite struct {
 	ID        int64  `json:"id"`
 	Email     string `json:"email"`
-	IsAdmin   bool   `json:"is_admin"`
 	CreatedAt int64  `json:"created_at"`
 	ExpiresAt int64  `json:"expires_at"`
 	UsedAt    *int64 `json:"used_at"`
@@ -152,8 +138,8 @@ type Invite struct {
 
 // CreateInvite returns the invite code once; only its hash is stored. An invite with an email can only be
 // redeemed with that email. With email set up (ADR-0012) the invite is also mailed; otherwise the admin passes the code on.
-func (s *Service) CreateInvite(ctx context.Context, a auth.Actor, email string, admin bool, days int) (Invite, string, error) {
-	if err := adminOnly(a); err != nil {
+func (s *Service) CreateInvite(ctx context.Context, a auth.Actor, email string, days int) (Invite, string, error) {
+	if err := s.adminOnly(a); err != nil {
 		return Invite{}, "", err
 	}
 	if email = strings.TrimSpace(email); email != "" {
@@ -171,10 +157,10 @@ func (s *Service) CreateInvite(ctx context.Context, a auth.Actor, email string, 
 	}
 	code := base64.RawURLEncoding.EncodeToString(b)
 	now := s.nowMs()
-	inv := Invite{Email: email, IsAdmin: admin, CreatedAt: now, ExpiresAt: now + int64(days)*86_400_000}
+	inv := Invite{Email: email, CreatedAt: now, ExpiresAt: now + int64(days)*86_400_000}
 	err := s.tx(func(tx *sql.Tx) error {
-		res, err := tx.Exec(`INSERT INTO invites (code_hash, email, is_admin, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			auth.HashRecoveryCode(code), email, admin, a.UserID, inv.CreatedAt, inv.ExpiresAt)
+		res, err := tx.Exec(`INSERT INTO invites (code_hash, email, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+			auth.HashRecoveryCode(code), email, a.UserID, inv.CreatedAt, inv.ExpiresAt)
 		if err != nil {
 			return err
 		}
@@ -188,16 +174,16 @@ func (s *Service) CreateInvite(ctx context.Context, a auth.Actor, email string, 
 			}
 		}
 		return s.journal(ctx, tx, a, change{Operation: "invite.create", Target: "invite-" + strconv.FormatInt(inv.ID, 10), Event: "admin.updated",
-			Changes: map[string]any{"email": email, "is_admin": admin}}) // never the code
+			Changes: map[string]any{"email": email}}) // never the code
 	})
 	return inv, code, err
 }
 
 func (s *Service) ListInvites(ctx context.Context, a auth.Actor) ([]Invite, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, email, is_admin, created_at, expires_at, used_at FROM invites ORDER BY id DESC LIMIT 200`)
+	rows, err := s.db.R.Query(`SELECT id, email, created_at, expires_at, used_at FROM invites ORDER BY id DESC LIMIT 200`)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +192,7 @@ func (s *Service) ListInvites(ctx context.Context, a auth.Actor) ([]Invite, erro
 	for rows.Next() {
 		var i Invite
 		var used sql.NullInt64
-		if err := rows.Scan(&i.ID, &i.Email, &i.IsAdmin, &i.CreatedAt, &i.ExpiresAt, &used); err != nil {
+		if err := rows.Scan(&i.ID, &i.Email, &i.CreatedAt, &i.ExpiresAt, &used); err != nil {
 			return nil, err
 		}
 		if used.Valid {
@@ -218,7 +204,7 @@ func (s *Service) ListInvites(ctx context.Context, a auth.Actor) ([]Invite, erro
 }
 
 func (s *Service) RevokeInvite(ctx context.Context, a auth.Actor, id int64) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
@@ -254,15 +240,14 @@ func (s *Service) Register(ctx context.Context, email, name, password, invite st
 	}
 	var u User
 	err = s.tx(func(tx *sql.Tx) error {
-		admin := false
 		var inviteID int64
 		switch {
 		case invite != "":
 			var invEmail string
 			var expires int64
 			var used sql.NullInt64
-			err := tx.QueryRow(`SELECT id, email, is_admin, expires_at, used_at FROM invites WHERE code_hash = ?`, auth.HashRecoveryCode(invite)).
-				Scan(&inviteID, &invEmail, &admin, &expires, &used)
+			err := tx.QueryRow(`SELECT id, email, expires_at, used_at FROM invites WHERE code_hash = ?`, auth.HashRecoveryCode(invite)).
+				Scan(&inviteID, &invEmail, &expires, &used)
 			if err == sql.ErrNoRows || (err == nil && (used.Valid || expires < s.nowMs() || (invEmail != "" && !strings.EqualFold(invEmail, email)))) {
 				return rule("this invite is not valid")
 			}
@@ -276,14 +261,14 @@ func (s *Service) Register(ctx context.Context, email, name, password, invite st
 		default:
 			return ErrForbidden
 		}
-		res, err := tx.Exec(`INSERT INTO users (email, name, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)`, email, name, hash, admin, s.nowMs())
+		res, err := tx.Exec(`INSERT INTO users (email, name, password_hash, created_at) VALUES (?, ?, ?, ?)`, email, name, hash, s.nowMs())
 		if err != nil {
 			if isUnique(err) {
 				return rule("email already in use")
 			}
 			return err
 		}
-		u = User{Email: email, Name: name, IsAdmin: admin}
+		u = User{Email: email, Name: name}
 		u.ID, _ = res.LastInsertId()
 		if inviteID != 0 {
 			if _, err := tx.Exec(`UPDATE invites SET used_at = ?, used_by = ? WHERE id = ?`, s.nowMs(), u.ID, inviteID); err != nil {

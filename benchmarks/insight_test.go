@@ -37,7 +37,7 @@ func TestInsight(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := core.New(d, a)
-	actor := auth.Actor{Kind: auth.KindHuman, UserID: u.ID, IsAdmin: true}
+	actor := auth.Actor{Kind: auth.KindHuman, UserID: u.ID}
 	ctx := context.Background()
 	var project string
 	var pid int64

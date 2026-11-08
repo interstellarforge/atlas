@@ -239,14 +239,13 @@ func (s *Server) adminInvites(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminCreateInvite(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Email   string `json:"email"`
-		IsAdmin bool   `json:"is_admin"`
-		Days    int    `json:"days"`
+		Email string `json:"email"`
+		Days  int    `json:"days"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	inv, code, err := s.core.CreateInvite(r.Context(), actor(r), in.Email, in.IsAdmin, in.Days)
+	inv, code, err := s.core.CreateInvite(r.Context(), actor(r), in.Email, in.Days)
 	if err != nil {
 		s.fail(w, r, err)
 		return

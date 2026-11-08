@@ -40,7 +40,7 @@
 
   let update = $state<UpdateStatus | undefined>();
   $effect(() => {
-    if (!user.is_admin) return;
+    if (!user.is_superadmin) return;
     getUpdateStatus().then(
       (u) => (update = u.available ? u : undefined),
       () => undefined, // advisory only
@@ -80,7 +80,9 @@
     icon: "key",
     label: "nav.admin",
   } as const;
-  const visibleLinks = $derived(user.is_admin ? [...links, adminLink] : links);
+  const visibleLinks = $derived(
+    user.is_superadmin ? [...links, adminLink] : links,
+  );
 
   const viewLabel = {
     overview: "project.overview",

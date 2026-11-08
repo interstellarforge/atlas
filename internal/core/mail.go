@@ -79,7 +79,7 @@ func (s *Service) MailWorkerSettings() (notifications.Settings, bool, error) {
 }
 
 func (s *Service) GetMailSettings(ctx context.Context, a auth.Actor) (MailSettings, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return MailSettings{}, err
 	}
 	st, source, err := s.MailEffective(s.db.R)
@@ -98,7 +98,7 @@ type MailInput struct {
 }
 
 func (s *Service) SetMailSettings(ctx context.Context, a auth.Actor, in MailInput) (MailSettings, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return MailSettings{}, err
 	}
 	st := notifications.Settings{Host: strings.TrimSpace(in.Host), Port: in.Port, Security: in.Security, Username: strings.TrimSpace(in.Username),
@@ -136,7 +136,7 @@ func (s *Service) SetMailSettings(ctx context.Context, a auth.Actor, in MailInpu
 
 // ClearMailSettings drops the stored settings, so the environment defaults (if any) apply again.
 func (s *Service) ClearMailSettings(ctx context.Context, a auth.Actor) (MailSettings, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return MailSettings{}, err
 	}
 	err := s.tx(func(tx *sql.Tx) error {
@@ -154,7 +154,7 @@ func (s *Service) ClearMailSettings(ctx context.Context, a auth.Actor) (MailSett
 // SendTestMail sends straight away (not through the outbox) to the admin's own address, so a wrong setting
 // is reported right where it was entered.
 func (s *Service) SendTestMail(ctx context.Context, a auth.Actor) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	st, _, err := s.MailEffective(s.db.R)

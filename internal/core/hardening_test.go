@@ -12,7 +12,7 @@ import (
 
 func TestCreateUserIsHumanAdminOnlyAndJournaled(t *testing.T) {
 	e, ctx := setup(t), context.Background()
-	pat := auth.Actor{Kind: auth.KindToken, UserID: e.admin.UserID, TokenID: 1, IsAdmin: true, Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}
+	pat := auth.Actor{Kind: auth.KindToken, UserID: e.admin.UserID, TokenID: 1, Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}
 	if _, err := e.svc.CreateUser(ctx, pat, "evil@x.io", "Evil", "password-123", true); !errors.Is(err, core.ErrForbidden) {
 		t.Fatalf("token created a user: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestTokenListsOnlyUsersSharingItsProjects(t *testing.T) {
 		key string
 		id  int64
 	}{{"EXO", e.aliceID}, {"EXO", e.bobID}, {"OTH", e.carolID}} {
-		if err := e.svc.SetMember(ctx, e.admin, m.key, m.id, ""); err != nil {
+		if err := e.member(m.key, m.id, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -47,7 +47,7 @@ func TestTokenListsOnlyUsersSharingItsProjects(t *testing.T) {
 	got := map[int64]bool{}
 	for _, u := range list {
 		got[u.ID] = true
-		if u.IsAdmin {
+		if u.IsSuperadmin {
 			t.Fatal("token saw an admin flag")
 		}
 	}
@@ -95,7 +95,7 @@ func TestDeleteAccountScrubsEmailFromAudit(t *testing.T) {
 	if _, err := e.svc.ChangeEmail(ctx, e.alice, "alice.new@x.io", "password-123"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := e.svc.CreateInvite(ctx, e.admin, "alice.new@x.io", false, 7); err != nil {
+	if _, _, err := e.svc.CreateInvite(ctx, e.admin, "alice.new@x.io", 7); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.svc.DeleteAccount(ctx, e.alice, "password-123"); err != nil {

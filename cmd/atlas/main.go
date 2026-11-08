@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/kees/atlas/internal/mcp"
 	"github.com/kees/atlas/internal/media"
 	"github.com/kees/atlas/internal/notifications"
+	"github.com/kees/atlas/internal/orgmigrate"
 	"github.com/kees/atlas/internal/repo"
 	"github.com/kees/atlas/internal/scheduler"
 	"github.com/kees/atlas/internal/update"
@@ -98,11 +100,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	svc := core.New(database, authSvc)
 	if created {
 		slog.Info("admin user created", "email", cfg.AdminEmail)
+		if err := svc.BootstrapOrganization(context.Background(), cfg.AdminEmail, envOr("ATLAS_DEFAULT_ORG_KEY", "DEFAULT"), envOr("ATLAS_DEFAULT_ORG_NAME", "Default organization")); err != nil {
+			return err
+		}
 	}
-
-	svc := core.New(database, authSvc)
 	uploads := media.NewStore(filepath.Join(cfg.DataDir, "uploads"), media.Limits{MaxBytes: cfg.UploadMaxBytes, MaxPixels: cfg.UploadMaxMegapixels})
 	svc.SetMedia(uploads)
 	svc.SetRepoFetcher(repo.NewFetcher(cfg.RepoAllowPrivate))
@@ -111,6 +115,14 @@ func run() error {
 	svc.ApplyPolicy()
 	if len(os.Args) > 1 {
 		return runCommand(svc, database, cfg.DataDir, os.Args[1:])
+	}
+	if reason, err := svc.UnmigratedReason(); err != nil {
+		return err
+	} else if reason != "" {
+		return fmt.Errorf("this database predates organizations (%s); run `atlas migrate-orgs --dry-run`, review the report and follow the runbook in docs/operations.md", reason)
+	}
+	if err := orgmigrate.Finalize(database); err != nil { // fresh or migrated: enforce project organizations, drop legacy flags
+		return err
 	}
 	feed := events.New(database, svc)
 	svc.SetNotifier(feed.Hub().Notify)

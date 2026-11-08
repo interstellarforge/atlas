@@ -7,9 +7,9 @@ Lightweight, MCP-native project management. Go + SQLite + Svelte 5, one containe
 - Backend: `go build ./...`, `go vet ./...`, `go test ./...`
 - Frontend (Node 24, pnpm): `pnpm --dir web install`, then `typecheck`, `lint`, `format`, `build`
 - Run: `ATLAS_ADMIN_EMAIL=… ATLAS_ADMIN_PASSWORD=… ATLAS_COOKIE_SECURE=false docker compose up --build`
-- Seed 10.000 items: `go run ./cmd/atlas-seed -data-dir ./data` (`-context 200` adds context entries to the first project)
+- Seed 10.000 items: `go run ./cmd/atlas-seed -data-dir ./data` (`-context 200` adds context entries to the first project, `-legacy-access` adds pre-organization accounts and roles)
 - Benchmarks: `ATLAS_BENCH=1 go test ./benchmarks -run Baseline -v`, `benchmarks/rss.sh`
-- Config env: `ATLAS_ADDR`, `ATLAS_DATA_DIR`, `ATLAS_LOG_LEVEL`, `ATLAS_SYNCHRONOUS` (FULL|NORMAL), `ATLAS_COOKIE_SECURE`, `ATLAS_EVENT_RETENTION_DAYS`, `ATLAS_UPLOAD_MAX_MB` (10), `ATLAS_UPLOAD_MAX_MEGAPIXELS` (20), `ATLAS_MCP_WRITES_PER_HOUR` (500), `ATLAS_PUBLIC_URL`, `ATLAS_UPDATE_CHECK` (true), `ATLAS_REPO_ALLOW_PRIVATE`, `ATLAS_TRUSTED_PROXIES`, `ATLAS_SMTP_HOST|PORT|SECURITY|USER|PASSWORD|FROM|FROM_NAME` (optional email)
+- Config env: `ATLAS_ADDR`, `ATLAS_DATA_DIR`, `ATLAS_LOG_LEVEL`, `ATLAS_SYNCHRONOUS` (FULL|NORMAL), `ATLAS_COOKIE_SECURE`, `ATLAS_EVENT_RETENTION_DAYS`, `ATLAS_UPLOAD_MAX_MB` (10), `ATLAS_UPLOAD_MAX_MEGAPIXELS` (20), `ATLAS_MCP_WRITES_PER_HOUR` (500), `ATLAS_PUBLIC_URL`, `ATLAS_UPDATE_CHECK` (true), `ATLAS_REPO_ALLOW_PRIVATE`, `ATLAS_TRUSTED_PROXIES`, `ATLAS_SMTP_HOST|PORT|SECURITY|USER|PASSWORD|FROM|FROM_NAME` (optional email), `ATLAS_SUPERADMIN_EMAIL`, `ATLAS_DEFAULT_ORG_KEY|NAME` (only for `atlas migrate-orgs`, docs/operations.md)
 
 ## Rules
 

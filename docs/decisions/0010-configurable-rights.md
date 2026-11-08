@@ -1,6 +1,6 @@
 # ADR-0010: Configurable rights and custom roles
 
-- Status: accepted
+- Status: superseded by ADR-0029
 - Date: 2026-10-27
 - Supersedes: decision 1 of ADR-0008
 

@@ -461,13 +461,14 @@ func checkAssignee(q queryer, projectID int64, assignee *int64) error {
 	if assignee == nil {
 		return nil
 	}
-	var ok int
-	err := q.QueryRow(`SELECT 1 FROM users u WHERE u.id = ? AND (u.is_admin = 1 OR
-		EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = ? AND m.user_id = u.id))`, *assignee, projectID).Scan(&ok)
-	if errors.Is(err, sql.ErrNoRows) {
+	ok, err := canReachProject(q, *assignee, projectID)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return invalid("assignee %d is not a member of the project", *assignee)
 	}
-	return err
+	return nil
 }
 
 func setLabels(tx *sql.Tx, projectID, itemID int64, names []string) error {

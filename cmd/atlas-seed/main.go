@@ -18,9 +18,10 @@ func main() {
 	projects := flag.Int("projects", 3, "number of projects")
 	seedVal := flag.Uint64("seed", 1, "random seed")
 	contextEntries := flag.Int("context", 0, "number of project context entries in the first project")
+	legacy := flag.Bool("legacy-access", false, "add pre-organization accounts and roles (admins, viewer, custom roles) for migration rehearsals")
 	flag.Parse()
 
-	if err := run(*dir, seed.Options{Items: *items, Projects: *projects, Seed: *seedVal, ContextEntries: *contextEntries}); err != nil {
+	if err := run(*dir, seed.Options{Items: *items, Projects: *projects, Seed: *seedVal, ContextEntries: *contextEntries, LegacyAccess: *legacy}); err != nil {
 		fmt.Fprintln(os.Stderr, "atlas-seed:", err)
 		os.Exit(1)
 	}

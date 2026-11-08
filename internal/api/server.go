@@ -73,7 +73,16 @@ func New(d Deps) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	protect := func(h http.HandlerFunc) http.Handler { return auth.Require(writeError, h) }
+	// Admin routes are refused before the request body is read: 403 for everyone but a SUPERADMIN (ADR-0029).
+	protect := func(h http.HandlerFunc) http.Handler {
+		return auth.Require(writeError, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/api/v1/admin/") && !s.core.IsSuperadmin(actor(r)) {
+				writeError(w, http.StatusForbidden, "forbidden", "not allowed")
+				return
+			}
+			h(w, r)
+		}))
+	}
 
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -98,7 +107,7 @@ func (s *Server) Handler() http.Handler {
 	if s.mcpStats != nil {
 		// Admins only: the answer says who is connected.
 		mux.Handle("GET /api/v1/mcp/stats", protect(func(w http.ResponseWriter, r *http.Request) {
-			if a := actor(r); a.Kind != auth.KindHuman || !a.IsAdmin {
+			if a := actor(r); !s.core.IsSuperadmin(a) {
 				writeError(w, http.StatusForbidden, "forbidden", "administrators only")
 				return
 			}

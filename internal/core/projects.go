@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"regexp"
 	"strings"
 
@@ -17,8 +16,14 @@ var defaultStatuses = []struct{ Name, Category string }{
 	{"Backlog", "todo"}, {"Todo", "todo"}, {"In Progress", "active"}, {"Review", "review"}, {"Done", "completed"},
 }
 
-// CreateProject creates a project with the default workflow; the creator becomes its admin.
+// CreateProject creates a project with the default workflow in the only organization the actor may administer.
 func (s *Service) CreateProject(ctx context.Context, a auth.Actor, key, name string) (Project, error) {
+	return s.CreateProjectIn(ctx, a, "", key, name)
+}
+
+// CreateProjectIn creates a project in an organization (SUPERADMIN, or ADMIN of that organization). An empty
+// orgKey means the actor's only organization.
+func (s *Service) CreateProjectIn(ctx context.Context, a auth.Actor, orgKey, key, name string) (Project, error) {
 	if !a.Can(auth.ScopeWrite) {
 		return Project{}, ErrForbidden
 	}
@@ -35,7 +40,11 @@ func (s *Service) CreateProject(ctx context.Context, a auth.Actor, key, name str
 
 	p := Project{Key: key, Name: name, CreatedAt: s.nowMs(), Role: "admin"}
 	err := s.tx(func(tx *sql.Tx) error {
-		res, err := tx.Exec(`INSERT INTO projects (key, name, created_at) VALUES (?, ?, ?)`, key, name, p.CreatedAt)
+		org, err := s.projectOrganization(tx, a, orgKey)
+		if err != nil {
+			return err
+		}
+		res, err := tx.Exec(`INSERT INTO projects (key, name, created_at, organization_id) VALUES (?, ?, ?, ?)`, key, name, p.CreatedAt, org.ID)
 		if err != nil {
 			if isUnique(err) {
 				return rule("project key %s already exists", key)
@@ -48,9 +57,6 @@ func (s *Service) CreateProject(ctx context.Context, a auth.Actor, key, name str
 				p.ID, st.Name, i, st.Category); err != nil {
 				return err
 			}
-		}
-		if _, err := tx.Exec(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'admin')`, p.ID, a.UserID); err != nil {
-			return err
 		}
 		return s.journal(ctx, tx, a, change{Operation: "project.create", Target: key, Event: "project.created",
 			Project: key, Changes: map[string]any{"name": name}})
@@ -166,11 +172,11 @@ func (s *Service) UpdateProject(ctx context.Context, a auth.Actor, key string, p
 // ---- users and members ----
 
 type User struct {
-	ID      int64  `json:"id"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	IsAdmin bool   `json:"is_admin"`
-	Avatar  bool   `json:"avatar"`
+	ID           int64  `json:"id"`
+	Email        string `json:"email"`
+	Name         string `json:"name"`
+	IsSuperadmin bool   `json:"is_superadmin"`
+	Avatar       bool   `json:"avatar"`
 }
 
 type Member struct {
@@ -180,16 +186,17 @@ type Member struct {
 	Role   string `json:"role"`
 }
 
-// ListUsers lists everyone for a signed-in person (assignee pickers). A token only sees people who share a
-// project it may access, without the global admin flag.
+// ListUsers lists the people the actor may see (assignee pickers; see visibleUsersQuery). Only a SUPERADMIN
+// session sees who else is SUPERADMIN.
 func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 	if !a.Can(auth.ScopeRead) {
 		return nil, ErrForbidden
 	}
-	q, args := `SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users ORDER BY name`, []any(nil)
-	if a.Kind == auth.KindToken {
-		q, args = s.sharedUsersQuery(a)
+	q, args, err := s.visibleUsersQuery(a)
+	if err != nil {
+		return nil, err
 	}
+	showFlag := s.IsSuperadmin(a)
 	rows, err := s.db.R.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -198,38 +205,20 @@ func (s *Service) ListUsers(ctx context.Context, a auth.Actor) ([]User, error) {
 	out := []User{}
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.Avatar); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.Avatar); err != nil {
 			return nil, err
 		}
-		if a.Kind == auth.KindToken {
-			u.IsAdmin = false
+		if !showFlag {
+			u.IsSuperadmin = false
 		}
 		out = append(out, u)
 	}
 	return out, rows.Err()
 }
 
-// sharedUsersQuery selects the users that are members of a project the token owner can reach and the token may use.
-func (s *Service) sharedUsersQuery(a auth.Actor) (string, []any) {
-	q := `SELECT id, email, name, is_admin, avatar_path IS NOT NULL FROM users WHERE id IN (
-		SELECT m.user_id FROM project_members m JOIN projects p ON p.id = m.project_id WHERE 1 = 1`
-	var args []any
-	if !a.IsAdmin {
-		q += ` AND p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)`
-		args = append(args, a.UserID)
-	}
-	if a.Projects != nil {
-		q += ` AND p.key IN (` + strings.TrimSuffix(strings.Repeat("?,", len(a.Projects)), ",") + `)`
-		for _, k := range a.Projects {
-			args = append(args, k)
-		}
-	}
-	return q + `) ORDER BY name`, args
-}
-
 // CreateUser is an instance-administration action: human admins only, journaled like every mutation.
 func (s *Service) CreateUser(ctx context.Context, a auth.Actor, email, name, password string, admin bool) (User, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return User{}, err
 	}
 	email = strings.TrimSpace(email)
@@ -243,9 +232,9 @@ func (s *Service) CreateUser(ctx context.Context, a auth.Actor, email, name, pas
 	if err != nil {
 		return User{}, err
 	}
-	u := User{Email: email, Name: name, IsAdmin: admin}
+	u := User{Email: email, Name: name, IsSuperadmin: admin}
 	err = s.tx(func(tx *sql.Tx) error {
-		res, err := tx.Exec(`INSERT INTO users (email, name, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)`,
+		res, err := tx.Exec(`INSERT INTO users (email, name, password_hash, is_superadmin, created_at) VALUES (?, ?, ?, ?, ?)`,
 			email, name, hash, admin, s.nowMs())
 		if err != nil {
 			if isUnique(err) {
@@ -255,7 +244,7 @@ func (s *Service) CreateUser(ctx context.Context, a auth.Actor, email, name, pas
 		}
 		u.ID, _ = res.LastInsertId()
 		return s.journal(ctx, tx, a, change{Operation: "user.create", Target: userTarget(u.ID), Event: "admin.updated",
-			Changes: map[string]any{"is_admin": admin}})
+			Changes: map[string]any{"is_superadmin": admin}})
 	})
 	return u, err
 }
@@ -282,24 +271,15 @@ func (s *Service) ListMembers(ctx context.Context, a auth.Actor, key string) ([]
 	return out, rows.Err()
 }
 
-// SetMember adds or updates a member. An empty roleName means the instance's default role.
+// SetMember adds a member to a project. The only project role is "member" (an empty role means member); the
+// user must already belong to the project's organization (ADR-0027).
 func (s *Service) SetMember(ctx context.Context, a auth.Actor, key string, userID int64, roleName string) error {
-	if roleName == "" {
-		roleName = s.Policy().DefaultRole
+	if roleName != "" && roleName != "member" {
+		return invalid("the only project role is member")
 	}
 	return s.tx(func(tx *sql.Tx) error {
-		p, mine, err := s.access(tx, a, key, actMembers)
+		p, _, err := s.access(tx, a, key, actMembers)
 		if err != nil {
-			return err
-		}
-		var known int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM roles WHERE name = ?`, roleName).Scan(&known); err != nil {
-			return err
-		}
-		if known == 0 {
-			return invalid("unknown role")
-		}
-		if err := guardAdminRole(tx, p.ID, userID, mine, roleName); err != nil {
 			return err
 		}
 		var exists int
@@ -309,30 +289,30 @@ func (s *Service) SetMember(ctx context.Context, a auth.Actor, key string, userI
 		if exists == 0 {
 			return invalid("unknown user")
 		}
-		if roleName != "admin" {
-			if err := s.guardLastAdmin(tx, p.ID, userID); err != nil {
-				return err
-			}
+		if !p.OrganizationID.Valid {
+			return invalid("the project has no organization yet")
 		}
-		if _, err := tx.Exec(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)
-			ON CONFLICT (project_id, user_id) DO UPDATE SET role = excluded.role`, p.ID, userID, roleName); err != nil {
+		var inOrg bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM organization_memberships WHERE organization_id = ? AND user_id = ?)`,
+			p.OrganizationID.Int64, userID).Scan(&inOrg); err != nil {
+			return err
+		}
+		if !inOrg {
+			return invalid("the user is not a member of the project's organization")
+		}
+		if _, err := tx.Exec(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'member')
+			ON CONFLICT (project_id, user_id) DO NOTHING`, p.ID, userID); err != nil {
 			return err
 		}
 		return s.journal(ctx, tx, a, change{Operation: "member.set", Target: key, Event: "project.updated",
-			Project: key, Changes: map[string]any{"user_id": userID, "role": roleName}})
+			Project: key, Changes: map[string]any{"user_id": userID, "role": "member"}})
 	})
 }
 
 func (s *Service) RemoveMember(ctx context.Context, a auth.Actor, key string, userID int64) error {
 	return s.tx(func(tx *sql.Tx) error {
-		p, mine, err := s.access(tx, a, key, actMembers)
+		p, _, err := s.access(tx, a, key, actMembers)
 		if err != nil {
-			return err
-		}
-		if err := guardAdminRole(tx, p.ID, userID, mine, ""); err != nil {
-			return err
-		}
-		if err := s.guardLastAdmin(tx, p.ID, userID); err != nil {
 			return err
 		}
 		res, err := tx.Exec(`DELETE FROM project_members WHERE project_id = ? AND user_id = ?`, p.ID, userID)
@@ -348,43 +328,6 @@ func (s *Service) RemoveMember(ctx context.Context, a auth.Actor, key string, us
 		return s.journal(ctx, tx, a, change{Operation: "member.remove", Target: key, Event: "project.updated",
 			Project: key, Changes: map[string]any{"user_id": userID}})
 	})
-}
-
-// guardAdminRole stops a custom role that holds "members" from escalating: only an admin may grant,
-// change or remove the admin role. newRole is "" when the member is being removed.
-func guardAdminRole(tx *sql.Tx, projectID, userID int64, actorRole, newRole string) error {
-	if actorRole == "admin" {
-		return nil
-	}
-	var cur string
-	err := tx.QueryRow(`SELECT role FROM project_members WHERE project_id = ? AND user_id = ?`, projectID, userID).Scan(&cur)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if cur == "admin" || newRole == "admin" {
-		return ErrForbidden
-	}
-	return nil
-}
-
-// guardLastAdmin refuses to demote or remove the only admin, which would orphan the project.
-func (s *Service) guardLastAdmin(tx *sql.Tx, projectID, userID int64) error {
-	var isAdmin bool
-	err := tx.QueryRow(`SELECT role = 'admin' FROM project_members WHERE project_id = ? AND user_id = ?`, projectID, userID).Scan(&isAdmin)
-	if errors.Is(err, sql.ErrNoRows) || !isAdmin {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var admins int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM project_members WHERE project_id = ? AND role = 'admin'`, projectID).Scan(&admins); err != nil {
-		return err
-	}
-	if admins <= 1 {
-		return rule("a project needs at least one admin")
-	}
-	return nil
 }
 
 func isUnique(err error) bool {

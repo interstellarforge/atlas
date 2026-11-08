@@ -29,15 +29,14 @@ func TestContextRightsAndIsolation(t *testing.T) {
 	e := setup(t)
 	e.project("EXO")
 	e.project("OTH")
-	for id, role := range map[int64]string{e.aliceID: "member", e.bobID: "viewer"} {
-		if err := e.svc.SetMember(ctx, e.admin, "EXO", id, role); err != nil {
-			t.Fatal(err)
-		}
+	if err := e.member("EXO", e.aliceID, "member"); err != nil {
+		t.Fatal(err)
 	}
+	e.orgUser(e.bobID) // organization membership alone gives no project access
 	in := newEntry("Auth flow", "architecture")
 
-	if _, err := e.svc.UpsertContext(ctx, e.bob, "EXO", in); !errors.Is(err, core.ErrForbidden) {
-		t.Fatalf("viewer write: %v", err)
+	if _, err := e.svc.UpsertContext(ctx, e.bob, "EXO", in); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("org member write: %v", err)
 	}
 	if _, err := e.svc.UpsertContext(ctx, e.carol, "EXO", in); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("non-member write: %v", err)
@@ -47,9 +46,9 @@ func TestContextRightsAndIsolation(t *testing.T) {
 		t.Fatalf("member create: %+v %v", res, err)
 	}
 
-	// Reading: viewer yes, non-member sees nothing, other project does not know the key.
-	if _, err := e.svc.GetContext(ctx, e.bob, "EXO", "auth-flow"); err != nil {
-		t.Fatalf("viewer read: %v", err)
+	// Reading: the member yes, anyone else sees nothing, other project does not know the key.
+	if _, err := e.svc.GetContext(ctx, e.alice, "EXO", "auth-flow"); err != nil {
+		t.Fatalf("member read: %v", err)
 	}
 	if _, err := e.svc.GetContext(ctx, e.carol, "EXO", "auth-flow"); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("non-member read: %v", err)
@@ -81,10 +80,10 @@ func TestContextRightsAndIsolation(t *testing.T) {
 func TestContextVerifyIsHumanAndAdminOnly(t *testing.T) {
 	e := setup(t)
 	e.project("EXO")
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.aliceID, "member"); err != nil {
+	if err := e.member("EXO", e.aliceID, "member"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.bobID, "admin"); err != nil {
+	if err := e.member("EXO", e.bobID, "admin"); err != nil {
 		t.Fatal(err)
 	}
 	res, err := e.svc.UpsertContext(ctx, e.alice, "EXO", newEntry("Rank keys", "convention"))

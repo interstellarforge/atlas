@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -142,7 +143,8 @@ func TestDeleteAccount(t *testing.T) {
 	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
 	ann, _ := e.auth.CreateUser("ann@example.com", "Ann", "password-123", false)
 	annID := strconv.FormatInt(ann.ID, 10)
-	e.do("PUT", "/api/v1/projects/EXO/members/"+annID, map[string]any{"role": "admin"}, kees)
+	e.orgAdmin(t, ann.ID) // Ann administers the organization; so does Kees, so she may leave
+	_ = annID
 	annS := loginAs(e, t, "ann@example.com", "password-123")
 	_, annTok, _ := e.auth.CreateToken(ann.ID, "t", []string{auth.ScopeRead}, nil, nil)
 	e.do("POST", "/api/v1/items", map[string]any{"project": "EXO", "type": "task", "title": "by ann"}, annS)
@@ -172,12 +174,13 @@ func TestDeleteAccount(t *testing.T) {
 	if body := e.do("GET", "/api/v1/items/EXO-1", nil, kees).Body.String(); !strings.Contains(body, "by ann") {
 		t.Fatalf("her work disappeared: %s", body)
 	}
-	// A sole project admin cannot leave a project orphaned.
+	// The only admin of an organization cannot leave it without one.
 	bob, _ := e.auth.CreateUser("bob@example.com", "Bob", "password-123", false)
-	e.do("POST", "/api/v1/projects", map[string]any{"key": "BOB", "name": "BOB"}, loginAs(e, t, "bob@example.com", "password-123"))
-	_ = bob
+	if _, err := e.svc.CreateOrganization(context.Background(), auth.Actor{Kind: auth.KindHuman, UserID: 1}, "SOLO", "Solo", bob.ID); err != nil {
+		t.Fatal(err)
+	}
 	if w := e.do("DELETE", "/api/v1/me", map[string]any{"password": "password-123"}, loginAs(e, t, "bob@example.com", "password-123")); w.Code != 422 {
-		t.Fatalf("sole project admin deleted themselves: %d", w.Code)
+		t.Fatalf("sole organization admin deleted themselves: %d", w.Code)
 	}
 }
 
@@ -309,7 +312,7 @@ func TestRegistrationPolicyAndInvites(t *testing.T) {
 	if c := reg("b@elsewhere.example", "password-123", ""); c != 403 {
 		t.Fatalf("invite-only without an invite: %d", c)
 	}
-	w := e.do("POST", "/api/v1/admin/invites", map[string]any{"email": "b@elsewhere.example", "is_admin": true, "days": 3}, kees)
+	w := e.do("POST", "/api/v1/admin/invites", map[string]any{"email": "b@elsewhere.example", "days": 3}, kees)
 	if w.Code != 201 {
 		t.Fatalf("create invite: %d %s", w.Code, w.Body)
 	}
@@ -328,18 +331,18 @@ func TestRegistrationPolicyAndInvites(t *testing.T) {
 	}
 	users := decodeBody[struct {
 		Items []struct {
-			Email   string
-			IsAdmin bool `json:"is_admin"`
+			Email        string
+			IsSuperadmin bool `json:"is_superadmin"`
 		}
 	}](t, e.do("GET", "/api/v1/admin/users", nil, kees))
 	admin := false
 	for _, u := range users.Items {
 		if u.Email == "b@elsewhere.example" {
-			admin = u.IsAdmin
+			admin = u.IsSuperadmin
 		}
 	}
-	if !admin {
-		t.Fatal("the invite's admin flag was not applied")
+	if admin {
+		t.Fatal("an invite made someone SUPERADMIN")
 	}
 	if strings.Contains(e.do("GET", "/api/v1/admin/audit?limit=200", nil, kees).Body.String(), code) {
 		t.Fatal("an invite code reached the audit log")

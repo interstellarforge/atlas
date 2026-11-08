@@ -61,14 +61,14 @@ func TestAdminOnlyAndDeactivation(t *testing.T) {
 	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"active": false}, kees); w.Code != 422 {
 		t.Fatalf("self-deactivation: %d", w.Code)
 	}
-	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"is_admin": false}, kees); w.Code != 422 {
+	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"is_superadmin": false}, kees); w.Code != 422 {
 		t.Fatalf("demoting the last admin: %d", w.Code)
 	}
 	// With a second admin the first can step down.
-	if w := e.do("PATCH", "/api/v1/admin/users/"+id, map[string]any{"is_admin": true}, kees); w.Code != 204 {
+	if w := e.do("PATCH", "/api/v1/admin/users/"+id, map[string]any{"is_superadmin": true}, kees); w.Code != 204 {
 		t.Fatalf("promote: %d", w.Code)
 	}
-	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"is_admin": false}, kees); w.Code != 204 {
+	if w := e.do("PATCH", "/api/v1/admin/users/1", map[string]any{"is_superadmin": false}, kees); w.Code != 204 {
 		t.Fatalf("demote with another admin around: %d", w.Code)
 	}
 }
@@ -104,15 +104,16 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 	e.do("PUT", "/api/v1/projects/EXO/time-tracking", map[string]any{"enabled": true}, kees)
 	e.do("POST", "/api/v1/projects/EXO/context", map[string]any{"key": "seed", "category": "pitfall", "title": "Seed", "summary": "s"}, kees)
 	roles := map[string]func(*http.Request){}
-	if c := e.do("PUT", "/api/v1/admin/roles/commenter", map[string]any{"actions": []string{"view", "comment"}}, kees); c.Code != 200 {
-		t.Fatalf("create role: %d", c.Code)
-	}
-	for _, r := range []string{"viewer", "member", "admin", "commenter"} {
+	for _, r := range []string{"member", "admin"} { // admin = ADMIN of the organization (inherited)
 		u, err := e.auth.CreateUser(r+"@example.com", r, "password-123", false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(u.ID, 10), map[string]any{"role": r}, kees)
+		if r == "admin" {
+			e.orgAdmin(t, u.ID)
+		} else {
+			e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(u.ID, 10), map[string]any{"role": "member"}, kees)
+		}
 		roles[r] = loginAs(e, t, r+"@example.com", "password-123")
 	}
 	try := map[string]func(role string, as func(*http.Request)) int{
@@ -140,7 +141,7 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 			return e.do("PATCH", "/api/v1/projects/EXO", map[string]any{"name": "EXO"}, as).Code
 		},
 		"members": func(_ string, as func(*http.Request)) int {
-			return e.do("PUT", "/api/v1/projects/EXO/members/1", map[string]any{"role": "admin"}, as).Code
+			return e.do("PUT", "/api/v1/projects/EXO/members/1", map[string]any{"role": "member"}, as).Code
 		},
 		"time.log": func(_ string, as func(*http.Request)) int {
 			return e.do("POST", "/api/v1/items/EXO-1/time", map[string]any{"duration": "5m"}, as).Code
@@ -159,7 +160,7 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 		Items   []core.Role
 		Actions []string
 	}](t, e.do("GET", "/api/v1/roles", nil, kees))
-	if len(matrix.Items) != 4 {
+	if len(matrix.Items) != 1 || matrix.Items[0].Name != "member" {
 		t.Fatalf("roles: %+v", matrix.Items)
 	}
 	for _, act := range matrix.Actions {
@@ -167,64 +168,39 @@ func TestRightsMatrixMatchesEnforcement(t *testing.T) {
 		if !ok {
 			t.Fatalf("action %q has no check", act)
 		}
-		for _, role := range matrix.Items {
-			want := slices.Contains(role.Actions, act)
-			code := f(role.Name, roles[role.Name])
+		for _, who := range []string{"member", "admin"} {
+			want := who == "admin" || slices.Contains(matrix.Items[0].Actions, act)
+			code := f(who, roles[who])
 			if allowed := code < 300; allowed != want {
-				t.Errorf("%s as %s: matrix says %v, got HTTP %d", act, role.Name, want, code)
+				t.Errorf("%s as %s: matrix says %v, got HTTP %d", act, who, want, code)
 			}
 		}
 	}
 }
 
-// TestRoleEditing: edits take effect at once, admin is fixed, assigned roles cannot be deleted and a
-// custom role with "members" cannot hand out admin.
-func TestRoleEditing(t *testing.T) {
+// TestRolesAreNotEditable: roles are frozen until the organization migration (ADR-0029): the edit routes are gone,
+// an unknown role is refused, and a role holder cannot hand out admin.
+func TestRolesAreNotEditable(t *testing.T) {
 	e := setup(t)
 	kees := sessionOf(e, t)
 	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
-	u, _ := e.auth.CreateUser("lead@example.com", "lead", "password-123", false)
-	uid := strconv.FormatInt(u.ID, 10)
-	if c := e.do("PUT", "/api/v1/admin/roles/lead", map[string]any{"actions": []string{"view", "members"}}, kees).Code; c != 200 {
-		t.Fatalf("create: %d", c)
-	}
-	e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "lead"}, kees)
-	lead := loginAs(e, t, "lead@example.com", "password-123")
-	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "admin"}, lead).Code; c != 403 {
-		t.Errorf("self-promotion to admin: HTTP %d, want 403", c)
-	}
-	for name, body := range map[string]map[string]any{
-		"admin":  {"actions": []string{"view"}},
-		"noview": {"actions": []string{"comment"}},
-		"bad":    {"actions": []string{"view", "nuke"}},
-	} {
-		if c := e.do("PUT", "/api/v1/admin/roles/"+name, body, kees).Code; c < 400 {
-			t.Errorf("PUT role %s: HTTP %d, want an error", name, c)
+	for _, m := range []string{"PUT", "DELETE"} {
+		if c := e.do(m, "/api/v1/admin/roles/member", map[string]any{"actions": []string{"view"}}, kees).Code; c != 404 && c != 405 {
+			t.Errorf("%s /admin/roles/member: HTTP %d, want the route to be gone", m, c)
 		}
 	}
-	if c := e.do("DELETE", "/api/v1/admin/roles/lead", nil, kees).Code; c < 400 {
-		t.Errorf("delete assigned role: HTTP %d", c)
-	}
-	if c := e.do("DELETE", "/api/v1/admin/roles/member", nil, kees).Code; c < 400 {
-		t.Errorf("delete built-in role: HTTP %d", c)
-	}
+	u, _ := e.auth.CreateUser("m@example.com", "m", "password-123", false)
+	uid := strconv.FormatInt(u.ID, 10)
 	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "ghost"}, kees).Code; c < 400 {
 		t.Errorf("unknown role: HTTP %d", c)
 	}
-	if c := e.do("PUT", "/api/v1/admin/roles/x", map[string]any{"actions": []string{"view"}}, lead).Code; c != 403 {
-		t.Errorf("non-admin role edit: HTTP %d, want 403", c)
+	e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "member"}, kees)
+	member := loginAs(e, t, "m@example.com", "password-123")
+	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "admin"}, member).Code; c != 400 {
+		t.Errorf("a role that does not exist: HTTP %d, want 400", c)
 	}
-	if c := e.do("PUT", "/api/v1/admin/roles/viewer", map[string]any{"actions": []string{"view"}}, kees).Code; c != 200 {
-		t.Fatalf("edit viewer: %d", c)
-	}
-	v, _ := e.auth.CreateUser("v@example.com", "v", "password-123", false)
-	e.do("PUT", "/api/v1/projects/EXO/members/"+strconv.FormatInt(v.ID, 10), map[string]any{"role": "viewer"}, kees)
-	if c := e.do("GET", "/api/v1/projects/EXO/export", nil, loginAs(e, t, "v@example.com", "password-123")).Code; c != 403 {
-		t.Errorf("export after removing it from viewer: HTTP %d, want 403", c)
-	}
-	e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "viewer"}, kees)
-	if c := e.do("DELETE", "/api/v1/admin/roles/lead", nil, kees).Code; c != 204 {
-		t.Errorf("delete unused role: HTTP %d", c)
+	if c := e.do("PUT", "/api/v1/projects/EXO/members/"+uid, map[string]any{"role": "member"}, member).Code; c != 403 {
+		t.Errorf("a member managing members: HTTP %d, want 403", c)
 	}
 }
 
@@ -265,27 +241,14 @@ func TestForcePasswordReset(t *testing.T) {
 	}
 }
 
-// TestDefaultRole: a member added without a role gets the instance default; it must be a real role and
-// cannot be deleted while it is the default.
-func TestDefaultRole(t *testing.T) {
+// TestDefaultMemberRole: a member added without a role is a member; the instance policy has no default role.
+func TestDefaultMemberRole(t *testing.T) {
 	e := setup(t)
 	kees := sessionOf(e, t)
 	e.do("POST", "/api/v1/projects", map[string]any{"key": "EXO", "name": "EXO"}, kees)
-	e.do("PUT", "/api/v1/admin/roles/reader", map[string]any{"actions": []string{"view"}}, kees)
 	pol := decodeBody[map[string]any](t, e.do("GET", "/api/v1/admin/policy", nil, kees))
-	if pol["default_role"] != "member" {
-		t.Fatalf("default_role = %v, want member", pol["default_role"])
-	}
-	pol["default_role"] = "ghost"
-	if c := e.do("PUT", "/api/v1/admin/policy", pol, kees).Code; c != 400 {
-		t.Errorf("unknown default role: HTTP %d, want 400", c)
-	}
-	pol["default_role"] = "reader"
-	if c := e.do("PUT", "/api/v1/admin/policy", pol, kees).Code; c != 200 {
-		t.Fatalf("set default role: HTTP %d", c)
-	}
-	if c := e.do("DELETE", "/api/v1/admin/roles/reader", nil, kees).Code; c < 400 {
-		t.Errorf("delete default role: HTTP %d", c)
+	if _, ok := pol["default_role"]; ok {
+		t.Fatal("the policy still has default_role")
 	}
 	u, _ := e.auth.CreateUser("new@example.com", "new", "password-123", false)
 	id := strconv.FormatInt(u.ID, 10)
@@ -299,8 +262,8 @@ func TestDefaultRole(t *testing.T) {
 		}
 	}](t, e.do("GET", "/api/v1/projects/EXO/members", nil, kees))
 	for _, m := range members.Items {
-		if m.UserID == u.ID && m.Role != "reader" {
-			t.Errorf("new member role = %q, want reader", m.Role)
+		if m.UserID == u.ID && m.Role != "member" {
+			t.Errorf("new member role = %q, want member", m.Role)
 		}
 	}
 }

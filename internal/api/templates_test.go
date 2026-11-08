@@ -85,7 +85,7 @@ func TestProjectTemplates(t *testing.T) {
 	e := setup(t)
 	kees := sessionOf(e, t)
 	usr, _ := e.auth.CreateUser("u@example.com", "U", "password-123", false)
-	_ = usr
+	e.orgAdmin(t, usr.ID) // may create projects, but is not a global admin
 	userS := loginAs(e, t, "u@example.com", "password-123")
 
 	// Build a project worth templating.

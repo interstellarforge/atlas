@@ -10,7 +10,7 @@
 ## Authorization
 
 - An admin can force a password change (`must_change_password`): sessions end, the next one may only reach `/auth/me`, logout and `/me/password`. Tokens are not touched. See ADR-0010.
-- Roles per project via `project_members`: built-in `admin` (fixed, all actions), `member` and `viewer` (editable) plus custom roles. Each role is a set of actions in `role_actions` (ADR-0010); every project check in `core` names an action through `Service.access`.
+- Roles per project via `project_members`: built-in `admin`, `member` and `viewer` plus any custom roles that already exist. Roles are frozen: they can no longer be edited (ADR-0029, which supersedes ADR-0010) and are replaced by the organization model in the ORG 2 migration. Each role is a set of actions in `role_actions`; every project check in `core` names an action through `Service.access`, and all account-level decisions live in `internal/core/authz.go`. `/api/v1/admin/*` is refused with 403 before the body is read. `internal/api/matrix_test.go` runs every registered route and MCP tool as each actor; an unclassified route or tool fails the test.
 - Token scopes: `read` and `write` separately, optionally limited to projects. A token never exceeds its owner's rights.
 - Enforced in `core` services, not only in handlers. SSE and `changes_since` filter by permission.
 - Required tests: permission matrix for read/write/other-project access, token scope, revoked token.
@@ -46,7 +46,7 @@
 ## Audit hardening (epic SEC, ADR-0017)
 
 - Creating users is a human-admin session action, journaled like other mutations (`user.create`); tokens, also admin tokens, get `forbidden`.
-- A token lists only users who share a project it may access, without the global admin flag; avatars follow the same rule.
+- People are visible only through a shared organization or project (`visibleUsersQuery`); tokens list only users who share a project they may access; nobody but a SUPERADMIN sees the SUPERADMIN flag; avatars follow the same rule (`TestUserListingIsScoped`, `TestUserListingIsScopedToOrganizations`).
 - Login and registration throttles key on the connection address. Behind a reverse proxy set `ATLAS_TRUSTED_PROXIES`; only then is `X-Forwarded-For` read, from the right, skipping trusted hops.
 - The HTTP server has a 2 minute `ReadTimeout`; JSON bodies must hold exactly one document.
 - The CSP forbids inline scripts; the theme bootstrap is `/theme-init.js`.
@@ -59,9 +59,10 @@
 
 - Password and session operations, tokens, and the admin API need a user session: a token cannot change a password, list sessions, mint tokens or administer users.
 - Changing a password requires the current one and ends every other session. Passwords, token secrets and hashes never enter the audit log (tested).
-- Deactivating a user deletes their sessions and makes their tokens fail; sign-in is refused. The last active admin cannot be demoted or deactivated, and nobody deactivates themselves.
-- Project tokens never exceed their owner: access still goes through the owner's membership. When the owner leaves the project, those tokens are revoked.
-- The rights matrix in the admin UI is the `roles`/`role_actions` data that `core.access` enforces; `TestRightsMatrixMatchesEnforcement` checks every role × action against real requests, `TestRoleEditing` the guards. Only global admins (human session) edit roles. A role holding `members` cannot grant, change or remove `admin` (no self-escalation). Defaults equal the old fixed behaviour. See ADR-0010.
+- Deactivating a user deletes their sessions and makes their tokens fail; sign-in is refused. The last active SUPERADMIN cannot be demoted, suspended or deleted: the core refuses in the same `BEGIN IMMEDIATE` transaction, and triggers on `users` (migration 0030) abort any other writer, with no override (tested with two database handles, a busy lock and a failing audit write). Neither can the last active ADMIN of an organization, and nobody deactivates themselves.
+- Project tokens never exceed their owner: access is resolved live from the owner's current rights. When the owner leaves the project or the organization (or an organization ADMIN is demoted), those tokens are revoked.
+- A SUPERADMIN is made only by the first-install bootstrap (`ATLAS_ADMIN_EMAIL`), the data migration (`ATLAS_SUPERADMIN_EMAIL`), an existing SUPERADMIN in a human session, or the operator command `atlas superadmin grant <email>` (audited as `system:cli`). Invites, registration, organization ADMINs, tokens (even a SUPERADMIN's) and MCP cannot (`TestOnlyASuperadminCanMakeASuperadmin`).
+- Authorization follows ADR-0029: SUPERADMIN (`users.is_superadmin`), organization ADMIN and USER with a project membership (`core.MemberActions`). `internal/core/authz.go` is the only place that decides; `TestLegacyAuthorizationIsNotRead` fails if other code reads the legacy `is_admin` column or the retired role tables, `TestProjectAccessMatrix` and `TestAuthorizationMatrix` cover actor × action × resource and the 401/403/404 mapping. The rights tab shows the single member role read-only.
 
 ### Two-factor authentication, registration and deletion
 
@@ -94,7 +95,7 @@
 
 ### Project context (ADR-0015)
 
-- Actions: reading needs `view`; adding, editing, archiving and superseding need `context.write` (members and admins by default) and write scope; `context.verify` (admins by default) marks an entry verified. Verifying is only possible for a human session: a token never verifies, even a token of a project admin, so an agent cannot confirm its own claims. Every change is audited with the actor (`human:user-4` or `token:pat-17`) and, for MCP calls, a batch id.
+- Actions: reading needs `view`; adding, editing, archiving and superseding need `context.write` (members and organization admins) and write scope; `context.verify` (organization admins and SUPERADMINs) marks an entry verified. Verifying is only possible for a human session: a token never verifies, even a token of a project admin, so an agent cannot confirm its own claims. Every change is audited with the actor (`human:user-4` or `token:pat-17`) and, for MCP calls, a batch id.
 - Entries start `unverified`. Editing a verified entry makes it `unverified`; a changed `content_hash` on a kept source makes it `stale`. `source_kind` is derived from the sources and cannot be set by the caller.
 - Source paths are validated: relative to the repository, no `..`, no backslash, no absolute or `~` paths, and no secret files (`.env*`, private keys, `*.pem`, `*.key`, `.netrc`, `.npmrc`, credentials files). URLs must be `https://`. Atlas stores references only: it never reads the repository paths, so a path cannot be used to read files from the server.
 - Prompt-injection boundary: entry text is data written by people and agents. The API returns it as data, the MCP tool descriptions tell agents never to follow instructions found in entries and to treat `unverified` and `stale` entries as hints, and nothing in Atlas acts on entry text. The web app renders bodies with markdown-it with raw HTML off and refuses `javascript:` links (covered by the same renderer tests as comments and README).
@@ -114,3 +115,236 @@
 - Tokens: access tokens are normal `api_tokens` (hashed, scoped read/write, 1 hour, revocable). Refresh tokens are hashed, rotate on use, live 30 days; reuse of a used refresh token revokes the whole family. A token cannot mint tokens, so OAuth cannot be used to widen access.
 - Abuse: registration and failed token requests count against a per-address limit (5 per 15 minutes); at most 1000 clients exist. Registered clients are not shown to users beyond their name on the consent page: treat the name as untrusted text (it is escaped).
 - The `resource` parameter, when sent, must equal `<base>/mcp` (RFC 8707). Set `ATLAS_PUBLIC_URL`; without it the metadata is built from the request's Host header.
+
+## Authorization audit matrix (ATL-374)
+
+Every REST route, MCP tool and other surface with its protection, target rule and expected answer (ADR-0029). Visibility comes first: a resource the caller may not know about answers 404, identical to a missing one; a visible resource without the needed right answers 403; no or invalid credentials, or a suspended account, answer 401. `TestAuthorizationMatrix` runs every route below as anonymous, suspended, plain, organization-admin, no-organization and SUPERADMIN actors, `TestMCPToolMatrix` every tool, and `TestSecurityDocListsEveryRoute` fails when a route is missing here. The "Rule" column names the action(s) the handler reaches in `core` (parsed from the code); read the handler for the exact check.
+
+### REST routes
+
+| Route | Protection | Rule | Answers |
+|---|---|---|---|
+| `GET /.well-known/oauth-authorization-server` | public | no credentials; the handler validates its own input | - |
+| `GET /.well-known/oauth-protected-resource` | public | no credentials; the handler validates its own input | - |
+| `GET /.well-known/oauth-protected-resource/mcp` | public | no credentials; the handler validates its own input | - |
+| `GET /api/v1/admin/audit` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/admin/audit/export` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/admin/instance` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/admin/invites` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `POST /api/v1/admin/invites` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `DELETE /api/v1/admin/invites/{id}` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/admin/logs` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `DELETE /api/v1/admin/mail` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/admin/mail` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `PUT /api/v1/admin/mail` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `POST /api/v1/admin/mail/test` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/admin/policy` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `PUT /api/v1/admin/policy` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/admin/update` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/admin/users` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `PATCH /api/v1/admin/users/{id}` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/attachments/{id}` | signed in + project right | the attachment's item: `access` view; token scope applies | 401 / 404 hidden |
+| `GET /api/v1/attachments/{id}/thumb` | signed in + project right | the attachment's item: `access` view; token scope applies | 401 / 404 hidden |
+| `POST /api/v1/auth/login` | public | no credentials; the handler validates its own input | - |
+| `POST /api/v1/auth/logout` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/auth/me` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/auth/policy` | public | no credentials; the handler validates its own input | - |
+| `POST /api/v1/auth/register` | public | no credentials; the handler validates its own input | - |
+| `POST /api/v1/batches/{id}/undo` | signed in + project right | `access`: export, item.update, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/board` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/changes` | signed in | events of readable projects only (`ReadableProjectKeys`); notifications only to their recipient | 401 |
+| `GET /api/v1/events` | signed in | same filter as `/changes`, delivered as a stream | 401 |
+| `GET /api/v1/health` | public | no credentials; the handler validates its own input | - |
+| `GET /api/v1/item-templates` | signed in | instance-wide templates, read-only for everyone | 401 |
+| `POST /api/v1/item-templates` | SUPERADMIN session | `adminOnly` in core | 401 / 403 |
+| `DELETE /api/v1/item-templates/{id}` | SUPERADMIN session | `adminOnly` in core | 401 / 403 |
+| `GET /api/v1/items` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/items` | signed in + project right | `access`: export, item.create, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/items/{key}` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/items/{key}` | signed in + project right | `access`: export, item.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/items/{key}/attachments` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/items/{key}/attachments` | signed in + project right | `access`: export, item.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/items/{key}/checklist` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/items/{key}/checklist` | signed in + project right | `access`: export, item.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/items/{key}/checklist/{id}` | signed in + project right | `access`: export, item.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/items/{key}/checklist/{id}` | signed in + project right | `access`: export, item.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/items/{key}/comments` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/items/{key}/comments` | signed in + project right | `access`: comment, export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/items/{key}/follow` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/items/{key}/follow` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PUT /api/v1/items/{key}/follow` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/items/{key}/links` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/items/{key}/links` | signed in + project right | `access`: export, item.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/items/{key}/links/{type}/{target}` | signed in + project right | `access`: export, item.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/items/{key}/move` | signed in + project right | `access`: export, item.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/items/{key}/time` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/items/{key}/time` | signed in + project right | `access`: export, time.log, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/mcp/stats` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `DELETE /api/v1/me` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `PATCH /api/v1/me` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `DELETE /api/v1/me/avatar` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `PUT /api/v1/me/avatar` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `PUT /api/v1/me/email` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `PUT /api/v1/me/password` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/me/preferences` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `PUT /api/v1/me/preferences` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/me/security` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/me/sessions` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `DELETE /api/v1/me/sessions/{id}` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `POST /api/v1/me/totp/disable` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `POST /api/v1/me/totp/enable` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `POST /api/v1/me/totp/setup` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/notifications` | signed in (own account) | the caller's own notifications | 401 |
+| `POST /api/v1/notifications/read` | signed in (own account) | the caller's own notifications | 401 |
+| `DELETE /api/v1/notifications/{id}` | signed in (own account) | the caller's own notification | 401 / 404 |
+| `POST /api/v1/notifications/{id}/read` | signed in (own account) | the caller's own notification | 401 / 404 |
+| `GET /api/v1/project-templates` | signed in | instance-wide templates, read-only for everyone | 401 |
+| `POST /api/v1/project-templates` | SUPERADMIN session | `adminOnly` in core | 401 / 403 |
+| `DELETE /api/v1/project-templates/{id}` | SUPERADMIN session | `adminOnly` in core | 401 / 403 |
+| `GET /api/v1/projects` | signed in | lists the projects the caller may read (`readableProjects`) | 401 |
+| `POST /api/v1/projects` | signed in + project right | `access`: export, project.update, view, workflow and organization rules; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/activity` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/batches` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/board` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/board/columns/{status}` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/context` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/context` | signed in + project right | `access`: context.write, export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/context/bootstrap` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/context/search` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/context/{ckey}` | signed in + project right | `access`: context.write, export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/context/{ckey}` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}/context/{ckey}` | signed in + project right | `access`: context.write, export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/context/{ckey}/supersede` | signed in + project right | `access`: context.write, export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/context/{ckey}/verify` | signed in + project right | `access`: context.verify, export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/custom-fields` | signed in + project right | `access`: export, view, workflow; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/custom-fields/{name}` | signed in + project right | `access`: export, view, workflow; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/export` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/import` | signed in + project right | `access`: export, import, item.create, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/item-templates` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/item-templates` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/item-templates/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/members` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/members/{user}` | signed in + project right | `access`: export, members, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PUT /api/v1/projects/{key}/members/{user}` | signed in + project right | `access`: export, members, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/milestones` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/milestones` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/milestones/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}/milestones/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/progress` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/readme` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/readme/asset` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/recurrences` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/recurrences` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/recurrences/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}/recurrences/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/sprints` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/sprints` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/sprints/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}/sprints/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/statuses` | signed in + project right | `access`: export, view, workflow; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/statuses/{id}` | signed in + project right | `access`: export, view, workflow; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}/statuses/{id}` | signed in + project right | `access`: export, view, workflow; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/time` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PUT /api/v1/projects/{key}/time-tracking` | signed in + project right | `access`: export, view, workflow; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/time/export` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/time/{id}` | signed in + project right | `access`: export, time.log, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}/time/{id}` | signed in + project right | `access`: export, time.log, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/timeline` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/tokens` | signed in + project right | `access`: export, tokens, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/tokens` | signed in + project right | `access`: export, tokens, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/tokens/{id}` | signed in + project right | `access`: export, tokens, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/webhooks` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `POST /api/v1/projects/{key}/webhooks` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `DELETE /api/v1/projects/{key}/webhooks/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}/webhooks/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/workflow` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PATCH /api/v1/projects/{key}/workflow` | signed in + project right | `access`: export, view, workflow; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `PUT /api/v1/projects/{key}/workflow` | signed in + project right | `access`: export, view, workflow; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/roles` | signed in | the single fixed member role, read-only | 401 |
+| `GET /api/v1/tokens` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `POST /api/v1/tokens` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `DELETE /api/v1/tokens/{id}` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/users` | signed in | lists the people the caller may see (`visibleUsersQuery`, ADR-0027) | 401 |
+| `POST /api/v1/users` | SUPERADMIN session | `adminOnly` in core | 401 / 403 |
+| `GET /api/v1/users/{id}/avatar` | signed in | only for people the caller may see (`visibleUsersQuery`); hidden = 404 | 401 / 404 |
+| `GET /oauth/authorize` | public | no credentials; the handler validates its own input | - |
+| `POST /oauth/authorize` | public | no credentials; the handler validates its own input | - |
+| `POST /oauth/register` | public | no credentials; the handler validates its own input | - |
+| `POST /oauth/token` | public | no credentials; the handler validates its own input | - |
+
+### MCP tools
+
+| Tool | Kind | Rule |
+|---|---|---|
+| `projects_list` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `project_create` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `project_templates_list` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `workflow_get` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `items_search` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `issues_search` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `issue_create` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `issue_update` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `item_get` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `board_get` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `changes_since` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `items_write` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `comment_add` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `project_progress` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `time_log` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `time_summary` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `context_get` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `context_write` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `checklist_write` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `attachments` | read | token scope (read) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `milestone_write` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `sprint_write` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `batch_undo` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+| `attachment_add` | write | token scope (write) and project list, then the owner's live rights through `access`; hidden = not found, identical to a missing project |
+
+### Other surfaces
+
+| Surface | Rule |
+|---|---|
+| SSE `/events`, `/changes` | only events of projects the caller may read; user-targeted notifications only to that user; project-less events are never delivered |
+| Search (`items?q=`, FTS) | a project filter through `access`; a hidden project answers 404 |
+| Exports and imports | `export` / `import` actions on the project (member and up) |
+| Attachments and thumbnails | through the item's project (`view`); avatars through `visibleUsersQuery` |
+| Webhooks, recurrences, milestones, sprints, workflow, tokens | management actions: SUPERADMIN or the organization ADMIN |
+| Notifications | the caller's own only |
+| OAuth (`/oauth/*`, `/.well-known/*`) | public by design (PKCE, exact redirect match, hashed codes); issued tokens are ordinary scoped tokens |
+| Background work (recurrences, webhooks, mail) | no rights of its own: runs for the user who created it with that user's live rights (a suspended creator fails closed) |
+| `atlas` subcommands | operator with shell access to the data directory: `backup`, `restore`, `check paths`, `superadmin grant`, `migrate-orgs` |
+
+### Findings
+
+- ATL-493: users and avatars were listed to every signed-in person. Fixed.
+- Four admin routes validated the body before authorizing (400 instead of 403). Fixed in `protect()`.
+- No route is unclassified. Known gaps are tracked: organization membership has no REST or UI yet (ATL-413, 439, 451).
+
+## Inventory: `is_admin` and role references before the flip (ATL-473, kept for audit)
+
+Code audit at commit 4e7217b (non-test files). Feeds ATL-475/477 and the authorization ADR (ADR-0029). Data inventory (c, d) needs the live database and is produced by the dry-run command (ATL-428), not guessed here.
+
+### (a) `users.is_admin`, `invites.is_admin`, `Actor.IsAdmin`
+
+| Area | Files | Action in the new model |
+|---|---|---|
+| Actor carrier | `internal/auth/actor.go`; session loader `auth/service.go:202`; token loader `auth/service.go:309` | remove the flag from the Actor; `authz.go` reads status/superadmin/memberships live (fail closed), ATL-435/436 |
+| User create/read | `auth/service.go:115,135,217`; `core/identity.go`; `api/identity.go`; `api/work.go:111` (`CreateUser` takes `is_admin`) | `is_superadmin` never settable via create/body; ATL-437/438 |
+| Invites | `core/policy.go:147-286`; `migrations/0011` | `invites.is_admin` dropped; kinds registration/organization (M3) |
+| Project authz | `core/core.go:163 access`, `core/projects.go` | replaced by `authz.go`, ATL-436 |
+| Bypasses outside `access()` | `core/notifications.go:93`, `core/items.go:465` (assignee/recipient check `is_admin = 1 OR member`) | must route through `authz.go`; easy to miss |
+| Background actor | `core/recurrence.go:263,296` builds an `Actor` from stored `is_admin` | must use live rights / system actor (ADR-0029) |
+| Admin API | `core/admin.go`, `api/admin.go` | SUPERADMIN-only (`/api/v1/admin/*`) |
+| SPA | `web/src/lib/{Admin,Shell,ProjectSettings,ItemTime,ContextView}.svelte`, `App.svelte`, `api.ts` | `is_admin` field becomes `is_superadmin`; UI hiding is convenience only |
+| Schema | `migrations/0001_auth.sql` | ATL-474 |
+
+### (b) Role consumers
+
+`roles`, `role_actions`, `project_members.role`: `core/roles.go` (role CRUD), `core/core.go` (`access`), `core/projects.go` (members, `guardLastAdmin`), `core/identity.go`, `core/items.go`, `core/notifications.go`, `api/admin.go` (`/admin/roles`), `web/src/lib/api.ts` plus the Admin roles UI, migrations 0003, 0012, 0017, 0018. All go away or are rewritten in ATL-478 and ATL-436; `guardLastAdmin` is replaced by the last-organization-ADMIN guard (ATL-490).
+
+### (c), (d) Data inventory and role comparison
+
+Pending: produced by `migrate-orgs --dry-run` (ATL-428) against the real database. Classes: equal, reduction (admin), REVIEW-REQUIRED (viewer, custom). See ADR-0028.

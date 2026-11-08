@@ -37,7 +37,10 @@ func seed(t *testing.T, dir string) (*db.DB, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, actor := core.New(d, au), auth.Actor{Kind: auth.KindHuman, UserID: u.ID, IsAdmin: true}
+	svc, actor := core.New(d, au), auth.Actor{Kind: auth.KindHuman, UserID: u.ID}
+	if _, err := svc.CreateOrganization(context.Background(), actor, "MAIN", "Main", 0); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.CreateProject(context.Background(), actor, "EXO", "Exo"); err != nil {
 		t.Fatal(err)
 	}

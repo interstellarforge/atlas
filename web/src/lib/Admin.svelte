@@ -9,7 +9,6 @@
     createUser,
     deleteInstanceItemTemplate,
     deleteProjectTemplate,
-    deleteRole,
     getAudit,
     getInstance,
     getMailSettings,
@@ -31,7 +30,6 @@
     saveInstanceItemTemplate,
     saveMailSettings,
     saveProjectTemplate,
-    saveRole,
     sendTestMail,
     setPolicy,
     type UpdateStatus,
@@ -68,7 +66,6 @@
   let policy = $state<Policy | undefined>();
   let invites = $state<Invite[]>([]);
   let inviteEmail = $state("");
-  let inviteAdmin = $state(false);
   let inviteDays = $state(7);
   let inviteLink = $state("");
   let itemTemplates = $state<ItemTemplate[]>([]);
@@ -85,7 +82,6 @@
   let users = $state<AdminUser[]>([]);
   let roles = $state<Role[]>([]);
   let roleActions = $state<string[]>([]);
-  let newRole = $state("");
   let settings = $state<Record<string, string | number | boolean>>({});
   let update = $state<UpdateStatus | undefined>();
   let audit = $state<AuditEntry[]>([]);
@@ -113,16 +109,6 @@
     } catch {
       error = t("admin.loadFailed");
     }
-  }
-
-  function toggleAction(r: Role, action: string, on: boolean): Promise<void> {
-    const actions = on
-      ? [...r.actions, action]
-      : r.actions.filter((x) => x !== action);
-    return run(t("admin.roleSaved"), async () => {
-      await saveRole(r.name, actions);
-      await loadRoles();
-    });
   }
 
   async function run(
@@ -196,7 +182,6 @@
       void loadUsers().catch(() => (error = t("admin.loadFailed")));
     if (active === "access") {
       void getPolicy().then((p) => (policy = p));
-      void loadRoles();
       void listInvites().then((l) => (invites = l));
     }
     if (active === "templates")
@@ -247,7 +232,8 @@
           {#if u.deactivated_at}<span class="chip warn"
               >{t("admin.deactivated")}</span
             >{/if}
-          {#if u.is_admin}<span class="chip type">{t("admin.admin")}</span>{/if}
+          {#if u.is_superadmin}<span class="chip type">{t("admin.admin")}</span
+            >{/if}
           {#if u.must_change_password}<span class="chip warn"
               >{t("admin.mustChange")}</span
             >{/if}
@@ -255,10 +241,10 @@
             type="button"
             onclick={() =>
               void run(t("settings.saved"), async () => {
-                await patchAdminUser(u.id, { is_admin: !u.is_admin });
+                await patchAdminUser(u.id, { is_superadmin: !u.is_superadmin });
                 await loadUsers();
               })}
-            >{u.is_admin
+            >{u.is_superadmin
               ? t("admin.removeAdmin")
               : t("admin.makeAdmin")}</button
           >
@@ -301,7 +287,7 @@
     onsubmit={(e) => {
       e.preventDefault();
       void run(t("admin.userCreated"), async () => {
-        await createUser({ email, name, password, is_admin: isAdmin });
+        await createUser({ email, name, password, is_superadmin: isAdmin });
         email = "";
         name = "";
         password = "";
@@ -401,15 +387,6 @@
         />
         <span class="hint">{t("admin.doneVisibleDaysHint")}</span>
       </label>
-      <label>
-        {t("admin.defaultRole")}
-        <select bind:value={policy.default_role}>
-          {#each roles as r (r.name)}
-            <option value={r.name}>{roleLabel(r.name)}</option>
-          {/each}
-        </select>
-      </label>
-      <p class="muted hint">{t("admin.defaultRoleHint")}</p>
       <div>
         <button class="primary" type="submit">{t("settings.save")}</button>
       </div>
@@ -437,8 +414,6 @@
                   })}</span
             >
           </div>
-          {#if inv.is_admin}<span class="chip type">{t("admin.admin")}</span
-            >{/if}
           {#if !inv.used_at}
             <button
               type="button"
@@ -459,12 +434,10 @@
         void run(t("admin.inviteCreated"), async () => {
           const made = await createInvite({
             email: inviteEmail,
-            is_admin: inviteAdmin,
             days: inviteDays,
           });
           inviteLink = `${location.origin}/#/register?invite=${made.code}`;
           inviteEmail = "";
-          inviteAdmin = false;
           invites = await listInvites();
         });
       }}
@@ -482,11 +455,6 @@
         aria-label={t("admin.inviteDays")}
         bind:value={inviteDays}
       />
-      <label class="check"
-        ><input type="checkbox" bind:checked={inviteAdmin} />{t(
-          "admin.admin",
-        )}</label
-      >
       <button class="primary" type="submit">{t("admin.createInvite")}</button>
     </form>
   </section>
@@ -649,19 +617,7 @@
         <tr>
           <th scope="col">{t("admin.action")}</th>
           {#each roles as r (r.name)}
-            <th scope="col"
-              >{roleLabel(r.name)}
-              {#if !r.builtin}
-                <button
-                  type="button"
-                  onclick={() =>
-                    void run(t("admin.roleDeleted"), async () => {
-                      await deleteRole(r.name);
-                      await loadRoles();
-                    })}>{t("admin.deleteRole")}</button
-                >
-              {/if}</th
-            >
+            <th scope="col">{roleLabel(r.name)}</th>
           {/each}
         </tr>
       </thead>
@@ -678,12 +634,10 @@
                 ><input
                   type="checkbox"
                   checked={r.actions.includes(action)}
-                  disabled={r.name === "admin" || action === "view"}
+                  disabled
                   aria-label="{roleLabel(r.name)}: {t(
                     `admin.actions.${action.replace('.', '_')}` as 'admin.actions.view',
                   )}"
-                  onchange={(e) =>
-                    void toggleAction(r, action, e.currentTarget.checked)}
                 /></td
               >
             {/each}
@@ -691,26 +645,6 @@
         {/each}
       </tbody>
     </table>
-    <form
-      class="inline"
-      onsubmit={(e) => {
-        e.preventDefault();
-        void run(t("admin.roleSaved"), async () => {
-          await saveRole(newRole.trim(), ["view"]);
-          newRole = "";
-          await loadRoles();
-        });
-      }}
-    >
-      <input
-        aria-label={t("admin.roleName")}
-        placeholder={t("admin.roleName")}
-        bind:value={newRole}
-        required
-        maxlength="32"
-      />
-      <button class="primary" type="submit">{t("admin.addRole")}</button>
-    </form>
     <p class="muted hint">{t("admin.rightsTokens")}</p>
   </section>
 {:else if active === "audit"}

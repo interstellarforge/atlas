@@ -3,19 +3,12 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"strings"
 
 	"github.com/kees/atlas/internal/auth"
 )
-
-// Instance administration: global admins only, through a user session (never a token).
-func adminOnly(a auth.Actor) error {
-	if a.Kind != auth.KindHuman || !a.IsAdmin {
-		return ErrForbidden
-	}
-	return nil
-}
 
 type AdminUser struct {
 	User
@@ -25,10 +18,10 @@ type AdminUser struct {
 }
 
 func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, email, name, is_admin, must_change_password, deactivated_at, created_at FROM users ORDER BY name`)
+	rows, err := s.db.R.Query(`SELECT id, email, name, is_superadmin, must_change_password, deactivated_at, created_at FROM users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +30,7 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 	for rows.Next() {
 		var u AdminUser
 		var off sql.NullInt64
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.MustChangePassword, &off, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.MustChangePassword, &off, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		if off.Valid {
@@ -48,41 +41,41 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 	return out, rows.Err()
 }
 
-// activeAdmins counts admins that can still sign in, optionally ignoring one user.
-func activeAdmins(tx *sql.Tx, except int64) (int, error) {
+// activeSuperadmins counts admins that can still sign in, optionally ignoring one user.
+func activeSuperadmins(tx *sql.Tx, except int64) (int, error) {
 	var n int
-	err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE is_admin = 1 AND deactivated_at IS NULL AND id <> ?`, except).Scan(&n)
+	err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE is_superadmin = 1 AND deactivated_at IS NULL AND id <> ?`, except).Scan(&n)
 	return n, err
 }
 
-// SetUserAdmin grants or removes global admin. The last active admin cannot be demoted.
-func (s *Service) SetUserAdmin(ctx context.Context, a auth.Actor, id int64, admin bool) error {
-	if err := adminOnly(a); err != nil {
+// SetUserSuperadmin grants or removes global admin. The last active admin cannot be demoted.
+func (s *Service) SetUserSuperadmin(ctx context.Context, a auth.Actor, id int64, admin bool) error {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
 		if !admin {
-			if n, err := activeAdmins(tx, id); err != nil {
+			if n, err := activeSuperadmins(tx, id); err != nil {
 				return err
 			} else if n == 0 {
-				return rule("there must be at least one active admin")
+				return rule("there must be at least one active superadmin")
 			}
 		}
-		res, err := tx.Exec(`UPDATE users SET is_admin = ? WHERE id = ?`, admin, id)
+		res, err := tx.Exec(`UPDATE users SET is_superadmin = ? WHERE id = ?`, admin, id)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotFound
 		}
-		return s.journal(ctx, tx, a, change{Operation: "user.admin", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{"is_admin": admin}})
+		return s.journal(ctx, tx, a, change{Operation: "user.superadmin", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{"is_superadmin": admin}})
 	})
 }
 
 // SetUserActive deactivates (sessions end at once, tokens stop working) or reactivates a user.
 // Nobody can deactivate themselves, and the last active admin stays.
 func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, active bool) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	if !active && id == a.UserID {
@@ -90,17 +83,22 @@ func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, act
 	}
 	return s.tx(func(tx *sql.Tx) error {
 		var admin bool
-		if err := tx.QueryRow(`SELECT is_admin FROM users WHERE id = ?`, id).Scan(&admin); err != nil {
+		if err := tx.QueryRow(`SELECT is_superadmin FROM users WHERE id = ?`, id).Scan(&admin); err != nil {
 			if err == sql.ErrNoRows {
 				return ErrNotFound
 			}
 			return err
 		}
 		if !active && admin {
-			if n, err := activeAdmins(tx, id); err != nil {
+			if n, err := activeSuperadmins(tx, id); err != nil {
 				return err
 			} else if n == 0 {
-				return rule("there must be at least one active admin")
+				return rule("there must be at least one active superadmin")
+			}
+		}
+		if !active {
+			if err := guardOrgAdminLoss(tx, id); err != nil {
+				return err
 			}
 		}
 		var at any
@@ -122,7 +120,7 @@ func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, act
 // ForcePasswordReset signs the user out everywhere; their next session can only change the password.
 // Tokens keep working: they are separate credentials the user or an admin revokes on their own.
 func (s *Service) ForcePasswordReset(ctx context.Context, a auth.Actor, id int64) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
@@ -160,7 +158,7 @@ type AuditFilter struct {
 
 // AuditLog lists audit entries newest first (admins only). Filters are exact, except Operation which is a prefix.
 func (s *Service) AuditLog(ctx context.Context, a auth.Actor, f AuditFilter) ([]AuditEntry, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
 	if f.Limit <= 0 || f.Limit > 200 {
@@ -202,7 +200,7 @@ func (s *Service) AuditLog(ctx context.Context, a auth.Actor, f AuditFilter) ([]
 
 // AdminUserPatch is a set of administrator changes to one account, applied together.
 type AdminUserPatch struct {
-	IsAdmin            *bool
+	IsSuperadmin       *bool
 	Active             *bool
 	ResetTOTP          bool
 	ForcePasswordReset bool
@@ -210,7 +208,7 @@ type AdminUserPatch struct {
 
 // UpdateUser applies every requested change in one transaction: all of them take effect or none does.
 func (s *Service) UpdateUser(ctx context.Context, a auth.Actor, id int64, p AdminUserPatch) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	_, err := s.Idempotent(ctx, a, "", nil, nil, func(ctx context.Context, s *Service) error {
@@ -224,8 +222,8 @@ func (s *Service) UpdateUser(ctx context.Context, a auth.Actor, id int64, p Admi
 				return err
 			}
 		}
-		if p.IsAdmin != nil {
-			if err := s.SetUserAdmin(ctx, a, id, *p.IsAdmin); err != nil {
+		if p.IsSuperadmin != nil {
+			if err := s.SetUserSuperadmin(ctx, a, id, *p.IsSuperadmin); err != nil {
 				return err
 			}
 		}
@@ -235,4 +233,26 @@ func (s *Service) UpdateUser(ctx context.Context, a auth.Actor, id int64, p Admi
 		return nil
 	})
 	return err
+}
+
+// GrantSuperadmin is the operator path (`atlas superadmin grant <email>`): it needs shell access to the data
+// directory and is the only way to make a SUPERADMIN without an existing one, besides the first-install bootstrap
+// and the data migration. No HTTP route reaches it.
+func (s *Service) GrantSuperadmin(ctx context.Context, email string) error {
+	a := auth.Actor{Kind: auth.KindSystem}
+	return s.tx(func(tx *sql.Tx) error {
+		var id int64
+		err := tx.QueryRow(`SELECT id FROM users WHERE email = ? AND deactivated_at IS NULL`, strings.TrimSpace(email)).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return invalid("no active account has that email")
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE users SET is_superadmin = 1 WHERE id = ?`, id); err != nil {
+			return err
+		}
+		return s.journal(ctx, tx, a, change{Operation: "user.superadmin", Target: userTarget(id), Event: "admin.updated",
+			Changes: map[string]any{"is_superadmin": true, "via": "cli"}})
+	})
 }

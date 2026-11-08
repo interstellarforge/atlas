@@ -208,7 +208,7 @@ func (s *Service) SaveItemTemplate(ctx context.Context, a auth.Actor, key string
 // SaveInstanceItemTemplate stores a template usable in every project; global admins only. A project
 // template with the same name takes precedence in its project.
 func (s *Service) SaveInstanceItemTemplate(ctx context.Context, a auth.Actor, t ItemTemplate) (ItemTemplate, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return ItemTemplate{}, err
 	}
 	if err := validateItemTemplate(&t); err != nil {
@@ -226,7 +226,7 @@ func (s *Service) SaveInstanceItemTemplate(ctx context.Context, a auth.Actor, t 
 }
 
 func (s *Service) DeleteInstanceItemTemplate(ctx context.Context, a auth.Actor, id int64) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
@@ -501,7 +501,7 @@ func (s *Service) ListProjectTemplates(ctx context.Context, a auth.Actor) ([]Pro
 
 // SaveProjectTemplate stores a template (global admins only), validated like an import.
 func (s *Service) SaveProjectTemplate(ctx context.Context, a auth.Actor, name, description string, data ProjectTemplateData) (ProjectTemplate, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return ProjectTemplate{}, err
 	}
 	name = strings.TrimSpace(name)
@@ -531,7 +531,7 @@ func (s *Service) SaveProjectTemplate(ctx context.Context, a auth.Actor, name, d
 
 // SaveProjectTemplateFromProject stores a template captured from an existing project (global admins only).
 func (s *Service) SaveProjectTemplateFromProject(ctx context.Context, a auth.Actor, name, description, key string) (ProjectTemplate, error) {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return ProjectTemplate{}, err
 	}
 	d, err := s.projectToTemplate(ctx, a, key)
@@ -566,7 +566,7 @@ func (s *Service) projectToTemplate(ctx context.Context, a auth.Actor, key strin
 }
 
 func (s *Service) DeleteProjectTemplate(ctx context.Context, a auth.Actor, id int64) error {
-	if err := adminOnly(a); err != nil {
+	if err := s.adminOnly(a); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
