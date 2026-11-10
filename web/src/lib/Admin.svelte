@@ -1,14 +1,20 @@
 <script lang="ts">
   import AdminSystem from "./AdminSystem.svelte";
   import {
+    type AdminApplication,
+    type AdminOrganization,
     type AdminUser,
     ApiError,
     type AuditEntry,
     clearMailSettings,
+    createAdminOrganization,
     createInvite,
     createUser,
+    decideApplication,
+    decideDomain,
     deleteInstanceItemTemplate,
     deleteProjectTemplate,
+    type DomainClaim,
     getAudit,
     getInstance,
     getMailSettings,
@@ -16,7 +22,10 @@
     getUpdateStatus,
     type Invite,
     type ItemTemplate,
+    listAdminApplications,
+    listAdminOrganizations,
     listAdminUsers,
+    listDomainClaims,
     listInstanceItemTemplates,
     listInvites,
     listProjectTemplates,
@@ -43,6 +52,7 @@
 
   const sections = [
     "users",
+    "organizations",
     "access",
     "templates",
     "rights",
@@ -80,6 +90,13 @@
   let importText = $state("");
   let importName = $state("");
   let users = $state<AdminUser[]>([]);
+  let orgs = $state<AdminOrganization[]>([]);
+  let claims = $state<DomainClaim[]>([]);
+  let applications = $state<AdminApplication[]>([]);
+  let appKeys = $state<Record<number, string>>({});
+  let orgKey = $state("");
+  let orgName = $state("");
+  let orgAdminEmail = $state("");
   let roles = $state<Role[]>([]);
   let roleActions = $state<string[]>([]);
   let settings = $state<Record<string, string | number | boolean>>({});
@@ -131,6 +148,15 @@
     users = await listAdminUsers();
   }
 
+  async function loadOrganizations(): Promise<void> {
+    [orgs, applications, claims] = await Promise.all([
+      listAdminOrganizations(),
+      listAdminApplications(),
+      listDomainClaims(),
+    ]);
+    for (const a of applications) appKeys[a.id] ??= a.key;
+  }
+
   function exportHref(format: string): string {
     const parts = [`format=${format}`];
     for (const [k, v] of [
@@ -180,6 +206,8 @@
         .catch(() => (error = t("admin.loadFailed")));
     if (active === "users")
       void loadUsers().catch(() => (error = t("admin.loadFailed")));
+    if (active === "organizations")
+      void loadOrganizations().catch(() => (error = t("admin.loadFailed")));
     if (active === "access") {
       void getPolicy().then((p) => (policy = p));
       void listInvites().then((l) => (invites = l));
@@ -330,6 +358,145 @@
       <button class="primary" type="submit">{t("admin.createUser")}</button>
     </div>
   </form>
+{:else if active === "organizations"}
+  <section class="panel" aria-labelledby="applications-title">
+    <h2 id="applications-title">{t("admin.appsTitle")}</h2>
+    {#if applications.length === 0}
+      <p class="muted">{t("admin.appsEmpty")}</p>
+    {:else}
+      <ul class="list">
+        {#each applications as a (a.id)}
+          <li>
+            <div>
+              <strong>{a.name}</strong>
+              <span class="muted"
+                >{t("admin.appBy", {
+                  name: a.applicant_name,
+                  email: a.applicant_email,
+                })}</span
+              >
+              {#if a.note}<span class="muted">{a.note}</span>{/if}
+            </div>
+            <label>
+              {t("admin.appKey")}
+              <input bind:value={appKeys[a.id]} maxlength="10" />
+            </label>
+            <button
+              type="button"
+              onclick={() =>
+                void run(t("admin.appApproved"), async () => {
+                  await decideApplication(a.id, "approve", {
+                    key: appKeys[a.id] ?? a.key,
+                  });
+                  await loadOrganizations();
+                })}>{t("admin.approve")}</button
+            >
+            <button
+              type="button"
+              onclick={() =>
+                void run(t("admin.appRejected"), async () => {
+                  await decideApplication(a.id, "reject");
+                  await loadOrganizations();
+                })}>{t("admin.reject")}</button
+            >
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+  <section class="panel" aria-labelledby="claims-title">
+    <h2 id="claims-title">{t("admin.domainsTitle")}</h2>
+    <p class="muted hint">{t("admin.domainsIntro")}</p>
+    {#if claims.length === 0}
+      <p class="muted">{t("admin.domainsEmpty")}</p>
+    {:else}
+      <ul class="list">
+        {#each claims as c (c.id)}
+          <li>
+            <div>
+              <strong>{c.domain}</strong>
+              <span class="muted"
+                >{t("admin.domainBy", {
+                  name: c.organization_name,
+                  key: c.organization_key,
+                })}</span
+              >
+            </div>
+            <button
+              type="button"
+              onclick={() =>
+                void run(t("admin.domainConfirmed"), async () => {
+                  await decideDomain(c.id, "approve");
+                  await loadOrganizations();
+                })}>{t("admin.approve")}</button
+            >
+            <button
+              type="button"
+              onclick={() =>
+                void run(t("admin.domainRejected"), async () => {
+                  await decideDomain(c.id, "reject");
+                  await loadOrganizations();
+                })}>{t("admin.reject")}</button
+            >
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+  <section class="panel" aria-labelledby="orgs-title">
+    <h2 id="orgs-title">{t("admin.orgsTitle")}</h2>
+    <p class="muted hint">{t("admin.orgsIntro")}</p>
+    <ul class="list">
+      {#each orgs as o (o.key)}
+        <li class:off={o.status !== "active"}>
+          <div>
+            <strong>{o.name}</strong>
+            <span class="muted">{o.key}</span>
+          </div>
+          <span class="muted"
+            >{t("admin.orgAdmins")}: {o.admins.join(", ") || "-"}</span
+          >
+          <span class="muted"
+            >{t("admin.orgMembers", { count: o.members })}</span
+          >
+        </li>
+      {/each}
+    </ul>
+  </section>
+  <form
+    class="panel"
+    onsubmit={(e) => {
+      e.preventDefault();
+      void run(t("admin.orgCreated"), async () => {
+        await createAdminOrganization({
+          key: orgKey,
+          name: orgName,
+          admin_email: orgAdminEmail,
+        });
+        orgKey = "";
+        orgName = "";
+        orgAdminEmail = "";
+        await loadOrganizations();
+      });
+    }}
+  >
+    <h2>{t("admin.orgCreate")}</h2>
+    <label>
+      {t("admin.orgKey")}
+      <input bind:value={orgKey} required maxlength="10" />
+    </label>
+    <label>
+      {t("admin.orgName")}
+      <input bind:value={orgName} required />
+    </label>
+    <label>
+      {t("admin.orgAdminEmail")}
+      <input type="email" bind:value={orgAdminEmail} required />
+    </label>
+    <div>
+      <button class="primary" type="submit">{t("admin.orgCreate")}</button>
+    </div>
+  </form>
 {:else if active === "access"}
   {#if policy}
     <form
@@ -351,6 +518,13 @@
           <option value="closed">{t("admin.regClosed")}</option>
           <option value="invite">{t("admin.regInvite")}</option>
           <option value="open">{t("admin.regOpen")}</option>
+        </select>
+      </label>
+      <label>
+        {t("admin.orgCreation")}
+        <select bind:value={policy.organization_creation}>
+          <option value="admin_only">{t("admin.orgCreationAdminOnly")}</option>
+          <option value="apply">{t("admin.orgCreationApply")}</option>
         </select>
       </label>
       {#if policy.registration === "open"}

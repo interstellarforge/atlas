@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"strings"
 
@@ -52,9 +53,20 @@ func (s *Service) CreateProjectIn(ctx context.Context, a auth.Actor, orgKey, key
 			return err
 		}
 		p.ID, _ = res.LastInsertId()
+		if org.Role == "user" { // a member who creates a project works in it as a member
+			p.Role = "member"
+			if _, err := tx.Exec(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'member')`, p.ID, a.UserID); err != nil {
+				return err
+			}
+		}
 		for i, st := range defaultStatuses {
 			if _, err := tx.Exec(`INSERT INTO project_statuses (project_id, name, position, category) VALUES (?, ?, ?, ?)`,
 				p.ID, st.Name, i, st.Category); err != nil {
+				return err
+			}
+		}
+		if !s.skipDefault {
+			if err := s.applyDefaultWorkflow(ctx, tx, a, p, org.ID); err != nil {
 				return err
 			}
 		}
@@ -332,4 +344,28 @@ func (s *Service) RemoveMember(ctx context.Context, a auth.Actor, key string, us
 
 func isUnique(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+// applyDefaultWorkflow gives a new project the organization's default project template, when it has one that is
+// still visible to it (an instance wide template or one of its own).
+func (s *Service) applyDefaultWorkflow(ctx context.Context, tx *sql.Tx, a auth.Actor, p Project, orgID int64) error {
+	var id sql.NullInt64
+	err := tx.QueryRow(`SELECT default_project_template_id FROM organization_settings WHERE organization_id = ?`, orgID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !id.Valid) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	t, err := scanProjectTemplate(tx.QueryRow(`SELECT `+projectTemplateCols+` FROM project_templates WHERE id = ? AND (organization_id IS NULL OR organization_id = ?)`, id.Int64, orgID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := t.Data.validate(); err != nil {
+		return err
+	}
+	return s.applyTemplateData(ctx, tx, a, p, t.Name, t.Data)
 }

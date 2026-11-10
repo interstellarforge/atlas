@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -47,7 +48,7 @@ func (s *Server) listOrganizations(w http.ResponseWriter, r *http.Request) {
 // publicPolicy tells the login page whether to offer registration and how long passwords must be.
 func (s *Server) publicPolicy(w http.ResponseWriter, r *http.Request) {
 	p := s.core.Policy()
-	writeJSON(w, http.StatusOK, map[string]any{"registration": p.Registration, "min_password_length": p.MinPasswordLength, "allowed_domain": p.AllowedDomain})
+	writeJSON(w, http.StatusOK, map[string]any{"registration": p.Registration, "min_password_length": p.MinPasswordLength, "allowed_domain": p.AllowedDomain, "organization_creation": p.OrganizationCreation})
 }
 
 // register is open to everyone, so it shares the login failure limiter against invite guessing.
@@ -108,6 +109,11 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putAvatar(w http.ResponseWriter, r *http.Request) {
+	s.uploadImage(w, r, func(name string, part io.Reader) error { return s.core.SetAvatar(r.Context(), actor(r), name, part) })
+}
+
+// uploadImage reads the multipart "file" part and hands it to store; a body over the limits is 413.
+func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request, store func(filename string, part io.Reader) error) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload+maxBodyBytes)
 	mr, err := r.MultipartReader()
 	if err != nil {
@@ -128,7 +134,7 @@ func (s *Server) putAvatar(w http.ResponseWriter, r *http.Request) {
 		if part.FormName() != "file" {
 			continue
 		}
-		if err := s.core.SetAvatar(r.Context(), actor(r), part.FileName(), part); err != nil {
+		if err := store(part.FileName(), part); err != nil {
 			var tooBig *http.MaxBytesError
 			if errors.As(err, &tooBig) {
 				err = core.ErrTooLarge

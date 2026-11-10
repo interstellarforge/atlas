@@ -1,0 +1,8 @@
+Subject: Confirm your email address for Atlas
+
+Hello,
+
+Confirm that this address is yours:
+{{.Link}}
+
+The link works once and expires in {{.Hours}} hours. If you did not ask for it, ignore this message.

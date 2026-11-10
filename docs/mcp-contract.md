@@ -59,7 +59,7 @@ Implemented: `projects_list`, `workflow_get`, `board_get` (10 cards per column b
 
 ## Safety
 
-Scopes: read and write separately, optionally per project. Rate limit per token; write quota (default 500 mutations/hour); mass-removal guard (archiving more than 10 items/hour needs the `confirm_mass_archive` flag); instant revocation.
+Organization management (members, invitations, join requests, domains, rules, support access) has no MCP tool; it is the organization ADMIN's in the web app and REST API (ADR-0031). Tokens, including OAuth tokens, obey the organization rules: access off or a lifetime limit refuses them at creation and at use. Scopes: read and write separately, optionally per project. Rate limit per token; write quota (default 500 mutations/hour); mass-removal guard (archiving more than 10 items/hour needs the `confirm_mass_archive` flag); instant revocation.
 
 ## Measured
 

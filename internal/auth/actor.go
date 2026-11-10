@@ -35,6 +35,8 @@ type Actor struct {
 	SessionID int64
 	// MustChangePassword limits the session to changing the password (humans only).
 	MustChangePassword bool
+	// MustEnableTOTP limits the session to setting up two-factor authentication (humans only).
+	MustEnableTOTP bool
 }
 
 // String gives the audit form: human:user-4, token:pat-17.

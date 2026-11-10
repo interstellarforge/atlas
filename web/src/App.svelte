@@ -1,20 +1,29 @@
 <script lang="ts">
   import Admin from "./lib/Admin.svelte";
   import {
+    acceptInvite,
+    acceptInviteNew,
     ApiError,
     getPreferences,
     getPublicPolicy,
+    type InvitePreview,
+    listOrganizations,
     listProjects,
     login,
     logout,
     me,
+    type Organization,
+    previewInvite,
     type Project,
     type PublicPolicy,
     register,
+    requestJoin,
     type User,
+    verifyEmail,
   } from "./lib/api";
   import Board from "./lib/Board.svelte";
   import Brand from "./lib/Brand.svelte";
+  import Company from "./lib/Company.svelte";
   import { connect, disconnect, onChange } from "./lib/events.svelte";
   import ForcedPassword from "./lib/ForcedPassword.svelte";
   import HeroArt from "./lib/HeroArt.svelte";
@@ -44,7 +53,39 @@
   let regInvite = $state("");
   let notice = $state("");
   const registering = $derived(route.path.startsWith("/register"));
+  const inviteToken = $derived(
+    route.path.startsWith("/invite/") ? (route.path.split("/")[2] ?? "") : "",
+  );
+  const joinKey = $derived(
+    route.path.startsWith("/join/") ? (route.path.split("/")[2] ?? "") : "",
+  );
+  let joinSent = $state(false);
+  const verifyToken = $derived(
+    route.path.startsWith("/verify/") ? (route.path.split("/")[2] ?? "") : "",
+  );
+  let verifyState = $state<"working" | "done" | "failed">("working");
+  $effect(() => {
+    if (ready && verifyToken) {
+      verifyState = "working";
+      void verifyEmail(verifyToken).then(
+        () => (verifyState = "done"),
+        () => (verifyState = "failed"),
+      );
+    }
+  });
+  let invite = $state<InvitePreview | undefined>();
+  let inviteInvalid = $state(false);
   let projects = $state<Project[]>([]);
+  let orgs = $state<Organization[]>([]);
+  const adminOrgs = $derived(orgs.filter((o) => o.role === "admin"));
+  async function loadOrgs(): Promise<void> {
+    orgs = await listOrganizations();
+  }
+  // A role can change while the page is open (an application is approved): look again on every page change.
+  $effect(() => {
+    const path = route.path;
+    if (user && path) void loadOrgs();
+  });
 
   const current = $derived(matchProject(route.path));
   // Browser tab title: "Atlas - {project name} {ticket}".
@@ -115,6 +156,61 @@
     }
   });
 
+  // /invite/TOKEN: who invited the address, and whether to register or sign in.
+  $effect(() => {
+    invite = undefined;
+    inviteInvalid = false;
+    if (ready && inviteToken)
+      void previewInvite(inviteToken).then(
+        (p) => (invite = p),
+        () => (inviteInvalid = true),
+      );
+  });
+
+  async function submitInviteNew(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    error = "";
+    try {
+      await acceptInviteNew({
+        token: inviteToken,
+        name: regName,
+        password,
+      });
+      user = await login(invite?.email ?? "", password);
+      password = "";
+      navigate("/");
+    } catch (e) {
+      error = t("auth.invite.failed", {
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
+
+  async function sendJoinRequest(): Promise<void> {
+    error = "";
+    try {
+      await requestJoin(joinKey);
+      joinSent = true;
+    } catch (e) {
+      error = t("auth.join.failed", {
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
+
+  async function acceptSignedIn(): Promise<void> {
+    error = "";
+    try {
+      await acceptInvite(inviteToken);
+      await loadProjects();
+      navigate("/");
+    } catch (e) {
+      error = t("auth.invite.failed", {
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
+
   async function submitRegister(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     error = "";
@@ -166,6 +262,19 @@
 
 {#if !ready}
   <p class="loading muted">{t("app.loading")}</p>
+{:else if verifyToken}
+  <main class="loading">
+    <div class="invite">
+      <Brand />
+      <p
+        class={verifyState === "failed" ? "banner error" : "banner"}
+        role="status"
+      >
+        {t(`auth.verify.${verifyState}`)}
+      </p>
+      <a href="#/">{t("auth.verify.home")}</a>
+    </div>
+  </main>
 {:else if !user}
   <div class="auth">
     <aside class="story" aria-hidden="true">
@@ -177,7 +286,58 @@
       </blockquote>
     </aside>
     <main class="formside">
-      {#if registering}
+      {#if inviteToken && invite && !invite.account_exists}
+        <form onsubmit={submitInviteNew}>
+          <div class="header">
+            <Brand />
+            <h1>
+              {t("auth.invite.title", { organization: invite.organization })}
+            </h1>
+            <p class="muted">
+              {t("auth.invite.intro", { email: invite.email })}
+              {t("auth.invite.newAccount")}
+            </p>
+          </div>
+          <label
+            >{t("settings.name")}<input
+              bind:value={regName}
+              required
+              maxlength="100"
+            /></label
+          >
+          <label>
+            {t("auth.login.password")}
+            <input
+              type="password"
+              bind:value={password}
+              autocomplete="new-password"
+              minlength={policy?.min_password_length ?? 8}
+              required
+            />
+            <small class="muted"
+              >{t("auth.register.minLength", {
+                count: policy?.min_password_length ?? 8,
+              })}</small
+            >
+          </label>
+          {#if error}<p class="banner error" role="alert">{error}</p>{/if}
+          <button class="primary" type="submit"
+            >{t("auth.invite.accept")}</button
+          >
+        </form>
+      {:else if inviteToken && inviteInvalid}
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+          }}
+        >
+          <div class="header">
+            <Brand />
+            <p class="banner error" role="alert">{t("auth.invite.invalid")}</p>
+          </div>
+          <a class="switch" href="#/">{t("auth.register.haveAccount")}</a>
+        </form>
+      {:else if registering}
         <form onsubmit={submitRegister}>
           <div class="header">
             <Brand />
@@ -241,6 +401,12 @@
             <Brand />
             <h1>{t("auth.login.title")}</h1>
             <p class="muted">{t("auth.login.subtitle")}</p>
+            {#if joinKey}
+              <p class="banner" role="status">{t("auth.join.signin")}</p>
+            {/if}
+            {#if inviteToken && invite?.account_exists}
+              <p class="banner" role="status">{t("auth.invite.existing")}</p>
+            {/if}
           </div>
           <label>
             {t("auth.login.email")}
@@ -285,6 +451,23 @@
       {/if}
     </main>
   </div>
+{:else if user.must_enable_totp}
+  <main class="invite">
+    <p class="banner" role="status">{t("auth.totp.required")}</p>
+    <Settings
+      {user}
+      section="security"
+      onuser={(u: User) => {
+        user = u;
+        void me().then((fresh) => (user = fresh));
+      }}
+      ondeleted={() => {
+        user = undefined;
+        navigate("/");
+      }}
+    />
+    <button onclick={() => void signOut()}>{t("nav.signOut")}</button>
+  </main>
 {:else if user.must_change_password}
   <ForcedPassword
     {user}
@@ -296,9 +479,43 @@
     {user}
     {projects}
     unread={inbox.unread}
+    companyAdmin={adminOrgs.length > 0}
     onsignout={() => void signOut()}
   >
-    {#if route.path === "/"}
+    {#if joinKey}
+      <section class="invite">
+        <h1>{t("auth.join.title")}</h1>
+        {#if joinSent}
+          <p class="banner" role="status">{t("auth.join.sent")}</p>
+        {:else}
+          {#if error}<p class="banner error" role="alert">{error}</p>{/if}
+          <button class="primary" onclick={() => void sendJoinRequest()}
+            >{t("auth.join.submit")}</button
+          >
+        {/if}
+      </section>
+    {:else if inviteToken}
+      <section class="invite">
+        {#if invite}
+          <h1>
+            {t("auth.invite.title", { organization: invite.organization })}
+          </h1>
+          <p class="muted">{t("auth.invite.intro", { email: invite.email })}</p>
+          {#if invite.email.toLowerCase() === user.email.toLowerCase()}
+            {#if error}<p class="banner error" role="alert">{error}</p>{/if}
+            <button class="primary" onclick={() => void acceptSignedIn()}
+              >{t("auth.invite.accept")}</button
+            >
+          {:else}
+            <p class="banner" role="status">
+              {t("auth.invite.wrongAccount", { email: invite.email })}
+            </p>
+          {/if}
+        {:else if inviteInvalid}
+          <p class="banner error" role="alert">{t("auth.invite.invalid")}</p>
+        {/if}
+      </section>
+    {:else if route.path === "/"}
       <Projects {projects} onchange={() => void loadProjects()} />
     {:else if current}
       <ProjectView
@@ -321,6 +538,19 @@
     {:else if route.path === "/board"}
       <PageHero title={t("cross.title")} description={t("cross.intro")} />
       <div class="fill"><Board projects={allKeys} /></div>
+    {:else if route.path.startsWith("/company")}
+      {#if adminOrgs.length > 0}
+        <Company
+          {user}
+          orgs={adminOrgs}
+          orgKey={route.path.split("/")[2] ?? ""}
+          section={route.path.split("/")[3] ?? "members"}
+          onchange={() => void loadOrgs()}
+        />
+      {:else}
+        <h1>{t("notFound.title")}</h1>
+        <p><a href="#/">{t("notFound.back")}</a></p>
+      {/if}
     {:else if route.path.startsWith("/admin") && user.is_superadmin}
       <Admin {user} section={route.path.split("/")[2] ?? "users"} />
     {:else if route.path.startsWith("/settings")}
@@ -341,6 +571,12 @@
 {/if}
 
 <style>
+  .invite {
+    display: grid;
+    gap: var(--space-4);
+    max-width: 480px;
+    margin: var(--space-6) auto;
+  }
   .fill {
     flex: 1;
     min-height: 420px;

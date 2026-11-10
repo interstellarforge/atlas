@@ -28,6 +28,8 @@ var (
 	ErrRateLimited        = errors.New("too many login attempts")
 	ErrUnauthenticated    = errors.New("unauthenticated")
 	ErrInvalid            = errors.New("invalid input")
+	// ErrPolicy means an organization rule forbids the action (token access off, token lifetime too long).
+	ErrPolicy = errors.New("not allowed by an organization policy")
 	// ErrTOTPRequired means the password was right but the account has two-factor authentication on.
 	ErrTOTPRequired = errors.New("two-factor code required")
 )
@@ -47,6 +49,17 @@ type User struct {
 	MustChangePassword bool `json:"must_change_password,omitempty"`
 	// TOTP is true when two-factor authentication is on (shown to the user themselves only).
 	TOTP bool `json:"totp,omitempty"`
+	// MustEnableTOTP is set when an organization of the user requires two-factor authentication and it is off:
+	// the session may only set it up until it is on.
+	MustEnableTOTP bool `json:"must_enable_totp,omitempty"`
+}
+
+// UserPolicy is what the organizations of a user impose (strictest wins); the core supplies it live.
+type UserPolicy struct {
+	SessionDays   int  // 0 = no organization limit
+	RequireTOTP   bool // two-factor authentication is required
+	TokensAllowed bool // API tokens, OAuth and MCP access
+	TokenMaxDays  int  // 0 = no limit
 }
 
 type Token struct {
@@ -70,6 +83,30 @@ type Service struct {
 	// seen throttles last_used_at writes: token id -> when it was last written.
 	seen map[int64]time.Time
 	ttl  time.Duration
+	// policy gives the organization rules of a user; nil means none.
+	policy func(userID int64) UserPolicy
+}
+
+// SetUserPolicy installs the lookup of organization rules (session length, token access, required 2FA).
+func (s *Service) SetUserPolicy(f func(userID int64) UserPolicy) { s.policy = f }
+
+func (s *Service) userPolicy(userID int64) UserPolicy {
+	if s.policy == nil {
+		return UserPolicy{TokensAllowed: true}
+	}
+	return s.policy(userID)
+}
+
+// TokensAllowedFor reports whether the organizations of a user allow API tokens, OAuth and MCP access.
+func (s *Service) TokensAllowedFor(userID int64) bool { return s.userPolicy(userID).TokensAllowed }
+
+// SessionTTLFor is the session length for a user: the instance value, shortened by their organizations.
+func (s *Service) SessionTTLFor(userID int64) time.Duration {
+	ttl := s.SessionTTL()
+	if d := s.userPolicy(userID).SessionDays; d > 0 && time.Duration(d)*24*time.Hour < ttl {
+		return time.Duration(d) * 24 * time.Hour
+	}
+	return ttl
 }
 
 // SessionTTL is how long a new session lasts; the instance policy can change it.
@@ -173,7 +210,7 @@ func (s *Service) Login(email, password, code, clientKey string) (user User, ses
 	csrf = randomToken(16)
 	now := time.Now()
 	if _, err := s.db.W.Exec(`INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?)`, hashToken(session), user.ID, csrf, now.UnixMilli(), now.Add(s.SessionTTL()).UnixMilli()); err != nil {
+		VALUES (?, ?, ?, ?, ?)`, hashToken(session), user.ID, csrf, now.UnixMilli(), now.Add(s.SessionTTLFor(user.ID)).UnixMilli()); err != nil {
 		return User{}, "", "", err
 	}
 	s.clearFails(key)
@@ -208,9 +245,10 @@ func (s *Service) Logout(session string) error {
 func (s *Service) SessionActor(session string) (Actor, error) {
 	var a Actor
 	var exp int64
-	err := s.db.R.QueryRow(`SELECT s.user_id, s.csrf_token, s.expires_at, s.rowid, u.must_change_password
+	var totpOn bool
+	err := s.db.R.QueryRow(`SELECT s.user_id, s.csrf_token, s.expires_at, s.rowid, u.must_change_password, u.totp_enabled
 		FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.status = 'active'`, hashToken(session)).
-		Scan(&a.UserID, &a.CSRF, &exp, &a.SessionID, &a.MustChangePassword)
+		Scan(&a.UserID, &a.CSRF, &exp, &a.SessionID, &a.MustChangePassword, &totpOn)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && exp < time.Now().UnixMilli()) {
 		return Actor{}, ErrUnauthenticated
 	}
@@ -218,6 +256,7 @@ func (s *Service) SessionActor(session string) (Actor, error) {
 		return Actor{}, err
 	}
 	a.Kind = KindHuman
+	a.MustEnableTOTP = !totpOn && s.userPolicy(a.UserID).RequireTOTP
 	return a, nil
 }
 
@@ -225,6 +264,7 @@ func (s *Service) User(id int64) (User, error) {
 	var u User
 	err := s.db.R.QueryRow(`SELECT id, email, name, is_superadmin, avatar_path IS NOT NULL, totp_enabled, must_change_password FROM users WHERE id = ?`, id).
 		Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.Avatar, &u.TOTP, &u.MustChangePassword)
+	u.MustEnableTOTP = err == nil && !u.TOTP && s.userPolicy(id).RequireTOTP
 	return u, err
 }
 
@@ -243,6 +283,13 @@ func (s *Service) CreateToken(userID int64, name string, scopes, projects []stri
 		if sc != ScopeRead && sc != ScopeWrite {
 			return Token{}, "", ErrInvalid
 		}
+	}
+	pol := s.userPolicy(userID)
+	if !pol.TokensAllowed {
+		return Token{}, "", ErrPolicy
+	}
+	if pol.TokenMaxDays > 0 && (expiresAt == nil || *expiresAt > time.Now().Add(time.Duration(pol.TokenMaxDays)*24*time.Hour).UnixMilli()) {
+		return Token{}, "", ErrPolicy
 	}
 	plain, prefix, hash := NewTokenSecret()
 	scopesJSON, _ := json.Marshal(scopes)
@@ -315,9 +362,10 @@ func (s *Service) TokenActor(plain string) (Actor, error) {
 	var scopes string
 	var projects sql.NullString
 	var exp, rev sql.NullInt64
-	err := s.db.R.QueryRow(`SELECT t.id, t.user_id, t.scopes, t.projects, t.expires_at, t.revoked_at
+	var created int64
+	err := s.db.R.QueryRow(`SELECT t.id, t.user_id, t.scopes, t.projects, t.expires_at, t.revoked_at, t.created_at
 		FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ? AND u.status = 'active'`, hashToken(plain)).
-		Scan(&a.TokenID, &a.UserID, &scopes, &projects, &exp, &rev)
+		Scan(&a.TokenID, &a.UserID, &scopes, &projects, &exp, &rev, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Actor{}, ErrUnauthenticated
 	}
@@ -325,6 +373,11 @@ func (s *Service) TokenActor(plain string) (Actor, error) {
 		return Actor{}, err
 	}
 	if rev.Valid || (exp.Valid && exp.Int64 < time.Now().UnixMilli()) {
+		return Actor{}, ErrUnauthenticated
+	}
+	// Organization rules apply at use too: a token that predates a rule stops working.
+	pol := s.userPolicy(a.UserID)
+	if !pol.TokensAllowed || (pol.TokenMaxDays > 0 && created+int64(pol.TokenMaxDays)*86_400_000 < time.Now().UnixMilli()) {
 		return Actor{}, ErrUnauthenticated
 	}
 	a.Kind = KindToken

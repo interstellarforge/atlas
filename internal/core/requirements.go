@@ -106,31 +106,44 @@ func (s *Service) SetMergeColumns(ctx context.Context, a auth.Actor, key string,
 
 // SetMergeCategories chooses the status categories whose statuses share one board column (ADR-0020).
 func (s *Service) SetMergeCategories(ctx context.Context, a auth.Actor, key string, categories []string) error {
-	for _, c := range categories {
-		if !slices.Contains(allCategories, c) {
-			return invalid("unknown category %q", c)
-		}
-	}
-	// Stored in board order so the same choice always reads the same.
-	var keep []string
-	for _, c := range allCategories {
-		if slices.Contains(categories, c) {
-			keep = append(keep, c)
-		}
+	keep, err := mergeCategoryOrder(categories)
+	if err != nil {
+		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
 		p, _, err := s.access(tx, a, key, actWorkflow)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE projects SET merge_categories = ?, merge_columns = ? WHERE id = ?`, strings.Join(keep, ","), len(keep) > 0, p.ID); err != nil {
-			return err
-		}
-		if keep == nil {
-			keep = []string{}
-		}
-		// project.updated makes clients refetch the workflow and the board.
-		return s.journal(ctx, tx, a, change{Operation: "workflow.merge_columns", Target: key, Event: "project.updated",
-			Project: key, Changes: map[string]any{"merge_categories": keep}})
+		return s.setMergeCategoriesTx(ctx, tx, a, p, keep)
 	})
+}
+
+// mergeCategoryOrder validates the categories and returns them in board order, so the same choice always reads the same.
+func mergeCategoryOrder(categories []string) ([]string, error) {
+	for _, c := range categories {
+		if !slices.Contains(allCategories, c) {
+			return nil, invalid("unknown category %q", c)
+		}
+	}
+	var keep []string
+	for _, c := range allCategories {
+		if slices.Contains(categories, c) {
+			keep = append(keep, c)
+		}
+	}
+	return keep, nil
+}
+
+// setMergeCategoriesTx stores ordered categories after the access check, for a project the caller just created.
+func (s *Service) setMergeCategoriesTx(ctx context.Context, tx *sql.Tx, a auth.Actor, p Project, keep []string) error {
+	if _, err := tx.Exec(`UPDATE projects SET merge_categories = ?, merge_columns = ? WHERE id = ?`, strings.Join(keep, ","), len(keep) > 0, p.ID); err != nil {
+		return err
+	}
+	if keep == nil {
+		keep = []string{}
+	}
+	// project.updated makes clients refetch the workflow and the board.
+	return s.journal(ctx, tx, a, change{Operation: "workflow.merge_columns", Target: p.Key, Event: "project.updated",
+		Project: p.Key, Changes: map[string]any{"merge_categories": keep}})
 }

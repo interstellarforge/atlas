@@ -142,3 +142,23 @@ Status category enum: `todo`, `active`, `review`, `completed` (`review` since mi
 
 - `users.status` (`active|suspended` in use; the CHECK still allows the retired `pending|rejected`, which migration 0033 converts to `active`), `status_changed_at/by`; `rejection_note`, `reapply_count` and `reapply_window_at` are unused leftovers. The single authentication gate is `status = 'active'`; `deactivated_at` remains for anonymised users, the last-SUPERADMIN triggers and the organization migration.
 - `support_grants` (`organization_id`, `level read_only|full`, `granted_by`, `granted_at`, `expires_at` NULL = until revoked, `revoked_at/by`): created and revoked only by an explicit ADMIN of the organization; authorization reads it live and only for a SUPERADMIN user session.
+
+## Organization applications (migration 0034; ADR-0031)
+
+`organization_applications` (`applicant_id`, `name`, `key`, `note`, `status pending|approved|rejected`, `created_at`, `decided_at/by`, `decision_note`, `organization_id`). A unique partial index allows one waiting application per account. Instance setting `organization_creation` (`admin_only` default | `apply`) lives in `instance_settings`.
+
+## Organization invitations (migration 0035; ADR-0031)
+
+`organization_invites` (`organization_id`, `email`, `token_hash` unique, `status pending|accepted|revoked`, `invited_by`, `created_at`, `expires_at`, `accepted_by`, `accepted_at`); "expired" is derived from `expires_at`. A unique partial index allows one pending invitation per organization and address. `organization_invite_projects` (`invite_id`, `project_id`) lists the projects the invitee joins. `users.email_verified_at` is set when an invitation is accepted. Instance invites (`invites`, registration mode `invite`) stay separate.
+
+## Join requests (migration 0036; ADR-0031)
+
+`organization_settings` (`organization_id`, `join_link_enabled`; more company settings follow in COM 7). `organization_join_requests` (`organization_id`, `user_id`, `status pending|approved|rejected`, `created_at`, `decided_at/by`, `decision_note`); a unique partial index allows one waiting request per account and organization.
+
+## Email domains and verification (migration 0037; ADR-0031)
+
+`organization_domains` (`organization_id`, `domain` unique, `mode request|auto`, `status pending|confirmed`, `claimed_by/at`, `confirmed_by/at`): one domain belongs to one organization, claimed by its ADMIN and confirmed by the SUPERADMIN. `email_verifications` (`user_id`, `email`, `token_hash` unique, `created_at`, `expires_at`, `used_at`). `users.email_verified_at` is cleared when the email changes.
+
+## Organization settings (migration 0038; ADR-0031)
+
+`organization_settings` gains `password_min_length`, `session_days`, `token_max_days` (NULL = the instance value applies), `project_creation admins|members`, `require_2fa`, `tokens_allowed`. They are read live (`core.userRules`): the strictest value over the active organizations a person belongs to. `done_visible_days` (migration 0039; NULL = instance value, 0 = never hide) overrides the instance setting for the projects of the organization (applied in the list filter, `core/list.go`). `item_templates` and `project_templates` gain `organization_id` (migration 0039): an item template with `project_id` NULL and an organization is company wide, both NULL is instance wide; a project template with an organization is visible to its members only and creates its projects in it. Names are unique per scope. `organization_settings.logo_path` and `default_project_template_id` (migration 0040, the latter `ON DELETE SET NULL`) hold the logo and the default workflow. Not planned: a company default language (the app is single-language).

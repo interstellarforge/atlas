@@ -137,7 +137,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 			} else {
 				var id int64
 				if id, err = projectTemplateID(ctx, s, a, in.Template); err == nil {
-					p, err = s.CreateProjectFromTemplate(ctx, a, in.Key, in.Name, id)
+					p, err = s.CreateProjectFromTemplateIn(ctx, a, in.Organization, in.Key, in.Name, id)
 				}
 			}
 			if err != nil {

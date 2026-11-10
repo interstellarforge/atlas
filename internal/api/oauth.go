@@ -252,8 +252,13 @@ func (s *Server) oauthDecide(w http.ResponseWriter, r *http.Request) {
 			s.page(w, http.StatusForbidden, d)
 			return
 		}
+		if !s.auth.TokensAllowedFor(user.ID) {
+			d.Error = "An organization of yours does not allow access for applications."
+			s.page(w, http.StatusForbidden, d)
+			return
+		}
 		http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Value: session, Path: "/", HttpOnly: true, Secure: s.cookieSecure,
-			SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(s.auth.SessionTTL())})
+			SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(s.auth.SessionTTLFor(user.ID))})
 		s.page(w, http.StatusOK, pageData{Mode: "consent", Client: c.Name, CSRF: csrf, Req: req, Scopes: scopes})
 	case "approve", "deny":
 		a, ok := s.sessionActor(r)
@@ -262,6 +267,10 @@ func (s *Server) oauthDecide(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.PostForm.Get("action") == "deny" {
+			redirectBack(w, r, req, url.Values{"error": {"access_denied"}})
+			return
+		}
+		if !s.auth.TokensAllowedFor(a.UserID) {
 			redirectBack(w, r, req, url.Values{"error": {"access_denied"}})
 			return
 		}
@@ -310,6 +319,9 @@ func (s *Server) oauthToken(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, auth.ErrOAuthGrant):
 		s.auth.Failed("oauth|" + s.clientKey(r))
 		oauthError(w, http.StatusBadRequest, "invalid_grant", "the code or refresh token is invalid, expired or already used")
+		return
+	case errors.Is(err, auth.ErrPolicy):
+		oauthError(w, http.StatusBadRequest, "invalid_grant", "an organization policy does not allow this access")
 		return
 	case err != nil:
 		s.internal(w, r, err)

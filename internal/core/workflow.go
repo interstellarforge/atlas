@@ -334,31 +334,36 @@ func (s *Service) SetTransitions(ctx context.Context, a auth.Actor, key string, 
 		if err != nil {
 			return err
 		}
-		sts, err := statuses(tx, p.ID)
-		if err != nil {
-			return err
-		}
-		ids := map[string]int64{}
-		for _, st := range sts {
-			ids[strings.ToLower(st.Name)] = st.ID
-		}
-		if _, err := tx.Exec(`DELETE FROM workflow_transitions WHERE project_id = ?`, p.ID); err != nil {
-			return err
-		}
-		for _, t := range ts {
-			from, ok1 := ids[strings.ToLower(t.From)]
-			to, ok2 := ids[strings.ToLower(t.To)]
-			if !ok1 || !ok2 {
-				return invalid("unknown status in transition %q -> %q", t.From, t.To)
-			}
-			if _, err := tx.Exec(`INSERT OR IGNORE INTO workflow_transitions (project_id, from_status_id, to_status_id) VALUES (?, ?, ?)`,
-				p.ID, from, to); err != nil {
-				return err
-			}
-		}
-		return s.journal(ctx, tx, a, change{Operation: "workflow.set", Target: key, Event: "project.updated",
-			Project: key, Changes: map[string]any{"transitions": len(ts)}})
+		return s.setTransitionsTx(ctx, tx, a, p, ts)
 	})
+}
+
+// setTransitionsTx is SetTransitions after the access check, for a project the caller just created.
+func (s *Service) setTransitionsTx(ctx context.Context, tx *sql.Tx, a auth.Actor, p Project, ts []Transition) error {
+	sts, err := statuses(tx, p.ID)
+	if err != nil {
+		return err
+	}
+	ids := map[string]int64{}
+	for _, st := range sts {
+		ids[strings.ToLower(st.Name)] = st.ID
+	}
+	if _, err := tx.Exec(`DELETE FROM workflow_transitions WHERE project_id = ?`, p.ID); err != nil {
+		return err
+	}
+	for _, t := range ts {
+		from, ok1 := ids[strings.ToLower(t.From)]
+		to, ok2 := ids[strings.ToLower(t.To)]
+		if !ok1 || !ok2 {
+			return invalid("unknown status in transition %q -> %q", t.From, t.To)
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO workflow_transitions (project_id, from_status_id, to_status_id) VALUES (?, ?, ?)`,
+			p.ID, from, to); err != nil {
+			return err
+		}
+	}
+	return s.journal(ctx, tx, a, change{Operation: "workflow.set", Target: p.Key, Event: "project.updated",
+		Project: p.Key, Changes: map[string]any{"transitions": len(ts)}})
 }
 
 // transitionAllowed reports whether moving from one status to another is permitted.
@@ -411,6 +416,19 @@ func (s *Service) customFields(q queryer, projectID int64) ([]CustomField, error
 }
 
 func (s *Service) AddCustomField(ctx context.Context, a auth.Actor, key string, f CustomField) error {
+	if err := cleanCustomField(&f); err != nil {
+		return err
+	}
+	return s.tx(func(tx *sql.Tx) error {
+		p, _, err := s.access(tx, a, key, actWorkflow)
+		if err != nil {
+			return err
+		}
+		return s.addCustomFieldTx(ctx, tx, a, p, f)
+	})
+}
+
+func cleanCustomField(f *CustomField) error {
 	f.Name = strings.TrimSpace(f.Name)
 	if f.Name == "" || !slices.Contains(fieldTypes, f.Type) {
 		return invalid("name and type (text, number, bool, date, select) are required")
@@ -419,34 +437,33 @@ func (s *Service) AddCustomField(ctx context.Context, a auth.Actor, key string, 
 		return invalid("select fields need options")
 	}
 	if f.Default != nil {
-		if _, err := validateValue(f, f.Default); err != nil {
+		if _, err := validateValue(*f, f.Default); err != nil {
 			return invalid("default: %v", err)
 		}
 	}
-	return s.tx(func(tx *sql.Tx) error {
-		p, _, err := s.access(tx, a, key, actWorkflow)
-		if err != nil {
-			return err
+	return nil
+}
+
+// addCustomFieldTx stores a cleaned field after the access check, for a project the caller just created.
+func (s *Service) addCustomFieldTx(ctx context.Context, tx *sql.Tx, a auth.Actor, p Project, f CustomField) error {
+	var def, opts any
+	if f.Default != nil {
+		b, _ := json.Marshal(f.Default)
+		def = string(b)
+	}
+	if len(f.Options) > 0 {
+		b, _ := json.Marshal(f.Options)
+		opts = string(b)
+	}
+	if _, err := tx.Exec(`INSERT INTO custom_field_definitions (project_id, name, type, required, default_value, options)
+		VALUES (?, ?, ?, ?, ?, ?)`, p.ID, f.Name, f.Type, f.Required, def, opts); err != nil {
+		if isUnique(err) {
+			return rule("custom field %q already exists", f.Name)
 		}
-		var def, opts any
-		if f.Default != nil {
-			b, _ := json.Marshal(f.Default)
-			def = string(b)
-		}
-		if len(f.Options) > 0 {
-			b, _ := json.Marshal(f.Options)
-			opts = string(b)
-		}
-		if _, err := tx.Exec(`INSERT INTO custom_field_definitions (project_id, name, type, required, default_value, options)
-			VALUES (?, ?, ?, ?, ?, ?)`, p.ID, f.Name, f.Type, f.Required, def, opts); err != nil {
-			if isUnique(err) {
-				return rule("custom field %q already exists", f.Name)
-			}
-			return err
-		}
-		return s.journal(ctx, tx, a, change{Operation: "field.create", Target: key, Event: "project.updated",
-			Project: key, Changes: map[string]any{"field": f.Name}})
-	})
+		return err
+	}
+	return s.journal(ctx, tx, a, change{Operation: "field.create", Target: p.Key, Event: "project.updated",
+		Project: p.Key, Changes: map[string]any{"field": f.Name}})
 }
 
 // DeleteCustomField removes the definition; values already stored on items are left untouched.

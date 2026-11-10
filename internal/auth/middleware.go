@@ -44,6 +44,10 @@ func Require(onFail func(w http.ResponseWriter, status int, code, msg string), n
 			onFail(w, http.StatusForbidden, "password_change_required", "change your password first")
 			return
 		}
+		if a.MustEnableTOTP && !totpSetupPaths[r.URL.Path] {
+			onFail(w, http.StatusForbidden, "totp_required", "set up two-factor authentication first")
+			return
+		}
 		scope := ScopeWrite
 		if safeMethod(r.Method) {
 			scope = ScopeRead
@@ -61,6 +65,15 @@ var passwordChangePaths = map[string]bool{
 	"/api/v1/auth/me":     true,
 	"/api/v1/auth/logout": true,
 	"/api/v1/me/password": true,
+}
+
+// totpSetupPaths is all a session may do while an organization requires two-factor authentication it does not have.
+var totpSetupPaths = map[string]bool{
+	"/api/v1/auth/me":        true,
+	"/api/v1/auth/logout":    true,
+	"/api/v1/me/security":    true,
+	"/api/v1/me/totp/setup":  true,
+	"/api/v1/me/totp/enable": true,
 }
 
 func safeMethod(m string) bool {

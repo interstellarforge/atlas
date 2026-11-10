@@ -46,7 +46,7 @@ func (s *Service) ChangeEmail(ctx context.Context, a auth.Actor, email, password
 		if err := tx.QueryRow(`SELECT email FROM users WHERE id = ?`, a.UserID).Scan(&old); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE users SET email = ? WHERE id = ?`, email, a.UserID); err != nil {
+		if _, err := tx.Exec(`UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?`, email, a.UserID); err != nil {
 			if isUnique(err) {
 				return rule("email already in use")
 			}
@@ -354,6 +354,6 @@ func scrubAuditPII(tx *sql.Tx, a auth.Actor) error {
 		return err
 	}
 	_, err := tx.Exec(`UPDATE audit_entries SET changes = json_remove(changes, '$.email')
-		WHERE operation = 'invite.create' AND lower(json_extract(changes, '$.email')) = lower(?)`, email)
+		WHERE operation IN ('invite.create', 'org.invite.create') AND lower(json_extract(changes, '$.email')) = lower(?)`, email)
 	return err
 }

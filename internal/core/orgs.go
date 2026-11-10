@@ -20,6 +20,8 @@ type Organization struct {
 	Role      string `json:"role,omitempty"`
 	// NoActiveAdmin flags an organization left without an active ADMIN (only possible through allow_orphan).
 	NoActiveAdmin bool `json:"no_active_admin"`
+	// Logo is true when the organization has a logo (GET /organizations/{key}/logo).
+	Logo bool `json:"logo"`
 }
 
 type OrgMember struct {
@@ -32,12 +34,13 @@ type OrgMember struct {
 
 const orgSelect = `SELECT o.id, o.key, o.name, o.status, o.created_at, COALESCE(m.role, ''),
 	NOT EXISTS (SELECT 1 FROM organization_memberships x JOIN users u ON u.id = x.user_id
-		WHERE x.organization_id = o.id AND x.role = 'admin' AND u.status = 'active')
+		WHERE x.organization_id = o.id AND x.role = 'admin' AND u.status = 'active'),
+	EXISTS (SELECT 1 FROM organization_settings g WHERE g.organization_id = o.id AND g.logo_path IS NOT NULL)
 	FROM organizations o LEFT JOIN organization_memberships m ON m.organization_id = o.id AND m.user_id = ?`
 
 func scanOrg(sc interface{ Scan(...any) error }) (Organization, error) {
 	var o Organization
-	err := sc.Scan(&o.ID, &o.Key, &o.Name, &o.Status, &o.CreatedAt, &o.Role, &o.NoActiveAdmin)
+	err := sc.Scan(&o.ID, &o.Key, &o.Name, &o.Status, &o.CreatedAt, &o.Role, &o.NoActiveAdmin, &o.Logo)
 	return o, err
 }
 
@@ -60,7 +63,8 @@ func cleanOrg(key, name string) (string, string, error) {
 	return key, name, nil
 }
 
-// CreateOrganization makes an organization with its first ADMIN (ADR-0027); adminID 0 means the creating SUPERADMIN.
+// CreateOrganization makes an organization with its first ADMIN (ADR-0027, ADR-0031). SUPERADMIN only; the first
+// admin must be given and is never the creator by default: the Atlas admin does not get into the organization.
 func (s *Service) CreateOrganization(ctx context.Context, a auth.Actor, key, name string, adminID int64) (Organization, error) {
 	if err := s.adminOnly(a); err != nil {
 		return Organization{}, err
@@ -69,37 +73,60 @@ func (s *Service) CreateOrganization(ctx context.Context, a auth.Actor, key, nam
 	if err != nil {
 		return Organization{}, err
 	}
-	if adminID == 0 {
-		adminID = a.UserID
+	if adminID <= 0 {
+		return Organization{}, invalid("give the first admin of the organization")
 	}
 	var out Organization
 	err = s.tx(func(tx *sql.Tx) error {
-		var active bool
-		if err := tx.QueryRow(`SELECT status = 'active' FROM users WHERE id = ?`, adminID).Scan(&active); errors.Is(err, sql.ErrNoRows) || (err == nil && !active) {
-			return invalid("the first admin must be an active user")
-		} else if err != nil {
-			return err
-		}
-		now := s.nowMs()
-		res, err := tx.Exec(`INSERT INTO organizations (key, name, created_at, created_by) VALUES (?, ?, ?, ?)`, key, name, now, a.UserID)
-		if isUnique(err) {
-			return rule("organization %s already exists", key)
-		}
-		if err != nil {
-			return err
-		}
-		id, _ := res.LastInsertId()
-		if _, err := tx.Exec(`INSERT INTO organization_memberships (organization_id, user_id, role, created_at, created_by) VALUES (?, ?, 'admin', ?, ?)`,
-			id, adminID, now, a.UserID); err != nil {
-			return err
-		}
-		if out, err = loadOrg(tx, a.UserID, key); err != nil {
-			return err
-		}
-		return s.journal(ctx, tx, a, change{Operation: "org.create", Target: orgTarget(key), Event: "admin.updated",
-			Changes: map[string]any{"name": name, "admin": adminID}})
+		out, err = s.createOrganizationTx(ctx, tx, a, key, name, adminID)
+		return err
 	})
 	return out, err
+}
+
+// CreateOrganizationFor is CreateOrganization with the first admin given by the email of an active account.
+func (s *Service) CreateOrganizationFor(ctx context.Context, a auth.Actor, key, name, adminEmail string) (Organization, error) {
+	if err := s.adminOnly(a); err != nil {
+		return Organization{}, err
+	}
+	var id int64
+	err := s.db.R.QueryRow(`SELECT id FROM users WHERE email = ? AND status = 'active'`, strings.TrimSpace(adminEmail)).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Organization{}, invalid("no active account has that email")
+	}
+	if err != nil {
+		return Organization{}, err
+	}
+	return s.CreateOrganization(ctx, a, key, name, id)
+}
+
+// createOrganizationTx inserts the organization and its first ADMIN in the caller's transaction.
+func (s *Service) createOrganizationTx(ctx context.Context, tx *sql.Tx, a auth.Actor, key, name string, adminID int64) (Organization, error) {
+	var active bool
+	if err := tx.QueryRow(`SELECT status = 'active' FROM users WHERE id = ?`, adminID).Scan(&active); errors.Is(err, sql.ErrNoRows) || (err == nil && !active) {
+		return Organization{}, invalid("the first admin must be an active user")
+	} else if err != nil {
+		return Organization{}, err
+	}
+	now := s.nowMs()
+	res, err := tx.Exec(`INSERT INTO organizations (key, name, created_at, created_by) VALUES (?, ?, ?, ?)`, key, name, now, a.UserID)
+	if isUnique(err) {
+		return Organization{}, rule("organization %s already exists", key)
+	}
+	if err != nil {
+		return Organization{}, err
+	}
+	id, _ := res.LastInsertId()
+	if _, err := tx.Exec(`INSERT INTO organization_memberships (organization_id, user_id, role, created_at, created_by) VALUES (?, ?, 'admin', ?, ?)`,
+		id, adminID, now, a.UserID); err != nil {
+		return Organization{}, err
+	}
+	o, err := loadOrg(tx, a.UserID, key)
+	if err != nil {
+		return Organization{}, err
+	}
+	return o, s.journal(ctx, tx, a, change{Operation: "org.create", Target: orgTarget(key), Event: "admin.updated",
+		Changes: map[string]any{"name": name, "admin": adminID}})
 }
 
 func orgTarget(key string) string { return "org:" + key }
@@ -348,7 +375,7 @@ func guardOrgAdminLoss(q queryer, userID int64) error {
 // projectOrganization picks the organization a new project goes into and checks the actor may create it there.
 func (s *Service) projectOrganization(tx *sql.Tx, a auth.Actor, orgKey string) (Organization, error) {
 	if orgKey != "" {
-		return s.authorizeOrg(tx, a, orgKey, orgUpdate)
+		return s.orgForProjectCreation(tx, a, orgKey)
 	}
 	st, err := s.standing(tx, a)
 	if err != nil {
@@ -359,7 +386,8 @@ func (s *Service) projectOrganization(tx *sql.Tx, a auth.Actor, orgKey string) (
 	}
 	// Only organizations the actor administers: a SUPERADMIN has no project rights without a membership or a grant.
 	rows, err := tx.Query(`SELECT o.key FROM organizations o WHERE o.status = 'active'
-		AND EXISTS (SELECT 1 FROM organization_memberships m WHERE m.organization_id = o.id AND m.user_id = ? AND m.role = 'admin') ORDER BY o.key`, a.UserID)
+		AND EXISTS (SELECT 1 FROM organization_memberships m WHERE m.organization_id = o.id AND m.user_id = ?1
+			AND (m.role = 'admin' OR EXISTS (SELECT 1 FROM organization_settings x WHERE x.organization_id = o.id AND x.project_creation = 'members'))) ORDER BY o.key`, a.UserID)
 	if err != nil {
 		return Organization{}, err
 	}
@@ -375,11 +403,36 @@ func (s *Service) projectOrganization(tx *sql.Tx, a auth.Actor, orgKey string) (
 	rows.Close()
 	switch len(keys) {
 	case 0:
-		return Organization{}, ErrForbidden // only an organization ADMIN creates projects
+		return Organization{}, ErrForbidden // only an organization ADMIN creates projects, unless the organization lets members
 	case 1:
-		return s.authorizeOrg(tx, a, keys[0], orgUpdate)
+		return s.orgForProjectCreation(tx, a, keys[0])
 	}
 	return Organization{}, invalid("several organizations: say which one the project belongs to")
+}
+
+// orgForProjectCreation lets the organization ADMIN create projects, and a plain member when the organization
+// setting project_creation is "members" (ADR-0031 point 9).
+func (s *Service) orgForProjectCreation(tx *sql.Tx, a auth.Actor, key string) (Organization, error) {
+	o, err := s.authorizeOrg(tx, a, key, orgUpdate)
+	if !errors.Is(err, ErrForbidden) {
+		return o, err
+	}
+	st, err := s.standing(tx, a)
+	if err != nil || !st.active || a.Projects != nil || !a.Can(auth.ScopeWrite) {
+		return Organization{}, ErrForbidden
+	}
+	o, err = loadOrg(tx, a.UserID, key)
+	if err != nil || o.Role != "user" || o.Status != "active" {
+		return Organization{}, ErrForbidden
+	}
+	var members bool
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM organization_settings WHERE organization_id = ? AND project_creation = 'members')`, o.ID).Scan(&members); err != nil {
+		return Organization{}, err
+	}
+	if !members {
+		return Organization{}, ErrForbidden
+	}
+	return o, nil
 }
 
 // revokeProjectTokensInOrg revokes the user's project tokens for the projects of an organization; with onlyWithoutRow
@@ -426,7 +479,7 @@ func (s *Service) BootstrapOrganization(ctx context.Context, superadminEmail, ke
 	if err := s.db.W.QueryRow(`SELECT id FROM users WHERE email = ? AND is_superadmin = 1`, superadminEmail).Scan(&id); err != nil {
 		return err
 	}
-	_, err := s.CreateOrganization(ctx, auth.Actor{Kind: auth.KindHuman, UserID: id}, key, name, 0)
+	_, err := s.CreateOrganization(ctx, auth.Actor{Kind: auth.KindHuman, UserID: id}, key, name, id) // bootstrap only: the SUPERADMIN runs the default organization (ADR-0028)
 	return err
 }
 

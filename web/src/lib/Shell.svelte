@@ -24,12 +24,15 @@
     user,
     projects,
     unread,
+    companyAdmin = false,
     onsignout,
     children,
   }: {
     user: User;
     projects: Project[];
     unread: number;
+    /** The user administers at least one organization. */
+    companyAdmin?: boolean;
     onsignout: () => void;
     children: Snippet;
   } = $props();
@@ -57,6 +60,7 @@
       | "nav.overview"
       | "nav.inbox"
       | "nav.settings"
+      | "nav.company"
       | "nav.admin";
   }[] = [
     { href: "#/", path: "/", icon: "projects", label: "nav.projects" },
@@ -80,9 +84,17 @@
     icon: "key",
     label: "nav.admin",
   } as const;
-  const visibleLinks = $derived(
-    user.is_superadmin ? [...links, adminLink] : links,
-  );
+  const companyLink = {
+    href: "#/company",
+    path: "/company",
+    icon: "projects",
+    label: "nav.company",
+  } as const;
+  const visibleLinks = $derived([
+    ...links,
+    ...(companyAdmin ? [companyLink] : []),
+    ...(user.is_superadmin ? [adminLink] : []),
+  ]);
 
   const viewLabel = {
     overview: "project.overview",
@@ -119,6 +131,7 @@
         { label: current.key, href: `#/p/${current.key}` },
         { label: t(viewLabel[current.view]) },
       ];
+    if (route.path === "/") return [{ label: t("nav.projects") }];
     const link = visibleLinks.find((l) => l.path !== "/" && isActive(l.path));
     return [{ label: link ? t(link.label) : t("notFound.title") }];
   });

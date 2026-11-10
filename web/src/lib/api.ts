@@ -18,6 +18,7 @@ export interface User {
   avatar?: boolean;
   totp?: boolean;
   must_change_password?: boolean;
+  must_enable_totp?: boolean;
 }
 
 interface Session {
@@ -973,6 +974,8 @@ export interface ProjectTemplate {
   name: string;
   description: string;
   data: unknown;
+  /** Key of the organization the template belongs to; empty for an instance wide one. */
+  organization?: string;
 }
 
 export async function listItemTemplates(
@@ -1027,6 +1030,8 @@ export interface Organization {
   /** The caller's own role in it: admin, user, or empty. */
   role?: string;
   no_active_admin: boolean;
+  /** The organization has a logo (GET /organizations/{key}/logo). */
+  logo?: boolean;
 }
 
 export async function listOrganizations(): Promise<Organization[]> {
@@ -1034,8 +1039,87 @@ export async function listOrganizations(): Promise<Organization[]> {
     .items;
 }
 
+export interface Application {
+  id: number;
+  key: string;
+  name: string;
+  note: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: number;
+  decided_at: number | null;
+  decision_note?: string;
+  organization_key?: string;
+}
+
+export interface AdminApplication extends Application {
+  applicant_email: string;
+  applicant_name: string;
+}
+
+export interface AdminOrganization {
+  key: string;
+  name: string;
+  status: string;
+  created_at: number;
+  admins: string[];
+  members: number;
+}
+
+export async function listMyApplications(): Promise<Application[]> {
+  return (
+    await request<{ items: Application[] }>(
+      "GET",
+      "/organizations/applications",
+    )
+  ).items;
+}
+
+export function applyForOrganization(body: {
+  key: string;
+  name: string;
+  note: string;
+}): Promise<Application> {
+  return request("POST", "/organizations/applications", body);
+}
+
+export async function listAdminOrganizations(): Promise<AdminOrganization[]> {
+  return (
+    await request<{ items: AdminOrganization[] }>("GET", "/admin/organizations")
+  ).items;
+}
+
+export function createAdminOrganization(body: {
+  key: string;
+  name: string;
+  admin_email: string;
+}): Promise<Organization> {
+  return request("POST", "/admin/organizations", body);
+}
+
+export async function listAdminApplications(): Promise<AdminApplication[]> {
+  return (
+    await request<{ items: AdminApplication[] }>(
+      "GET",
+      "/admin/organization-applications",
+    )
+  ).items;
+}
+
+export function decideApplication(
+  id: number,
+  decision: "approve" | "reject",
+  body: { key?: string; note?: string } = {},
+): Promise<void> {
+  return request(
+    "POST",
+    `/admin/organization-applications/${String(id)}/${decision}`,
+    body,
+  );
+}
+
 export interface PublicPolicy {
   registration: "closed" | "invite" | "open";
+  organization_creation: "admin_only" | "apply";
   min_password_length: number;
   allowed_domain: string;
 }
@@ -1051,6 +1135,43 @@ export function register(body: {
   invite?: string;
 }): Promise<{ user: User }> {
   return request("POST", "/auth/register", body);
+}
+
+export interface InvitePreview {
+  organization: string;
+  email: string;
+  account_exists: boolean;
+}
+
+export function previewInvite(token: string): Promise<InvitePreview> {
+  return request("GET", `/auth/invitations/${encodeURIComponent(token)}`);
+}
+
+// Creates the account for the invited address and joins the organization.
+export function acceptInviteNew(body: {
+  token: string;
+  name: string;
+  password: string;
+}): Promise<{ organization: string }> {
+  return request("POST", "/auth/invitations/accept", body);
+}
+
+// Joins as the signed-in account, whose email must be the invited address.
+export function acceptInvite(token: string): Promise<{ organization: string }> {
+  return request("POST", "/organizations/invitations/accept", { token });
+}
+
+// Spends the mailed link that proves the address.
+export function verifyEmail(token: string): Promise<void> {
+  return request("POST", "/auth/email-verification", { token });
+}
+
+// Always answers the same: an unknown or disabled link is not revealed.
+export function requestJoin(key: string): Promise<void> {
+  return request(
+    "POST",
+    `/organizations/${encodeURIComponent(key)}/join-requests`,
+  );
 }
 
 export async function changeEmail(
@@ -1129,6 +1250,7 @@ export function totpDisable(
 export interface Policy {
   min_password_length: number;
   registration: "closed" | "invite" | "open";
+  organization_creation: "admin_only" | "apply";
   allowed_domain: string;
   session_days: number;
   done_visible_days: number;
@@ -1536,4 +1658,254 @@ export async function getContextPreview(
   );
   const json = JSON.stringify(data, null, 2);
   return { json, bytes: new TextEncoder().encode(JSON.stringify(data)).length };
+}
+
+// ---- organization administration (ADR-0031) ----
+
+const org = (key: string): string =>
+  `/organizations/${encodeURIComponent(key)}`;
+
+export interface OrgMember {
+  user_id: number;
+  email: string;
+  name: string;
+  role: "admin" | "user";
+  active: boolean;
+}
+
+export async function listOrgMembers(key: string): Promise<OrgMember[]> {
+  return (await request<{ items: OrgMember[] }>("GET", `${org(key)}/members`))
+    .items;
+}
+
+export function setOrgMemberRole(
+  key: string,
+  userId: number,
+  role: "admin" | "user",
+): Promise<void> {
+  return request("PUT", `${org(key)}/members/${String(userId)}`, { role });
+}
+
+export function removeOrgMember(key: string, userId: number): Promise<void> {
+  return request("DELETE", `${org(key)}/members/${String(userId)}`);
+}
+
+export interface OrgInvite {
+  id: number;
+  email: string;
+  state: "pending" | "accepted" | "revoked" | "expired";
+  projects: string[];
+  created_at: number;
+  expires_at: number;
+}
+
+export async function listOrgInvites(key: string): Promise<OrgInvite[]> {
+  return (await request<{ items: OrgInvite[] }>("GET", `${org(key)}/invites`))
+    .items;
+}
+
+// The token is only returned here; it is mailed when outgoing email is set up.
+export function createOrgInvite(
+  key: string,
+  body: { email: string; projects?: string[]; days?: number },
+): Promise<{ invite: OrgInvite; token: string }> {
+  return request("POST", `${org(key)}/invites`, body);
+}
+
+export function revokeOrgInvite(key: string, id: number): Promise<void> {
+  return request("DELETE", `${org(key)}/invites/${String(id)}`);
+}
+
+export interface JoinRequest {
+  id: number;
+  user_email: string;
+  user_name: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: number;
+  decided_at: number | null;
+  decision_note?: string;
+}
+
+export async function listJoinRequests(
+  key: string,
+  status = "",
+): Promise<JoinRequest[]> {
+  return (
+    await request<{ items: JoinRequest[] }>(
+      "GET",
+      `${org(key)}/join-requests${status ? `?status=${status}` : ""}`,
+    )
+  ).items;
+}
+
+export function decideJoinRequest(
+  key: string,
+  id: number,
+  decision: "approve" | "reject",
+): Promise<void> {
+  return request(
+    "POST",
+    `${org(key)}/join-requests/${String(id)}/${decision}`,
+    {},
+  );
+}
+
+export async function getJoinLink(key: string): Promise<boolean> {
+  return (await request<{ enabled: boolean }>("GET", `${org(key)}/join-link`))
+    .enabled;
+}
+
+export function setJoinLink(key: string, enabled: boolean): Promise<void> {
+  return request("PUT", `${org(key)}/join-link`, { enabled });
+}
+
+export interface OrgDomain {
+  id: number;
+  domain: string;
+  mode: "request" | "auto";
+  status: "pending" | "confirmed";
+}
+
+export async function listOrgDomains(key: string): Promise<OrgDomain[]> {
+  return (await request<{ items: OrgDomain[] }>("GET", `${org(key)}/domains`))
+    .items;
+}
+
+export function claimDomain(
+  key: string,
+  body: { domain: string; mode: "request" | "auto" },
+): Promise<OrgDomain> {
+  return request("POST", `${org(key)}/domains`, body);
+}
+
+export function setDomainMode(
+  key: string,
+  id: number,
+  mode: "request" | "auto",
+): Promise<void> {
+  return request("PUT", `${org(key)}/domains/${String(id)}`, { mode });
+}
+
+export function removeOrgDomain(key: string, id: number): Promise<void> {
+  return request("DELETE", `${org(key)}/domains/${String(id)}`);
+}
+
+export interface DomainClaim extends OrgDomain {
+  organization_key: string;
+  organization_name: string;
+  claimed_at: number;
+}
+
+export async function listDomainClaims(
+  status = "pending",
+): Promise<DomainClaim[]> {
+  return (
+    await request<{ items: DomainClaim[] }>(
+      "GET",
+      `/admin/organization-domains?status=${status}`,
+    )
+  ).items;
+}
+
+export function decideDomain(
+  id: number,
+  decision: "approve" | "reject",
+): Promise<void> {
+  return request(
+    "POST",
+    `/admin/organization-domains/${String(id)}/${decision}`,
+    {},
+  );
+}
+
+export interface OrgSettings {
+  password_min_length: number | null;
+  session_days: number | null;
+  project_creation: "admins" | "members";
+  require_2fa: boolean;
+  tokens_allowed: boolean;
+  token_max_days: number | null;
+  done_visible_days: number | null;
+  default_project_template: number | null;
+  join_link_enabled: boolean;
+  instance: { min_password_length: number; session_days: number };
+}
+
+export function getOrgSettings(key: string): Promise<OrgSettings> {
+  return request("GET", `${org(key)}/settings`);
+}
+
+export function updateOrgSettings(
+  key: string,
+  patch: Partial<Omit<OrgSettings, "instance" | "join_link_enabled">>,
+): Promise<OrgSettings> {
+  return request("PUT", `${org(key)}/settings`, patch);
+}
+
+export interface SupportGrant {
+  id: number;
+  level: "read_only" | "full";
+  granted_at: number;
+  expires_at: number | null;
+  revoked_at: number | null;
+  valid: boolean;
+}
+
+export async function listSupportGrants(key: string): Promise<SupportGrant[]> {
+  return (
+    await request<{ items: SupportGrant[] }>(
+      "GET",
+      `${org(key)}/support-grants`,
+    )
+  ).items;
+}
+
+export function grantSupport(
+  key: string,
+  body: {
+    level: "read_only" | "full";
+    hours?: number;
+    until_revoked?: boolean;
+  },
+): Promise<SupportGrant> {
+  return request("POST", `${org(key)}/support-grants`, body);
+}
+
+export function revokeSupport(key: string, id: number): Promise<void> {
+  return request("DELETE", `${org(key)}/support-grants/${String(id)}`);
+}
+
+export async function listOrgAudit(
+  key: string,
+  before = 0,
+): Promise<AuditEntry[]> {
+  return (
+    await request<{ items: AuditEntry[] }>(
+      "GET",
+      `${org(key)}/audit${before ? `?before=${String(before)}` : ""}`,
+    )
+  ).items;
+}
+
+export interface JoinOption {
+  key: string;
+  name: string;
+  mode: "request" | "auto";
+}
+
+export async function listJoinOptions(): Promise<JoinOption[]> {
+  return (await request<{ items: JoinOption[] }>("GET", "/me/join-options"))
+    .items;
+}
+
+export function requestEmailVerification(): Promise<void> {
+  return request("POST", "/me/email/verification");
+}
+
+export function uploadOrgLogo(key: string, file: File): Promise<void> {
+  return sendFile("PUT", `${org(key)}/logo`, file);
+}
+
+export function removeOrgLogo(key: string): Promise<void> {
+  return request("DELETE", `${org(key)}/logo`);
 }

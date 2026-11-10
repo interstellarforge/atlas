@@ -50,7 +50,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: auth.SessionCookie, Value: session, Path: "/", HttpOnly: true,
 		Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode,
-		Expires: time.Now().Add(s.auth.SessionTTL()),
+		Expires: time.Now().Add(s.auth.SessionTTLFor(user.ID)),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"user": user, "csrf_token": csrf})
 }
@@ -119,6 +119,10 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 	tok, plain, err := s.auth.CreateToken(a.UserID, in.Name, in.Scopes, in.Projects, in.ExpiresAt)
 	if errors.Is(err, auth.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid", "name and scopes (read, write) are required")
+		return
+	}
+	if errors.Is(err, auth.ErrPolicy) {
+		writeError(w, http.StatusForbidden, "token_policy", "an organization of yours does not allow this token (access off, or the lifetime is too long)")
 		return
 	}
 	if err != nil {

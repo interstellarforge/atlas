@@ -128,6 +128,11 @@ func (s *Service) AuditLog(ctx context.Context, a auth.Actor, f AuditFilter) ([]
 	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
+	return s.auditLog(f, 0, "")
+}
+
+// auditLog reads the log; orgID limits it to one organization (its own target and those of its projects and items).
+func (s *Service) auditLog(f AuditFilter, orgID int64, orgTargetName string) ([]AuditEntry, error) {
 	if f.Limit <= 0 || f.Limit > 200 {
 		f.Limit = 50
 	}
@@ -144,6 +149,10 @@ func (s *Service) AuditLog(ctx context.Context, a auth.Actor, f AuditFilter) ([]
 	}
 	if f.Before > 0 {
 		conds, args = append(conds, "id < ?"), append(args, f.Before)
+	}
+	if orgID != 0 {
+		conds = append(conds, `(target = ? OR EXISTS (SELECT 1 FROM projects p WHERE p.organization_id = ? AND (audit_entries.target = p.key OR audit_entries.target LIKE p.key || '-%')))`)
+		args = append(args, orgTargetName, orgID)
 	}
 	q := `SELECT id, actor, operation, target, changes, COALESCE(batch_id, ''), ts FROM audit_entries`
 	if len(conds) > 0 {

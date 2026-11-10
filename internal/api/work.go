@@ -147,11 +147,8 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	var p core.Project
 	var err error
 	switch {
-	case in.Template != 0 && in.Organization != "":
-		writeError(w, http.StatusBadRequest, "invalid", "organization cannot be combined with a template yet")
-		return
 	case in.Template != 0:
-		p, err = s.core.CreateProjectFromTemplate(r.Context(), actor(r), in.Key, in.Name, in.Template)
+		p, err = s.core.CreateProjectFromTemplateIn(r.Context(), actor(r), in.Organization, in.Key, in.Name, in.Template)
 	default:
 		p, err = s.core.CreateProjectIn(r.Context(), actor(r), in.Organization, in.Key, in.Name)
 	}

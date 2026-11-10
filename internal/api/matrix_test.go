@@ -24,6 +24,9 @@ var publicRoutes = []string{
 	"POST /api/v1/auth/login",
 	"POST /api/v1/auth/register",
 	"GET /api/v1/auth/policy",
+	"GET /api/v1/auth/invitations/{token}",
+	"POST /api/v1/auth/invitations/accept",
+	"POST /api/v1/auth/email-verification",
 	"GET /.well-known/oauth-protected-resource",
 	"GET /.well-known/oauth-protected-resource/mcp",
 	"GET /.well-known/oauth-authorization-server",
@@ -336,5 +339,121 @@ func TestSecurityDocListsEveryRoute(t *testing.T) {
 		if !strings.Contains(string(doc), "`"+r.String()+"`") {
 			t.Errorf("docs/security.md does not list %s", r)
 		}
+	}
+}
+
+// ADR-0031 (ATL-506): the organization-scoped routes run as every actor of the company model: anonymous, an account
+// without a company, the ADMIN of another company, a plain member, the SUPERADMIN without a grant and with a
+// read_only or full support grant, and the company's own ADMIN. Hidden organizations answer like missing ones; the
+// SUPERADMIN never decides who joins, who is invited or which rules apply, grant or not.
+func TestOrganizationRouteMatrix(t *testing.T) {
+	e := setup(t)
+	kees := sessionOf(e, t)
+	ctx := context.Background()
+	mk := func(email string) (int64, func(*http.Request)) {
+		u, err := e.auth.CreateUser(email, email, "password-123", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.ID, loginAs(e, t, email, "password-123")
+	}
+	annID, ann := mk("ann@example.com")
+	membID, memb := mk("memb@example.com")
+	carolID, other := mk("carol@example.com")
+	noOrgID, noOrg := mk("noorg@example.com")
+	root := auth.Actor{Kind: auth.KindHuman, UserID: 1}
+	if err := e.svc.RemoveOrgMember(ctx, root, "MAIN", noOrgID, false); err != nil {
+		t.Fatal(err)
+	}
+	for key, admin := range map[string]string{"ACME": "ann@example.com", "OTHER": "carol@example.com"} {
+		if c := e.do("POST", "/api/v1/admin/organizations", map[string]any{"key": key, "name": key + " Inc", "admin_email": admin}, kees).Code; c != 201 {
+			t.Fatalf("create %s: %d", key, c)
+		}
+	}
+	_, _ = annID, carolID
+	if err := e.svc.SetOrgMember(ctx, auth.Actor{Kind: auth.KindHuman, UserID: annID}, "ACME", membID, "user", false); err != nil {
+		t.Fatal(err)
+	}
+
+	type call struct {
+		method, path string
+		body         any
+		superFull    int // what the SUPERADMIN gets with a full grant (read_only and no grant: 403)
+	}
+	reads := []call{
+		{"GET", "/members", nil, 200}, {"GET", "/invites", nil, 200}, {"GET", "/join-requests", nil, 403},
+		{"GET", "/join-link", nil, 403}, {"GET", "/domains", nil, 403}, {"GET", "/settings", nil, 403},
+		{"GET", "/audit", nil, 403}, {"GET", "/support-grants", nil, 403}, {"GET", "/templates", nil, 403},
+	}
+	writes := []call{
+		{"POST", "/invites", map[string]any{"email": "new@example.com"}, 403},
+		{"PUT", "/join-link", map[string]any{"enabled": true}, 403},
+		{"PUT", "/settings", map[string]any{"require_2fa": false}, 403},
+		{"POST", "/domains", map[string]any{"domain": "example.org"}, 403},
+		{"POST", "/join-requests/1/approve", map[string]any{}, 403},
+		{"POST", "/item-templates", map[string]any{"name": "Incident", "type": "bug"}, 403},
+		{"POST", "/project-templates", map[string]any{"name": "Support", "from_project": "NONE"}, 403},
+	}
+	all := append(slices.Clone(reads), writes...)
+	url := func(org string, c call) string { return "/api/v1/organizations/" + org + c.path }
+
+	for _, c := range all {
+		name := c.method + " " + c.path
+		if code := e.do(c.method, url("ACME", c), c.body, nil).Code; code != 401 {
+			t.Errorf("%s anonymous: %d, want 401", name, code)
+		}
+		ghost := e.do(c.method, url("GHOST", c), c.body, noOrg)
+		for who, as := range map[string]func(*http.Request){"account without a company": noOrg, "ADMIN of another company": other} {
+			got := e.do(c.method, url("ACME", c), c.body, as)
+			if got.Code != 404 || got.Code != ghost.Code || got.Body.String() != ghost.Body.String() {
+				t.Errorf("%s as %s: %d %q, a missing organization answers %d %q", name, who, got.Code, got.Body, ghost.Code, ghost.Body)
+			}
+		}
+		if code := e.do(c.method, url("ACME", c), c.body, memb).Code; code != 403 {
+			t.Errorf("%s as a plain member: %d, want 403", name, code)
+		}
+	}
+
+	// the SUPERADMIN: no grant and read_only never reach an organization's people or rules; full only lists members and invitations
+	for _, c := range all {
+		if code := e.do(c.method, url("ACME", c), c.body, kees).Code; code != 403 {
+			t.Errorf("%s as the SUPERADMIN without a grant: %d, want 403", c.method+" "+c.path, code)
+		}
+	}
+	grant := func(level string) {
+		if c := e.do("POST", "/api/v1/organizations/ACME/support-grants", map[string]any{"level": level, "hours": 1}, ann).Code; c != 201 {
+			t.Fatalf("grant %s: %d", level, c)
+		}
+	}
+	grant("read_only")
+	for _, c := range all {
+		if code := e.do(c.method, url("ACME", c), c.body, kees).Code; code != 403 {
+			t.Errorf("%s as the SUPERADMIN with a read_only grant: %d, want 403", c.method+" "+c.path, code)
+		}
+	}
+	grant("full")
+	for _, c := range all {
+		if code := e.do(c.method, url("ACME", c), c.body, kees).Code; code != c.superFull {
+			t.Errorf("%s as the SUPERADMIN with a full grant: %d, want %d", c.method+" "+c.path, code, c.superFull)
+		}
+	}
+
+	// the company's own ADMIN reaches everything
+	for _, c := range reads {
+		if code := e.do(c.method, url("ACME", c), c.body, ann).Code; code != 200 {
+			t.Errorf("%s as the company ADMIN: %d, want 200", c.method+" "+c.path, code)
+		}
+	}
+	// an account without a company sees no organization at all, and a join request answers like for a missing one
+	if body := e.do("GET", "/api/v1/organizations", nil, noOrg).Body.String(); strings.Contains(body, "ACME") || strings.Contains(body, "OTHER") {
+		t.Errorf("an account without a company lists organizations: %s", body)
+	}
+	if body := e.do("GET", "/api/v1/me/join-options", nil, noOrg).Body.String(); !strings.Contains(body, `"items":[]`) {
+		t.Errorf("join options of an account without a company: %s", body)
+	}
+	real := e.do("POST", "/api/v1/organizations/ACME/join-requests", nil, noOrg)
+	ghost := e.do("POST", "/api/v1/organizations/GHOST/join-requests", nil, noOrg)
+	if real.Code != 202 || real.Code != ghost.Code || real.Body.String() != ghost.Body.String() {
+		t.Errorf("a join request to a closed organization answers %d %q, to a missing one %d %q", real.Code, real.Body, ghost.Code, ghost.Body)
 	}
 }

@@ -127,6 +127,42 @@ Result of reviewing `POST /auth/register`, invites and login, with tests in `int
 - **Residual risk (accepted).** Without email verification, someone who registers an address and then tries to sign in with the password they chose learns whether the address already had an account (sign-in works for a new one, 401 for an existing one). Mitigations: the login limiter and the register limiter; a new account has no access anyway (ADR-0031). Closing it needs verified email, which is out of scope for the MVP.
 - **For M3.** Organization invitations must keep the same answer whether or not the email has an account (ATL-414 and the invitation tests).
 
+## Email domains: threat note (ATL-503, ADR-0031)
+
+Risk: whoever controls an address at a domain could join the organization that claims it.
+
+- A claim does nothing until the SUPERADMIN confirms it. An unconfirmed claim gives no join path (tested).
+- Free-mail providers (fixed list in `internal/core/domains.go`) cannot be claimed. A domain another organization holds gets the same refusal, so a claimant learns nothing about other organizations. One domain, one organization (unique index).
+- Mode `auto` joins only a verified address, only while outgoing mail is set up, and never an account an ADMIN rejected. An unverified address, or an instance without mail, falls back to a request the ADMIN decides. Joining gives a USER membership and no project access.
+- Verification links are random, stored as a hash, single use, valid 24 h and bound to the address they were sent to; changing the email clears the verified flag. Unusable links give one answer and count against the login limiter.
+- Join options are listed only to a verified address, so registering with a victim domain reveals nothing.
+- Known limit: in mode `auto` an ADMIN who removes a member of the domain cannot stop that person joining again; switch the domain to `request`. Domain ownership is the SUPERADMIN's judgement (no DNS proof). A domain that changes hands needs the SUPERADMIN to reject the confirmed claim.
+
+## Organization rules on sessions and tokens (ATL-504)
+
+- The auth service asks the core for the live rules of the user on every login, session request and token request (`auth.Service.SetUserPolicy`): shortest session wins, required 2FA if any organization requires it, tokens only if every organization allows them, shortest token lifetime.
+- Required 2FA limits the session to setting it up (`totpSetupPaths`); tokens are not affected by it (they carry no second factor). An ADMIN who requires it is bound by it too.
+- Token rules bind at creation and at use (`created_at` + lifetime), so a rule applies to existing tokens too; OAuth consent and the token endpoint refuse when access is off.
+- The password minimum applies when the password is changed, not retroactively. Registration and invitation sign-up use the instance minimum because the account has no organization yet.
+- A member who creates a project (`project_creation` = `members`) becomes a member of it, not an administrator of the organization.
+
+## Company model: actors and organization routes (ATL-506, ADR-0031)
+
+`TestOrganizationRouteMatrix` (`internal/api/matrix_test.go`) runs the organization-scoped routes as every actor of the company model. `TestAuthorizationMatrix` and `TestFreshAccountReachesNothing` keep covering every other route and a fresh account.
+
+| Actor | Organization read/write routes of a company | What the test pins |
+| --- | --- | --- |
+| Anonymous | 401 | every route |
+| Account without a company | 404, byte-identical to a missing organization; a join request answers 202 like for a missing one | no organization is listed or disclosed |
+| ADMIN of another company | 404, identical to a missing organization | no cross-company reach |
+| Plain member (USER) | 403 | members cannot invite, change rules, decide requests or claim domains |
+| SUPERADMIN without a grant | 403 | the Atlas admin runs Atlas, not companies |
+| SUPERADMIN with a `read_only` grant | 403 | read_only only opens project views and exports |
+| SUPERADMIN with a `full` grant | members and invitations lists 200; everything else 403 | a grant never decides who joins, who is invited or which rules apply, and never reads the company's join requests, domains, rules, audit log or support grants |
+| Company ADMIN | 200 | the only actor with the organization's own management |
+
+Not covered by a test, by design: organization management has no MCP tool (`docs/mcp-contract.md`).
+
 ## Authorization audit matrix (ATL-374)
 
 Every REST route, MCP tool and other surface with its protection, target rule and expected answer (ADR-0029). Visibility comes first: a resource the caller may not know about answers 404, identical to a missing one; a visible resource without the needed right answers 403; no or invalid credentials, or a suspended account, answer 401. `TestAuthorizationMatrix` runs every route below as anonymous, suspended, plain, organization-admin, no-organization and SUPERADMIN actors, `TestMCPToolMatrix` every tool, and `TestSecurityDocListsEveryRoute` fails when a route is missing here. The "Rule" column names the action(s) the handler reaches in `core` (parsed from the code); read the handler for the exact check.
@@ -158,6 +194,43 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `GET /api/v1/organizations/{key}/support-grants` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`: never through a support grant, never a token with a project list | 401 / 403 / 404 |
 | `POST /api/v1/organizations/{key}/support-grants` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`; level read_only or full, hours 1-720 or until_revoked | 400 / 401 / 403 / 404 |
 | `DELETE /api/v1/organizations/{key}/support-grants/{id}` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`; ends the grant at once | 401 / 403 / 404 |
+| `GET /api/v1/admin/organizations` | SUPERADMIN session | `protect()` refuses everyone else before the body is read; name, key, status, ADMIN emails, member count only | 401 / 403 |
+| `POST /api/v1/admin/organizations` | SUPERADMIN session | `protect()`; `core.CreateOrganizationFor`: the first ADMIN is an existing active account, the creator does not join | 401 / 403 |
+| `GET /api/v1/admin/organization-applications` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `POST /api/v1/admin/organization-applications/{id}/{decision}` | SUPERADMIN session | `protect()`; `core.DecideApplication`: compare-and-set, human session only | 401 / 403 / 404 / 422 |
+| `GET /api/v1/organizations/{key}/invites` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgMembers` | 401 / 403 / 404 |
+| `POST /api/v1/organizations/{key}/invites` | explicit ADMIN of that organization, user session | `core.CreateOrgInvite`: role is always USER; projects must belong to the organization; the Atlas admin and support grants are refused; same answer for any address; the token is shown once | 400 / 401 / 403 / 404 |
+| `DELETE /api/v1/organizations/{key}/invites/{id}` | explicit ADMIN of that organization, user session | `core.RevokeOrgInvite` | 401 / 403 / 404 |
+| `POST /api/v1/organizations/invitations/accept` | signed-in human session | `core.AcceptOrgInvite`: the account's email must be the invited address; never changes an existing role; compare-and-set | 401 / 403 / 422 / 429 |
+| `GET /api/v1/organizations/{key}/join-link` | explicit ADMIN of that organization, user session | `core.adminOfOrg`: `orgMembers`, support grants refused | 401 / 403 / 404 |
+| `PUT /api/v1/organizations/{key}/join-link` | explicit ADMIN of that organization, user session | `core.SetJoinLink`; audited | 400 / 401 / 403 / 404 |
+| `POST /api/v1/organizations/{key}/join-requests` | signed-in human session | `core.RequestJoin`: always 202; an unknown, archived or disabled link, a member, a waiting request and a cooldown (24 h after a rejection, 3 per 30 days) answer the same and file nothing | 401 / 403 |
+| `GET /api/v1/organizations/{key}/join-requests` | explicit ADMIN of that organization, user session | `core.adminOfOrg`; the requester gets 404 | 401 / 403 / 404 |
+| `POST /api/v1/organizations/{key}/join-requests/{id}/{decision}` | explicit ADMIN of that organization, user session | `core.DecideJoinRequest`: compare-and-set; approve adds a USER membership and no project access | 400 / 401 / 403 / 404 / 422 |
+| `GET /api/v1/organizations/{key}/domains` | explicit ADMIN of that organization, user session | `core.adminOfOrg` | 401 / 403 / 404 |
+| `POST /api/v1/organizations/{key}/domains` | explicit ADMIN of that organization, user session | `core.ClaimDomain`: the claim stays pending; a free-mail provider and a held domain give the same refusal | 400 / 401 / 403 / 404 / 422 |
+| `PUT /api/v1/organizations/{key}/domains/{id}` | explicit ADMIN of that organization, user session | `core.SetDomainMode`: request or auto | 400 / 401 / 403 / 404 |
+| `DELETE /api/v1/organizations/{key}/domains/{id}` | explicit ADMIN of that organization, user session | `core.RemoveDomain` | 401 / 403 / 404 |
+| `GET /api/v1/admin/organization-domains` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `POST /api/v1/admin/organization-domains/{id}/{decision}` | SUPERADMIN session | `protect()`; `core.DecideDomain`: approve is compare-and-set; reject also revokes a confirmed domain | 401 / 403 / 404 / 422 |
+| `POST /api/v1/me/email/verification` | signed-in human session | `core.RequestEmailVerification`: mails a link to the own address only; needs outgoing mail (422 without); one per minute | 401 / 403 / 422 |
+| `GET /api/v1/me/join-options` | signed-in human session | `core.JoinOptions`: only for a verified address, only organizations holding a confirmed domain of that address | 401 / 403 |
+| `GET /api/v1/organizations/{key}/members` | explicit ADMIN of that organization, user session | `core.ListOrgMembers`: `authorizeOrg` `orgMembers` | 401 / 403 / 404 |
+| `PUT /api/v1/organizations/{key}/members/{user}` | explicit ADMIN of that organization, user session | `core.SetOrgMember`: role admin or user; the last active ADMIN is protected; a support grant cannot make its own access permanent | 400 / 401 / 403 / 404 / 422 |
+| `DELETE /api/v1/organizations/{key}/members/{user}` | explicit ADMIN of that organization, user session | `core.RemoveOrgMember`: also leaves every project of the organization; the last active ADMIN is protected | 401 / 403 / 404 / 422 |
+| `GET /api/v1/organizations/{key}/logo` | member of that organization (the Atlas admin sees the organization too), user session | `authorizeOrg` `orgView`; only a re-encoded thumbnail is served; no logo and no access answer the same | 401 / 404 |
+| `PUT /api/v1/organizations/{key}/logo` | explicit ADMIN of that organization, user session | `core.SetOrgLogo`: the ADMIN check runs before the upload is read; same limits, magic bytes and pixel count as attachments | 400 / 401 / 403 / 404 / 413 |
+| `DELETE /api/v1/organizations/{key}/logo` | explicit ADMIN of that organization, user session | `core.RemoveOrgLogo` | 401 / 403 / 404 |
+| `GET /api/v1/organizations/{key}/templates` | explicit ADMIN of that organization, user session | `core.ListOrgTemplates`: only the organization's own item and project templates | 401 / 403 / 404 |
+| `POST /api/v1/organizations/{key}/item-templates` | explicit ADMIN of that organization, user session | `core.SaveOrgItemTemplate`: create or replace by name; support grants refused | 400 / 401 / 403 / 404 |
+| `DELETE /api/v1/organizations/{key}/item-templates/{id}` | explicit ADMIN of that organization, user session | `core.DeleteOrgItemTemplate`: only the organization's own | 401 / 403 / 404 |
+| `POST /api/v1/organizations/{key}/project-templates` | explicit ADMIN of that organization, user session | `core.SaveOrgProjectTemplate`: data or a project of the same organization | 400 / 401 / 403 / 404 / 422 |
+| `DELETE /api/v1/organizations/{key}/project-templates/{id}` | explicit ADMIN of that organization, user session | `core.DeleteOrgProjectTemplate`: only the organization's own | 401 / 403 / 404 |
+| `GET /api/v1/organizations/{key}/settings` | explicit ADMIN of that organization, user session | `core.adminOfOrg` | 401 / 403 / 404 |
+| `PUT /api/v1/organizations/{key}/settings` | explicit ADMIN of that organization, user session | `core.UpdateOrgSettings`: password minimum never below the instance's; unknown keys refused; audited | 400 / 401 / 403 / 404 |
+| `GET /api/v1/organizations/{key}/audit` | explicit ADMIN of that organization, user session | `core.ListOrgAudit`: the organization's own entries and those of its projects and items only | 401 / 403 / 404 |
+| `GET /api/v1/organizations/applications` | signed-in human session | `core.ListMyApplications`: own applications only | 401 / 403 |
+| `POST /api/v1/organizations/applications` | signed-in human session, instance setting `organization_creation` = apply | `core.ApplyForOrganization`: one waiting application, 24 h after a rejection, 3 per 30 days; a key that exists is not disclosed | 400 / 401 / 403 / 422 |
 | `GET /api/v1/attachments/{id}` | signed in + project right | the attachment's item: `access` view; token scope applies | 401 / 404 hidden |
 | `GET /api/v1/attachments/{id}/thumb` | signed in + project right | the attachment's item: `access` view; token scope applies | 401 / 404 hidden |
 | `POST /api/v1/auth/login` | public | no credentials; the handler validates its own input | - |
@@ -165,6 +238,9 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `GET /api/v1/auth/me` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
 | `GET /api/v1/auth/policy` | public | no credentials; the handler validates its own input | - |
 | `POST /api/v1/auth/register` | public | no credentials; the handler validates its own input | - |
+| `GET /api/v1/auth/invitations/{token}` | public, the token holder | `core.PreviewOrgInvite`: token hash lookup; every invalid, used, revoked or expired token gives the same 422; failures count against the login limiter | 422 / 429 |
+| `POST /api/v1/auth/email-verification` | public, the link holder | `core.VerifyEmail`: single use, 24 h, must still match the account's address; every unusable link gives the same 422; failures count against the login limiter | 400 / 422 / 429 |
+| `POST /api/v1/auth/invitations/accept` | public, the token holder | `core.AcceptOrgInviteNew`: creates the account for the invited address (marks the email verified) and a USER membership; an address with an account must sign in; compare-and-set, one winner | 400 / 422 / 429 |
 | `POST /api/v1/batches/{id}/undo` | signed in + project right | `access`: export, item.update, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `GET /api/v1/board` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `GET /api/v1/changes` | signed in | events of readable projects only (`ReadableProjectKeys`); notifications only to their recipient | 401 |

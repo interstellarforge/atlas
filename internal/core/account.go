@@ -52,7 +52,7 @@ func (s *Service) ChangePassword(ctx context.Context, a auth.Actor, current, nex
 	if err := selfOnly(a); err != nil {
 		return err
 	}
-	if err := checkPassword(s.Policy(), next); err != nil {
+	if err := checkPassword(s.passwordPolicy(a.UserID), next); err != nil {
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {

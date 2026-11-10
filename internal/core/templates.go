@@ -28,7 +28,8 @@ type ItemTemplate struct {
 	Checklist   []string `json:"checklist"`
 	// Subitems are created under the item, in the same transaction, as a tree of up to maxSubitemDepth levels.
 	Subitems []SubItem `json:"subitems"`
-	// Scope is "project" or "instance" (an instance-wide template, managed by global admins, usable in every project).
+	// Scope is "project", "organization" (managed by that organization's ADMIN, usable in its projects) or "instance"
+	// (managed by global admins, usable in every project).
 	Scope string `json:"scope"`
 }
 
@@ -48,8 +49,12 @@ const (
 	maxTemplateLists = 100
 )
 
+// templateOrgScope matches the item templates a project may use besides its own: instance wide ones and those of its
+// organization. ?1 is the project id.
+const templateOrgScope = `(organization_id IS NULL OR organization_id = (SELECT organization_id FROM projects WHERE id = ?1))`
+
 func itemTemplateNames(q queryer, projectID int64) ([]string, error) {
-	rows, err := q.Query(`SELECT DISTINCT name FROM item_templates WHERE project_id = ? OR project_id IS NULL ORDER BY name`, projectID)
+	rows, err := q.Query(`SELECT DISTINCT name FROM item_templates WHERE project_id = ?1 OR (project_id IS NULL AND `+templateOrgScope+`) ORDER BY name`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -68,12 +73,16 @@ func itemTemplateNames(q queryer, projectID int64) ([]string, error) {
 func scanItemTemplate(row interface{ Scan(...any) error }) (ItemTemplate, error) {
 	var t ItemTemplate
 	var labels, checklist, subitems string
-	var project sql.NullInt64
-	if err := row.Scan(&t.ID, &t.Name, &t.Type, &t.TitlePrefix, &t.Description, &t.Priority, &labels, &t.Status, &checklist, &subitems, &project); err != nil {
+	var project, organization sql.NullInt64
+	if err := row.Scan(&t.ID, &t.Name, &t.Type, &t.TitlePrefix, &t.Description, &t.Priority, &labels, &t.Status, &checklist, &subitems, &project, &organization); err != nil {
 		return t, err
 	}
 	t.Scope = "project"
-	if !project.Valid {
+	switch {
+	case project.Valid:
+	case organization.Valid:
+		t.Scope = "organization"
+	default:
 		t.Scope = "instance"
 	}
 	_ = json.Unmarshal([]byte(labels), &t.Labels)
@@ -91,14 +100,15 @@ func scanItemTemplate(row interface{ Scan(...any) error }) (ItemTemplate, error)
 	return t, nil
 }
 
-const itemTemplateCols = `id, name, type, title_prefix, description, priority, labels, status, checklist, subitems, project_id`
+const itemTemplateCols = `id, name, type, title_prefix, description, priority, labels, status, checklist, subitems, project_id, organization_id`
 
 func (s *Service) ListItemTemplates(ctx context.Context, a auth.Actor, key string) ([]ItemTemplate, error) {
 	p, _, err := s.access(s.db.R, a, key, actView)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT `+itemTemplateCols+` FROM item_templates WHERE project_id = ? OR project_id IS NULL ORDER BY project_id IS NULL, name`, p.ID)
+	rows, err := s.db.R.Query(`SELECT `+itemTemplateCols+` FROM item_templates WHERE project_id = ?1 OR (project_id IS NULL AND `+templateOrgScope+`)
+		ORDER BY project_id IS NULL, organization_id IS NULL, name`, p.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,13 +206,20 @@ func (s *Service) SaveItemTemplate(ctx context.Context, a auth.Actor, key string
 		if err != nil {
 			return err
 		}
-		if t.ID, err = s.upsertItemTemplate(tx, &p.ID, t); err != nil {
-			return err
-		}
-		t.Scope = "project"
-		return s.journal(ctx, tx, a, change{Operation: "item_template.save", Target: key, Event: "project.updated", Project: key, Changes: map[string]any{"name": t.Name}})
+		t, err = s.saveItemTemplateTx(ctx, tx, a, p, t)
+		return err
 	})
 	return t, err
+}
+
+// saveItemTemplateTx stores a validated project item template after the access check, for a project the caller just created.
+func (s *Service) saveItemTemplateTx(ctx context.Context, tx *sql.Tx, a auth.Actor, p Project, t ItemTemplate) (ItemTemplate, error) {
+	var err error
+	if t.ID, err = s.upsertItemTemplate(tx, &p.ID, nil, t); err != nil {
+		return t, err
+	}
+	t.Scope = "project"
+	return t, s.journal(ctx, tx, a, change{Operation: "item_template.save", Target: p.Key, Event: "project.updated", Project: p.Key, Changes: map[string]any{"name": t.Name}})
 }
 
 // SaveInstanceItemTemplate stores a template usable in every project; global admins only. A project
@@ -216,7 +233,7 @@ func (s *Service) SaveInstanceItemTemplate(ctx context.Context, a auth.Actor, t 
 	}
 	err := s.tx(func(tx *sql.Tx) error {
 		var err error
-		if t.ID, err = s.upsertItemTemplate(tx, nil, t); err != nil {
+		if t.ID, err = s.upsertItemTemplate(tx, nil, nil, t); err != nil {
 			return err
 		}
 		t.Scope = "instance"
@@ -230,7 +247,7 @@ func (s *Service) DeleteInstanceItemTemplate(ctx context.Context, a auth.Actor, 
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
-		res, err := tx.Exec(`DELETE FROM item_templates WHERE id = ? AND project_id IS NULL`, id)
+		res, err := tx.Exec(`DELETE FROM item_templates WHERE id = ? AND project_id IS NULL AND organization_id IS NULL`, id)
 		if err != nil {
 			return err
 		}
@@ -245,7 +262,7 @@ func (s *Service) ListInstanceItemTemplates(ctx context.Context, a auth.Actor) (
 	if !a.Can(auth.ScopeRead) {
 		return nil, ErrForbidden
 	}
-	rows, err := s.db.R.Query(`SELECT ` + itemTemplateCols + ` FROM item_templates WHERE project_id IS NULL ORDER BY name`)
+	rows, err := s.db.R.Query(`SELECT ` + itemTemplateCols + ` FROM item_templates WHERE project_id IS NULL AND organization_id IS NULL ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -261,28 +278,29 @@ func (s *Service) ListInstanceItemTemplates(ctx context.Context, a auth.Actor) (
 	return out, rows.Err()
 }
 
-// upsertItemTemplate writes a validated template for a project (nil = instance wide) and returns its id.
-func (s *Service) upsertItemTemplate(tx *sql.Tx, project *int64, t ItemTemplate) (int64, error) {
+// upsertItemTemplate writes a validated template for a project or an organization (both nil = instance wide) and
+// returns its id.
+func (s *Service) upsertItemTemplate(tx *sql.Tx, project, organization *int64, t ItemTemplate) (int64, error) {
 	labels, _ := json.Marshal(t.Labels)
 	checklist, _ := json.Marshal(t.Checklist)
 	subitems, _ := json.Marshal(t.Subitems)
 	var n int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM item_templates WHERE project_id IS ? AND name <> ?`, project, t.Name).Scan(&n); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM item_templates WHERE project_id IS ? AND organization_id IS ? AND name <> ?`, project, organization, t.Name).Scan(&n); err != nil {
 		return 0, err
 	}
 	if n >= maxTemplates {
 		return 0, rule("at most %d item templates", maxTemplates)
 	}
-	if _, err := tx.Exec(`INSERT INTO item_templates (project_id, name, type, title_prefix, description, priority, labels, status, checklist, subitems, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (COALESCE(project_id, 0), name) DO UPDATE SET type = excluded.type, title_prefix = excluded.title_prefix,
+	if _, err := tx.Exec(`INSERT INTO item_templates (project_id, organization_id, name, type, title_prefix, description, priority, labels, status, checklist, subitems, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (COALESCE(project_id, 0), COALESCE(organization_id, 0), name) DO UPDATE SET type = excluded.type, title_prefix = excluded.title_prefix,
 		description = excluded.description, priority = excluded.priority, labels = excluded.labels, status = excluded.status,
 		checklist = excluded.checklist, subitems = excluded.subitems`,
-		project, t.Name, t.Type, t.TitlePrefix, t.Description, t.Priority, string(labels), t.Status, string(checklist), string(subitems), s.nowMs()); err != nil {
+		project, organization, t.Name, t.Type, t.TitlePrefix, t.Description, t.Priority, string(labels), t.Status, string(checklist), string(subitems), s.nowMs()); err != nil {
 		return 0, err
 	}
 	var id int64
-	err := tx.QueryRow(`SELECT id FROM item_templates WHERE project_id IS ? AND name = ?`, project, t.Name).Scan(&id)
+	err := tx.QueryRow(`SELECT id FROM item_templates WHERE project_id IS ? AND organization_id IS ? AND name = ?`, project, organization, t.Name).Scan(&id)
 	return id, err
 }
 
@@ -312,7 +330,7 @@ type appliedTemplate struct {
 	expand    func(string) string
 }
 
-// applyItemTemplate fills the input from its template (project first, then instance wide) and collects
+// applyItemTemplate fills the input from its template (project first, then its organization, then instance wide) and collects
 // warnings for parts that no longer fit (a removed or blocked status): those are skipped, the create itself
 // never fails on them.
 func (s *Service) applyItemTemplate(a auth.Actor, in CreateItem) (appliedTemplate, error) {
@@ -322,7 +340,8 @@ func (s *Service) applyItemTemplate(a auth.Actor, in CreateItem) (appliedTemplat
 		return out, err
 	}
 	t, err := scanItemTemplate(s.db.R.QueryRow(`SELECT `+itemTemplateCols+` FROM item_templates
-		WHERE (project_id = ? OR project_id IS NULL) AND name = ? ORDER BY project_id IS NULL LIMIT 1`, p.ID, in.Template))
+		WHERE (project_id = ?1 OR (project_id IS NULL AND `+templateOrgScope+`)) AND name = ?2
+		ORDER BY project_id IS NULL, organization_id IS NULL LIMIT 1`, p.ID, in.Template))
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, invalid("unknown item template %q", in.Template)
 	}
@@ -414,6 +433,8 @@ type ProjectTemplate struct {
 	Name        string              `json:"name"`
 	Description string              `json:"description"`
 	Data        ProjectTemplateData `json:"data"`
+	// Organization is the key of the organization the template belongs to; empty for an instance wide template.
+	Organization string `json:"organization,omitempty"`
 }
 
 func (d *ProjectTemplateData) validate() error {
@@ -470,20 +491,25 @@ func (d *ProjectTemplateData) validate() error {
 	return nil
 }
 
+const projectTemplateCols = `id, name, description, data, COALESCE((SELECT key FROM organizations WHERE id = organization_id), '')`
+
 func scanProjectTemplate(row interface{ Scan(...any) error }) (ProjectTemplate, error) {
 	var t ProjectTemplate
 	var data string
-	if err := row.Scan(&t.ID, &t.Name, &t.Description, &data); err != nil {
+	if err := row.Scan(&t.ID, &t.Name, &t.Description, &data, &t.Organization); err != nil {
 		return t, err
 	}
 	return t, json.Unmarshal([]byte(data), &t.Data)
 }
 
+// visibleProjectTemplate: instance wide templates, and those of an organization the user ?1 belongs to.
+const visibleProjectTemplate = `(organization_id IS NULL OR organization_id IN (SELECT organization_id FROM organization_memberships WHERE user_id = ?1))`
+
 func (s *Service) ListProjectTemplates(ctx context.Context, a auth.Actor) ([]ProjectTemplate, error) {
 	if !a.Can(auth.ScopeRead) {
 		return nil, ErrForbidden
 	}
-	rows, err := s.db.R.Query(`SELECT id, name, description, data FROM project_templates ORDER BY name`)
+	rows, err := s.db.R.Query(`SELECT `+projectTemplateCols+` FROM project_templates WHERE `+visibleProjectTemplate+` ORDER BY name`, a.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -571,7 +597,7 @@ func (s *Service) DeleteProjectTemplate(ctx context.Context, a auth.Actor, id in
 	}
 	return s.tx(func(tx *sql.Tx) error {
 		var name string
-		if err := tx.QueryRow(`SELECT name FROM project_templates WHERE id = ?`, id).Scan(&name); err != nil {
+		if err := tx.QueryRow(`SELECT name FROM project_templates WHERE id = ? AND organization_id IS NULL`, id).Scan(&name); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -587,12 +613,25 @@ func (s *Service) DeleteProjectTemplate(ctx context.Context, a auth.Actor, id in
 // CreateProjectFromTemplate creates the project and applies the template in one transaction: either the
 // whole project exists, with the template's workflow, or nothing was created.
 func (s *Service) CreateProjectFromTemplate(ctx context.Context, a auth.Actor, key, name string, templateID int64) (Project, error) {
-	t, err := scanProjectTemplate(s.db.R.QueryRow(`SELECT id, name, description, data FROM project_templates WHERE id = ?`, templateID))
+	return s.CreateProjectFromTemplateIn(ctx, a, "", key, name, templateID)
+}
+
+// CreateProjectFromTemplateIn is CreateProjectFromTemplate in a named organization. A template of an organization is
+// only visible to its members and always creates the project in that organization; a template of another
+// organization looks like one that does not exist.
+func (s *Service) CreateProjectFromTemplateIn(ctx context.Context, a auth.Actor, orgKey, key, name string, templateID int64) (Project, error) {
+	t, err := scanProjectTemplate(s.db.R.QueryRow(`SELECT `+projectTemplateCols+` FROM project_templates WHERE id = ?2 AND `+visibleProjectTemplate, a.UserID, templateID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Project{}, invalid("unknown project template")
 	}
 	if err != nil {
 		return Project{}, err
+	}
+	if t.Organization != "" {
+		if orgKey != "" && !strings.EqualFold(orgKey, t.Organization) {
+			return Project{}, rule("this template belongs to another organization")
+		}
+		orgKey = t.Organization
 	}
 	if err := t.Data.validate(); err != nil {
 		return Project{}, err
@@ -606,62 +645,12 @@ func (s *Service) CreateProjectFromTemplate(ctx context.Context, a auth.Actor, k
 	}
 	bs := *s // shares the database; its tx() joins this transaction
 	bs.outer = tx
-	p, err := bs.CreateProject(ctx, a, key, name)
+	bs.skipDefault = true // the chosen template replaces the organization's default workflow
+	p, err := bs.CreateProjectIn(ctx, a, orgKey, key, name)
 	if err != nil {
 		return Project{}, err
 	}
-	if _, err := tx.Exec(`DELETE FROM project_statuses WHERE project_id = ?`, p.ID); err != nil {
-		return Project{}, err
-	}
-	for i, st := range t.Data.Statuses {
-		if _, err := tx.Exec(`INSERT INTO project_statuses (project_id, name, position, category, wip_limit, allow_create) VALUES (?, ?, ?, ?, ?, ?)`,
-			p.ID, strings.TrimSpace(st.Name), i, st.Category, st.WIPLimit, st.AllowCreate); err != nil {
-			return Project{}, err
-		}
-	}
-	for _, st := range t.Data.Statuses {
-		if len(st.Requires) == 0 {
-			continue
-		}
-		id, err := resolveStatus(tx, p.ID, st.Name)
-		if err != nil {
-			return Project{}, err
-		}
-		if err := setRequirements(tx, p.ID, id, st.Requires); err != nil {
-			return Project{}, err
-		}
-	}
-	if len(t.Data.MergeCategories) > 0 {
-		if err := bs.SetMergeCategories(ctx, a, p.Key, t.Data.MergeCategories); err != nil {
-			return Project{}, err
-		}
-	} else if t.Data.MergeColumns { // templates saved before categories could be chosen
-		if err := bs.SetMergeColumns(ctx, a, p.Key, true); err != nil {
-			return Project{}, err
-		}
-	}
-	if len(t.Data.Transitions) > 0 {
-		if err := bs.SetTransitions(ctx, a, p.Key, t.Data.Transitions); err != nil {
-			return Project{}, err
-		}
-	}
-	for _, l := range t.Data.Labels {
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO labels (project_id, name) VALUES (?, ?)`, p.ID, strings.TrimSpace(l)); err != nil {
-			return Project{}, err
-		}
-	}
-	for _, f := range t.Data.CustomFields {
-		if err := bs.AddCustomField(ctx, a, p.Key, f); err != nil {
-			return Project{}, err
-		}
-	}
-	for _, it := range t.Data.ItemTemplates {
-		if _, err := bs.SaveItemTemplate(ctx, a, p.Key, it); err != nil {
-			return Project{}, err
-		}
-	}
-	if err := bs.journal(ctx, tx, a, change{Operation: "project.from_template", Target: p.Key, Event: "project.updated", Project: p.Key,
-		Changes: map[string]any{"template": t.Name}}); err != nil {
+	if err := bs.applyTemplateData(ctx, tx, a, p, t.Name, t.Data); err != nil {
 		return Project{}, err
 	}
 	if s.outer != nil {
@@ -674,4 +663,73 @@ func (s *Service) CreateProjectFromTemplate(ctx context.Context, a auth.Actor, k
 		s.notify()
 	}
 	return p, nil
+}
+
+// applyTemplateData gives a project the statuses, requirements, columns, transitions, labels, fields and item
+// templates of a validated project template. It runs for a project the caller has just created in the same
+// transaction, so it does not check access again: that is what lets a member who may create projects get the
+// organization's default workflow.
+func (s *Service) applyTemplateData(ctx context.Context, tx *sql.Tx, a auth.Actor, p Project, name string, d ProjectTemplateData) error {
+	if _, err := tx.Exec(`DELETE FROM project_statuses WHERE project_id = ?`, p.ID); err != nil {
+		return err
+	}
+	for i, st := range d.Statuses {
+		if _, err := tx.Exec(`INSERT INTO project_statuses (project_id, name, position, category, wip_limit, allow_create) VALUES (?, ?, ?, ?, ?, ?)`,
+			p.ID, strings.TrimSpace(st.Name), i, st.Category, st.WIPLimit, st.AllowCreate); err != nil {
+			return err
+		}
+	}
+	for _, st := range d.Statuses {
+		if len(st.Requires) == 0 {
+			continue
+		}
+		id, err := resolveStatus(tx, p.ID, st.Name)
+		if err != nil {
+			return err
+		}
+		if err := setRequirements(tx, p.ID, id, st.Requires); err != nil {
+			return err
+		}
+	}
+	merge := d.MergeCategories
+	if len(merge) == 0 && d.MergeColumns { // templates saved before categories could be chosen
+		merge = allCategories
+	}
+	if len(merge) > 0 {
+		keep, err := mergeCategoryOrder(merge)
+		if err != nil {
+			return err
+		}
+		if err := s.setMergeCategoriesTx(ctx, tx, a, p, keep); err != nil {
+			return err
+		}
+	}
+	if len(d.Transitions) > 0 {
+		if err := s.setTransitionsTx(ctx, tx, a, p, d.Transitions); err != nil {
+			return err
+		}
+	}
+	for _, l := range d.Labels {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO labels (project_id, name) VALUES (?, ?)`, p.ID, strings.TrimSpace(l)); err != nil {
+			return err
+		}
+	}
+	for _, f := range d.CustomFields {
+		if err := cleanCustomField(&f); err != nil {
+			return err
+		}
+		if err := s.addCustomFieldTx(ctx, tx, a, p, f); err != nil {
+			return err
+		}
+	}
+	for _, it := range d.ItemTemplates {
+		if err := validateItemTemplate(&it); err != nil {
+			return err
+		}
+		if _, err := s.saveItemTemplateTx(ctx, tx, a, p, it); err != nil {
+			return err
+		}
+	}
+	return s.journal(ctx, tx, a, change{Operation: "project.from_template", Target: p.Key, Event: "project.updated", Project: p.Key,
+		Changes: map[string]any{"template": name}})
 }

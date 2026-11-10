@@ -54,7 +54,7 @@ func setupWith(t *testing.T, opts db.Options) env {
 	}
 	spa := fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}
 	svc := core.New(d, a)
-	if _, err := svc.CreateOrganization(context.Background(), auth.Actor{Kind: auth.KindHuman, UserID: 1}, "MAIN", "Main", 0); err != nil {
+	if _, err := svc.CreateOrganization(context.Background(), auth.Actor{Kind: auth.KindHuman, UserID: 1}, "MAIN", "Main", 1); err != nil {
 		t.Fatal(err)
 	}
 	// Every account made by a test joins the main organization as a plain member, like an invited colleague.

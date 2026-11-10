@@ -65,6 +65,7 @@ Tokens have separate read and write scopes, can be restricted to projects, and c
 | Work with code     | Link a repository, read its README inside Atlas and manage bugs in a dedicated issue view                  |
 | Work with agents   | Native MCP tools and resources, scoped tokens, mutation quotas, optimistic locking and change cursors      |
 | Preserve knowledge | Project Context with categories, sources, verification state, staleness and supersession                   |
+| Organize companies | Organizations with their own admin, invitations, join links, email domains, rules (2FA, sessions, tokens) and optional support access |
 | Operate            | Live backup and restore, automatic migrations, structured logs and an admin MCP status view                |
 
 Everything updates in real time over Server-Sent Events. A change made by an agent appears in the browser like any other change; a browser change is immediately available through the API and MCP.

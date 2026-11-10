@@ -49,7 +49,7 @@ func setup(t *testing.T) *env {
 	adminID := mk("admin@x.io", true)
 	e.aliceID, e.bobID, e.carolID = mk("alice@x.io", false), mk("bob@x.io", false), mk("carol@x.io", false)
 	e.admin, e.alice, e.bob, e.carol = human(adminID, true), human(e.aliceID, false), human(e.bobID, false), human(e.carolID, false)
-	if _, err := e.svc.CreateOrganization(context.Background(), e.admin, "MAIN", "Main", 0); err != nil {
+	if _, err := e.svc.CreateOrganization(context.Background(), e.admin, "MAIN", "Main", e.admin.UserID); err != nil {
 		t.Fatal(err)
 	}
 	return e

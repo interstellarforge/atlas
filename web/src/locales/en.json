@@ -29,7 +29,8 @@
     "sidebar": "Sidebar",
     "breadcrumb": "Breadcrumb",
     "settings": "Settings",
-    "admin": "Admin"
+    "admin": "Admin",
+    "company": "Organization"
   },
   "forcedPassword": {
     "title": "Choose a new password",
@@ -62,6 +63,32 @@
       "create": "Create an account",
       "haveAccount": "I already have an account",
       "failed": "Could not register: {message}"
+    },
+    "invite": {
+      "title": "Join {organization}",
+      "intro": "You were invited as {email}.",
+      "newAccount": "Choose a name and password to create your account.",
+      "existing": "An account with this address exists. Sign in to accept the invitation.",
+      "wrongAccount": "You are signed in with another account. Sign in as {email} to accept.",
+      "accept": "Accept invitation",
+      "invalid": "This invitation is not valid or has expired.",
+      "failed": "Could not accept the invitation: {message}"
+    },
+    "totp": {
+      "required": "An organization you belong to requires two-factor authentication. Set it up to continue."
+    },
+    "verify": {
+      "working": "Confirming your email address…",
+      "done": "Your email address is confirmed.",
+      "failed": "This link is not valid or has expired.",
+      "home": "Open Atlas"
+    },
+    "join": {
+      "title": "Ask to join an organization",
+      "signin": "Sign in to send a request to join. If the link is valid, an admin of the organization reviews it.",
+      "submit": "Send request",
+      "sent": "Request sent. If the organization accepts requests, an admin will review it.",
+      "failed": "Could not send the request: {message}"
     }
   },
   "home": {
@@ -76,7 +103,29 @@
     "items": "items",
     "backlog": "Backlog",
     "noOrganizationTitle": "You are not part of an organization yet",
-    "noOrganization": "Ask the admin of your organization to invite you. Once you are in, your projects appear here."
+    "noOrganization": "Ask the admin of your organization to invite you. Once you are in, your projects appear here.",
+    "applyTitle": "Create your own organization",
+    "applyIntro": "Apply for an organization. The Atlas admin decides; once approved you are its admin.",
+    "applyKey": "Key (2-10 letters or digits)",
+    "applyName": "Organization name",
+    "applyNote": "Why do you need it? (optional)",
+    "applySubmit": "Send application",
+    "applySent": "Application sent.",
+    "applyFailed": "Could not apply: {message}",
+    "applyStatusPending": "Waiting for a decision",
+    "applyStatusApproved": "Approved",
+    "applyStatusRejected": "Declined",
+    "applyMine": "Your applications",
+    "joinTitle": "Join an organization",
+    "joinIntro": "Organizations that hold your email domain.",
+    "joinAuto": "Join",
+    "joinRequest": "Ask to join",
+    "joinSent": "Done. If the organization accepts you, it appears here.",
+    "verifyTitle": "Confirm your email address",
+    "verifyIntro": "Confirm that this address is yours to see organizations that hold your email domain.",
+    "verifySend": "Send confirmation email",
+    "verifySent": "Check your inbox for the confirmation link.",
+    "verifyFailed": "Could not send the email. Email may not be set up on this instance."
   },
   "projects": {
     "create": "New project",
@@ -584,7 +633,8 @@
       "instance": "Instance",
       "templates": "Project templates",
       "access": "Access",
-      "mail": "Email"
+      "mail": "Email",
+      "organizations": "Organizations"
     },
     "system": {
       "refresh": "Refresh",
@@ -737,7 +787,33 @@
     "mailTest": "Send test email",
     "mailTestSent": "Test email sent to your address.",
     "mailUseEnv": "Use the environment settings",
-    "mailCleared": "Saved settings removed."
+    "mailCleared": "Saved settings removed.",
+    "orgsTitle": "Organizations",
+    "orgsIntro": "You manage Atlas, not the organizations' work. You see name, key, status, admins and the number of members.",
+    "orgAdmins": "Admins",
+    "orgMembers": "{count} members",
+    "orgCreate": "Create an organization",
+    "orgKey": "Key",
+    "orgName": "Name",
+    "orgAdminEmail": "First admin (email of an existing account)",
+    "orgCreated": "Organization created.",
+    "appsTitle": "Applications",
+    "appsEmpty": "No applications waiting.",
+    "appBy": "{name} ({email})",
+    "appKey": "Key for the new organization",
+    "approve": "Approve",
+    "reject": "Reject",
+    "appApproved": "Application approved, organization created.",
+    "appRejected": "Application rejected.",
+    "orgCreation": "Creating organizations",
+    "orgCreationAdminOnly": "Only the Atlas admin creates organizations",
+    "orgCreationApply": "Any account may apply; the Atlas admin approves",
+    "domainsTitle": "Email domain claims",
+    "domainsEmpty": "No claims waiting.",
+    "domainsIntro": "An organization admin claims a domain. Confirm it only when the organization really owns the domain.",
+    "domainBy": "{name} ({key})",
+    "domainConfirmed": "Domain confirmed.",
+    "domainRejected": "Claim rejected."
   },
   "issues": {
     "intro": "Bugs of this project. Report one, filter and work them like any item.",
@@ -928,5 +1004,119 @@
   "tickets": {
     "unscheduled": "Unscheduled",
     "more": "More tickets than can be shown."
+  },
+  "company": {
+    "title": "Organization",
+    "intro": "Members, invitations, join requests, email domains, rules and the audit log of your organization.",
+    "switch": "Organization",
+    "sections": "Organization sections",
+    "failed": "Could not do that: {message}",
+    "saved": "Saved.",
+    "save": "Save",
+    "nav": {
+      "members": "Members",
+      "invites": "Invitations",
+      "requests": "Join requests",
+      "domains": "Email domains",
+      "settings": "Rules",
+      "support": "Support access",
+      "audit": "Audit log"
+    },
+    "members": {
+      "role": "Role",
+      "admin": "Admin",
+      "user": "Member",
+      "remove": "Remove",
+      "removed": "Member removed.",
+      "confirmRemove": "Remove {name} from the organization and all its projects?",
+      "hint": "People join by invitation, join request or email domain. Project access is given per project."
+    },
+    "invites": {
+      "title": "Invite someone",
+      "email": "Email address",
+      "projects": "Projects to join (keys, optional)",
+      "days": "Valid for (days)",
+      "send": "Create invitation",
+      "sent": "Invitation created.",
+      "link": "Pass this link on if email is not set up. It is shown once.",
+      "revoke": "Revoke",
+      "revoked": "Invitation revoked.",
+      "empty": "No invitations yet.",
+      "state": {
+        "pending": "Waiting",
+        "accepted": "Accepted",
+        "revoked": "Revoked",
+        "expired": "Expired"
+      }
+    },
+    "requests": {
+      "title": "Join requests",
+      "linkOn": "Let people ask to join with the join link",
+      "approve": "Approve",
+      "reject": "Reject",
+      "decided": "Decision saved.",
+      "empty": "No requests waiting."
+    },
+    "domains": {
+      "title": "Email domains",
+      "intro": "Claim a domain so colleagues can join. The Atlas admin confirms a claim before it does anything. Free email providers cannot be claimed.",
+      "domain": "Domain",
+      "mode": "When someone with this domain asks",
+      "request": "An admin approves",
+      "auto": "Join at once (verified email only)",
+      "claim": "Claim domain",
+      "claimed": "Claim sent for confirmation.",
+      "remove": "Remove",
+      "removed": "Domain removed.",
+      "empty": "No domains claimed.",
+      "status": {
+        "pending": "Waiting for confirmation",
+        "confirmed": "Confirmed"
+      }
+    },
+    "settings": {
+      "title": "Rules",
+      "password": "Minimum password length (instance minimum {floor})",
+      "session": "Session length in days (instance {instance})",
+      "creation": "Who may create projects",
+      "creationAdmins": "Admins only",
+      "creationMembers": "All members",
+      "twoFactor": "Require two-factor authentication",
+      "tokens": "Allow API tokens, OAuth and MCP access",
+      "tokenDays": "Maximum token lifetime in days (empty = no limit)",
+      "hint": "People in several organizations get the strictest value. Requiring two-factor authentication applies to you too.",
+      "doneDays": "Hide completed items after this many days (0 = never, empty = instance value)",
+      "template": "Default workflow for new projects",
+      "templateNone": "The Atlas default"
+    },
+    "support": {
+      "title": "Support access",
+      "intro": "Let the Atlas admin look into your organization for a limited time. Off by default; every use is audited.",
+      "level": "Level",
+      "readOnly": "Read only",
+      "full": "Full",
+      "untilRevoked": "Until revoked",
+      "hours": "Hours",
+      "grant": "Grant access",
+      "granted": "Support access granted.",
+      "revoke": "Revoke",
+      "revoked": "Support access revoked.",
+      "revokedAt": "revoked",
+      "empty": "No support access given."
+    },
+    "audit": {
+      "time": "Time",
+      "actor": "Actor",
+      "operation": "Operation",
+      "target": "Target",
+      "more": "Load more"
+    },
+    "logo": {
+      "title": "Logo",
+      "none": "No logo yet.",
+      "alt": "Logo of {name}",
+      "choose": "Upload a logo (PNG, JPEG, GIF or WebP)",
+      "remove": "Remove logo"
+    }
   }
 }

@@ -17,7 +17,7 @@ Today the SUPERADMIN approves every account and reaches every project. The inten
 4. **Support access (company setting).** Off by default. The company ADMIN can allow it as `read_only` or `full`, time-limited (hours) or until revoked, and revoke it at any time. It is stored as a grant (`organization_id`, `level`, `granted_by`, `granted_at`, `expires_at`, `revoked_at`). Only while a valid grant exists may a SUPERADMIN session open that company; read-only gives `view` and `export`, full gives ADMIN actions. Every use is audited with the grant id. Authz reads the grant live.
 5. **Accounts are free.** An account is a global identity. Registration (instance mode `closed`, `invite` or `open`) creates an ACTIVE account with no memberships and therefore no access. Account status is `active` or `suspended` (SUPERADMIN only; the ADR-0030 status gate, suspension revocation and compare-and-set are kept). `pending` and `rejected` stop being account states; the instance mode `request` and the `approval_by` setting are removed.
 6. **Verified email.** `users.email_verified_at` is set when a person follows an emailed link (invitation, verification). Verified email is required for automatic domain join. Without outgoing mail configured nothing can auto-join.
-7. **Creating a company.** (a) A SUPERADMIN creates it with a first ADMIN (existing account or invitation). (b) Company application: when the instance setting `company_creation` is `apply` (default `admin_only`), a signed-in account submits a name, a desired key and a note. A SUPERADMIN approves (the company is created, the applicant becomes ADMIN) or rejects (re-apply 24 h later, at most 3 per 30 days). Compare-and-set, audited.
+7. **Creating a company.** (a) A SUPERADMIN creates it with a first ADMIN: an existing active account (inviting a new email as first ADMIN is not built; the account registers first). The creating SUPERADMIN does not become a member. (b) Company application: when the instance setting `organization_creation` is `apply` (default `admin_only`), a signed-in account submits a name, a desired key and a note. A SUPERADMIN approves (the company is created, the applicant becomes ADMIN) or rejects (re-apply 24 h later, at most 3 per 30 days). Compare-and-set, audited.
 8. **Joining a company.** The company ADMIN enables any combination:
    - **Invitation** (always available to the ADMIN): hashed single-use token, email, optional initial projects; accepting proves the address (sets `email_verified_at`).
    - **Join link** `/join/<key>`: enabled per company; the person submits a request, the ADMIN approves or rejects.
@@ -37,3 +37,14 @@ Today the SUPERADMIN approves every account and reaches every project. The inten
 - New tables: `organization_settings`, `organization_domains`, `organization_join_requests`, `organization_applications`, `organization_invites`, `support_grants`, `email_verifications`; `users.email_verified_at`.
 - Per-company policy touches login (password and 2FA rules), token creation and the MCP/OAuth gates.
 - Domain auto-join and verification depend on outgoing mail (ADR-0012); without it every join is approved by the ADMIN.
+
+## Implementation (2026-11-10)
+
+Built as epic COM, tickets COM 0-9: support access and SUPERADMIN scope reduction (COM 1), free accounts (COM 2), company creation and applications (COM 3), invitations and email verification (COM 4), join link and join requests (COM 5), email domains with SUPERADMIN confirmation and auto join (COM 6), company settings enforced live on sessions, tokens, passwords and project creation (COM 7), company and Atlas admin UI (COM 8), security matrix and docs (COM 9).
+
+Deviations from the text above:
+
+- Point 7: inviting a new email as the first ADMIN of a new company is not built; the account registers first.
+- Point 9: company-scoped project and item templates, the company profile (logo, default language, default workflow) and per-company completed-items visibility are not built (follow-up ATL-507). Support access is a separate grant flow (point 4), not a settings field.
+- Point 9: "require two-factor" limits the session until 2FA is set up; tokens carry no second factor and are not limited by it.
+- Point 8: join options (the list of companies holding the caller's domain) are shown only to a verified address.

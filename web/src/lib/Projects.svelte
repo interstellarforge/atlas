@@ -1,13 +1,21 @@
 <script lang="ts">
   import {
     ApiError,
+    type Application,
+    applyForOrganization,
     createProject,
     getProgress,
+    getPublicPolicy,
+    type JoinOption,
+    listJoinOptions,
+    listMyApplications,
     listOrganizations,
     listProjectTemplates,
     type Progress,
     type Project,
     type ProjectTemplate,
+    requestEmailVerification,
+    requestJoin,
   } from "./api";
   import EmptyState from "./EmptyState.svelte";
   import { type MessageKey, t } from "./i18n";
@@ -45,7 +53,54 @@
   void listProjectTemplates().then((list) => (projectTemplates = list));
   // An account without an organization has no access yet (ADR-0031): no project form, an explanation instead.
   let noOrganization = $state(false);
-  void listOrganizations().then((list) => (noOrganization = list.length === 0));
+  let canApply = $state(false);
+  let applications = $state<Application[]>([]);
+  let appKey = $state("");
+  let appName = $state("");
+  let appNote = $state("");
+  let appMessage = $state("");
+  let appError = $state("");
+  void listOrganizations().then((list) => {
+    noOrganization = list.length === 0;
+    if (!noOrganization) return;
+    void getPublicPolicy().then(
+      (p) => (canApply = p.organization_creation === "apply"),
+    );
+    void listMyApplications().then((a) => (applications = a));
+    void listJoinOptions().then((o) => (joinOptions = o));
+  });
+
+  let joinOptions = $state<JoinOption[]>([]);
+  let joinMessage = $state("");
+  let verifyMessage = $state("");
+  async function joinOrganization(o: JoinOption): Promise<void> {
+    await requestJoin(o.key);
+    joinMessage = t("home.joinSent");
+    joinOptions = joinOptions.filter((x) => x.key !== o.key);
+  }
+  async function sendVerification(): Promise<void> {
+    try {
+      await requestEmailVerification();
+      verifyMessage = t("home.verifySent");
+    } catch {
+      verifyMessage = t("home.verifyFailed");
+    }
+  }
+
+  async function apply(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    appMessage = appError = "";
+    try {
+      await applyForOrganization({ key: appKey, name: appName, note: appNote });
+      appMessage = t("home.applySent");
+      appKey = appName = appNote = "";
+      applications = await listMyApplications();
+    } catch (e) {
+      appError = t("home.applyFailed", {
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }
   let counts = $state<Record<string, Progress>>({});
 
   const shown = $derived(
@@ -148,6 +203,82 @@
       text={noOrganization ? t("home.noOrganization") : t("home.empty")}
     />
   </div>
+  {#if noOrganization && canApply}
+    <form class="newform" onsubmit={apply}>
+      <h2>{t("home.applyTitle")}</h2>
+      <p class="muted">{t("home.applyIntro")}</p>
+      <div class="fields">
+        <label>
+          {t("home.applyKey")}
+          <input
+            bind:value={appKey}
+            required
+            maxlength="10"
+            pattern={"[A-Za-z][A-Za-z0-9]{1,9}"}
+          />
+        </label>
+        <label>
+          {t("home.applyName")}
+          <input bind:value={appName} required />
+        </label>
+        <label>
+          {t("home.applyNote")}
+          <input bind:value={appNote} maxlength="500" />
+        </label>
+        <button class="primary" type="submit">{t("home.applySubmit")}</button>
+      </div>
+      {#if appMessage}<p class="muted" role="status">{appMessage}</p>{/if}
+      {#if appError}<p class="error" role="alert">{appError}</p>{/if}
+    </form>
+  {/if}
+  {#if noOrganization}
+    <section class="newform">
+      <h2>{t("home.joinTitle")}</h2>
+      {#if joinOptions.length > 0}
+        <p class="muted">{t("home.joinIntro")}</p>
+        <ul>
+          {#each joinOptions as o (o.key)}
+            <li>
+              <strong>{o.name}</strong>
+              <button
+                class="primary"
+                type="button"
+                onclick={() => void joinOrganization(o)}
+                >{o.mode === "auto"
+                  ? t("home.joinAuto")
+                  : t("home.joinRequest")}</button
+              >
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="muted">{t("home.verifyIntro")}</p>
+        <button type="button" onclick={() => void sendVerification()}
+          >{t("home.verifySend")}</button
+        >
+      {/if}
+      {#if joinMessage}<p class="muted" role="status">{joinMessage}</p>{/if}
+      {#if verifyMessage}<p class="muted" role="status">{verifyMessage}</p>{/if}
+    </section>
+  {/if}
+  {#if noOrganization && applications.length > 0}
+    <section class="newform">
+      <h2>{t("home.applyMine")}</h2>
+      <ul>
+        {#each applications as a (a.id)}
+          <li>
+            <strong>{a.name}</strong>
+            <span class="muted">{a.key}</span>
+            {a.status === "pending"
+              ? t("home.applyStatusPending")
+              : a.status === "approved"
+                ? t("home.applyStatusApproved")
+                : t("home.applyStatusRejected")}
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 {:else}
   <div class="bar">
     <div class="search">

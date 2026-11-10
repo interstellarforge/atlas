@@ -428,3 +428,136 @@ func TestSuperadminAppointsFirstAdminOnly(t *testing.T) {
 		t.Fatalf("a second appointment after the organization has an ADMIN again: %v", err)
 	}
 }
+
+// ADR-0031: the Atlas admin creates an organization for a named first ADMIN and does not become a member.
+func TestSuperadminCreatesOrganizationWithoutJoining(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	if _, err := e.svc.CreateOrganization(ctx, e.admin, "NEWO", "New", 0); err == nil {
+		t.Fatal("an organization was created without a first admin")
+	}
+	if _, err := e.svc.CreateOrganizationFor(ctx, e.admin, "NEWO", "New", "nobody@x.io"); err == nil {
+		t.Fatal("an unknown email became the first admin")
+	}
+	if _, err := e.svc.CreateOrganizationFor(ctx, e.alice, "NEWO", "New", "bob@x.io"); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a non-SUPERADMIN created an organization: %v", err)
+	}
+	o, err := e.svc.CreateOrganizationFor(ctx, e.admin, "NEWO", "New", "bob@x.io")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Role != "" {
+		t.Fatalf("the creating SUPERADMIN became a member (%q)", o.Role)
+	}
+	list, err := e.svc.ListAdminOrganizations(ctx, e.admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range list {
+		if x.Key == "NEWO" && (len(x.Admins) != 1 || x.Admins[0] != "bob@x.io" || x.Members != 1) {
+			t.Fatalf("admin view of the organization: %+v", x)
+		}
+	}
+	if _, err := e.svc.ListAdminOrganizations(ctx, e.alice); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a non-SUPERADMIN listed all organizations with their admins: %v", err)
+	}
+}
+
+// ADR-0031: organization applications: setting, limits, SUPERADMIN-only decisions, one winner, key collision.
+func TestOrganizationApplications(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	setCreation := func(mode string) {
+		if _, err := e.svc.SetPolicy(ctx, e.admin, core.Policy{MinPasswordLength: 8, Registration: "closed", OrganizationCreation: mode, SessionDays: 14, DoneVisibleDays: 14}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.svc.ApplyForOrganization(ctx, e.bob, "BOBCO", "Bob Co", ""); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("applying while only the Atlas admin creates organizations: %v", err)
+	}
+	setCreation("apply")
+	token := auth.Actor{Kind: auth.KindToken, UserID: e.bobID, TokenID: 1, Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}
+	if _, err := e.svc.ApplyForOrganization(ctx, token, "BOBCO", "Bob Co", ""); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a token applied: %v", err)
+	}
+	if _, err := e.svc.ApplyForOrganization(ctx, e.bob, "1", "Bob Co", ""); err == nil {
+		t.Fatal("an invalid key was accepted")
+	}
+	// the key MAIN exists: the applicant is not told
+	first, err := e.svc.ApplyForOrganization(ctx, e.bob, "MAIN", "Bob Co", "please")
+	if err != nil {
+		t.Fatalf("applying with a key that exists: %v", err)
+	}
+	if _, err := e.svc.ApplyForOrganization(ctx, e.bob, "BOBCO", "Bob Co", ""); err == nil {
+		t.Fatal("a second waiting application was accepted")
+	}
+	if _, err := e.svc.ListApplications(ctx, e.alice, ""); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a non-SUPERADMIN read the queue: %v", err)
+	}
+	if err := e.svc.DecideApplication(ctx, e.alice, first.ID, "approve", "", ""); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a non-SUPERADMIN decided: %v", err)
+	}
+	queue, err := e.svc.ListApplications(ctx, e.admin, "")
+	if err != nil || len(queue) != 1 || queue[0].ApplicantEmail != "bob@x.io" {
+		t.Fatalf("queue: %v %+v", err, queue)
+	}
+	// the collision shows at decision time and leaves the application waiting; another key works
+	var re *core.RuleError
+	if err := e.svc.DecideApplication(ctx, e.admin, first.ID, "approve", "", ""); !errors.As(err, &re) {
+		t.Fatalf("approving onto an existing key: %v", err)
+	}
+	if err := e.svc.DecideApplication(ctx, e.admin, first.ID, "approve", "", "BOBCO"); err != nil {
+		t.Fatal(err)
+	}
+	o, err := e.svc.GetOrganization(ctx, e.bob, "BOBCO")
+	if err != nil || o.Role != "admin" {
+		t.Fatalf("the applicant must be the first ADMIN: %v %+v", err, o)
+	}
+	if mine, _ := e.svc.GetOrganization(ctx, e.admin, "BOBCO"); mine.Role != "" {
+		t.Fatalf("the SUPERADMIN joined the new organization: %q", mine.Role)
+	}
+	if err := e.svc.DecideApplication(ctx, e.admin, first.ID, "reject", "", ""); !errors.As(err, &re) {
+		t.Fatalf("deciding twice: %v", err)
+	}
+
+	// concurrent decisions: exactly one wins
+	second, err := e.svc.ApplyForOrganization(ctx, e.carol, "CAROL", "Carol Co", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 2)
+	for _, d := range []string{"approve", "reject"} {
+		go func() { errs <- e.svc.DecideApplication(ctx, e.admin, second.ID, d, "", "") }()
+	}
+	if a, b := <-errs, <-errs; (a == nil) == (b == nil) {
+		t.Fatalf("two concurrent decisions: %v and %v, want exactly one success", a, b)
+	}
+
+	// rejection: wait 24 h, then at most 3 applications per 30 days
+	now := time.Now()
+	e.svc.SetClock(func() time.Time { return now })
+	third, err := e.svc.ApplyForOrganization(ctx, e.alice, "ALICE1", "Alice 1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.DecideApplication(ctx, e.admin, third.ID, "reject", "no", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.ApplyForOrganization(ctx, e.alice, "ALICE2", "Alice 2", ""); !errors.As(err, &re) {
+		t.Fatalf("re-applying within 24 h: %v", err)
+	}
+	for i, key := range []string{"ALICE2", "ALICE3"} {
+		now = now.Add(25 * time.Hour)
+		ap, err := e.svc.ApplyForOrganization(ctx, e.alice, key, key, "")
+		if err != nil {
+			t.Fatalf("re-apply %d: %v", i, err)
+		}
+		if err := e.svc.DecideApplication(ctx, e.admin, ap.ID, "reject", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now = now.Add(25 * time.Hour)
+	if _, err := e.svc.ApplyForOrganization(ctx, e.alice, "ALICE4", "Alice 4", ""); !errors.As(err, &re) {
+		t.Fatalf("a 4th application inside 30 days: %v", err)
+	}
+}

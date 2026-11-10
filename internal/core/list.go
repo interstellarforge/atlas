@@ -107,7 +107,9 @@ func (s *Service) filterConds(f ItemFilter, projectIDs []int64) ([]string, []any
 		}
 	}
 	if f.DoneBefore != nil {
-		add("NOT (st.category = 'completed' AND i.updated_at < ?)", *f.DoneBefore)
+		// A project of an organization with its own done_visible_days uses that (0 = never hide); others use the cutoff.
+		add(`NOT (st.category = 'completed' AND i.updated_at < COALESCE((SELECT CASE x.done_visible_days WHEN 0 THEN 0 ELSE ? - x.done_visible_days * 86400000 END
+			FROM organization_settings x JOIN projects p ON p.organization_id = x.organization_id WHERE p.id = i.project_id AND x.done_visible_days IS NOT NULL), ?))`, s.nowMs(), *f.DoneBefore)
 	}
 	if !f.IncludeArchived {
 		conds = append(conds, "i.archived_at IS NULL")

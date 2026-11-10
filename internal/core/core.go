@@ -49,10 +49,12 @@ func invalid(format string, a ...any) error { return &InvalidError{fmt.Sprintf(f
 func rule(format string, a ...any) error    { return &RuleError{fmt.Sprintf(format, a...)} }
 
 type Service struct {
-	db     *db.DB
-	users  *auth.Service
-	now    func() time.Time
-	notify func()
+	// skipDefault stops CreateProjectIn from applying the organization's default workflow (a chosen template does).
+	skipDefault bool
+	db          *db.DB
+	users       *auth.Service
+	now         func() time.Time
+	notify      func()
 	// outer is set on the per-batch copy of the service: tx() then joins the batch transaction.
 	outer *sql.Tx
 	media *media.Store
@@ -85,8 +87,10 @@ func (s *Service) ReadableProjectKeys(a auth.Actor) (map[string]bool, error) {
 }
 
 func New(d *db.DB, users *auth.Service) *Service {
-	return &Service{db: d, users: users, now: time.Now, readmes: &readmeCache{m: map[string]readmeEntry{}},
+	s := &Service{db: d, users: users, now: time.Now, readmes: &readmeCache{m: map[string]readmeEntry{}},
 		support: &supportAudit{seen: map[[2]int64]int64{}}}
+	s.installUserPolicy()
+	return s
 }
 
 func (s *Service) nowMs() int64 { return s.now().UnixMilli() }

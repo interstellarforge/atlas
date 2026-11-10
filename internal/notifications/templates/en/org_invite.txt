@@ -1,0 +1,12 @@
+Subject: {{.Inviter}} invited you to {{.Organization}} on Atlas
+
+Hello,
+
+{{.Inviter}} invited you to join {{.Organization}} on Atlas.
+{{if .Link}}
+Accept the invitation here:
+{{.Link}}
+{{else}}
+Ask {{.Inviter}} for the invitation link.
+{{end}}
+The invitation expires in {{.Days}} days.

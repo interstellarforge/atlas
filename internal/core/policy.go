@@ -16,14 +16,15 @@ import (
 
 // Policy is the instance-wide account policy, kept in instance_settings. Missing keys use these defaults.
 type Policy struct {
-	MinPasswordLength int    `json:"min_password_length"` // 8-128
-	Registration      string `json:"registration"`        // closed (the SUPERADMIN creates accounts), invite or open; every account starts without access (ADR-0031)
-	AllowedDomain     string `json:"allowed_domain"`      // open registration only: e.g. example.com; empty = any
-	SessionDays       int    `json:"session_days"`        // 1-90
-	DoneVisibleDays   int    `json:"done_visible_days"`   // 0-3650: lists hide completed items not updated for this long; 0 = never
+	MinPasswordLength    int    `json:"min_password_length"`   // 8-128
+	Registration         string `json:"registration"`          // closed (the SUPERADMIN creates accounts), invite or open; every account starts without access (ADR-0031)
+	OrganizationCreation string `json:"organization_creation"` // admin_only (the SUPERADMIN creates organizations) or apply (any account may apply)
+	AllowedDomain        string `json:"allowed_domain"`        // open registration only: e.g. example.com; empty = any
+	SessionDays          int    `json:"session_days"`          // 1-90
+	DoneVisibleDays      int    `json:"done_visible_days"`     // 0-3650: lists hide completed items not updated for this long; 0 = never
 }
 
-var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", SessionDays: 14, DoneVisibleDays: 14}
+var defaultPolicy = Policy{MinPasswordLength: 8, Registration: "closed", OrganizationCreation: "admin_only", SessionDays: 14, DoneVisibleDays: 14}
 
 func loadPolicy(q queryer) Policy {
 	p := defaultPolicy
@@ -42,6 +43,8 @@ func loadPolicy(q queryer) Policy {
 			p.MinPasswordLength, _ = strconv.Atoi(v)
 		case "registration":
 			p.Registration = v
+		case "organization_creation":
+			p.OrganizationCreation = v
 		case "allowed_domain":
 			p.AllowedDomain = v
 		case "session_days":
@@ -60,13 +63,13 @@ func loadPolicy(q queryer) Policy {
 
 func (s *Service) Policy() Policy { return loadPolicy(s.db.R) }
 
-// DoneCutoff is the updated_at (unix ms) before which completed items count as old, or nil when they never do.
+// DoneCutoff is the updated_at (unix ms) before which completed items count as old; 0 means they never do. An
+// organization can set its own number of days (organization_settings.done_visible_days), applied in the list filter.
 func (s *Service) DoneCutoff() *int64 {
-	days := s.Policy().DoneVisibleDays
-	if days <= 0 {
-		return nil
+	var t int64
+	if days := s.Policy().DoneVisibleDays; days > 0 {
+		t = time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
 	}
-	t := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
 	return &t
 }
 
@@ -87,13 +90,16 @@ func (s *Service) SetPolicy(ctx context.Context, a auth.Actor, p Policy) (Policy
 		return Policy{}, err
 	}
 	p.AllowedDomain = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(p.AllowedDomain), "@"))
+	if p.OrganizationCreation == "" {
+		p.OrganizationCreation = s.Policy().OrganizationCreation // clients that predate the setting keep the current value
+	}
 	if p.MinPasswordLength < 8 || p.MinPasswordLength > 128 || p.SessionDays < 1 || p.SessionDays > 90 || p.DoneVisibleDays < 0 || p.DoneVisibleDays > 3650 ||
-		!slices.Contains([]string{"closed", "invite", "open"}, p.Registration) || strings.ContainsAny(p.AllowedDomain, " @/") {
-		return Policy{}, invalid("min_password_length 8-128, session_days 1-90, done_visible_days 0-3650, registration closed, invite or open, allowed_domain like example.com")
+		!slices.Contains([]string{"closed", "invite", "open"}, p.Registration) || !slices.Contains([]string{"admin_only", "apply"}, p.OrganizationCreation) || strings.ContainsAny(p.AllowedDomain, " @/") {
+		return Policy{}, invalid("min_password_length 8-128, session_days 1-90, done_visible_days 0-3650, registration closed, invite or open, organization_creation admin_only or apply, allowed_domain like example.com")
 	}
 	err := s.tx(func(tx *sql.Tx) error {
 		for k, v := range map[string]string{"min_password_length": strconv.Itoa(p.MinPasswordLength), "registration": p.Registration,
-			"allowed_domain": p.AllowedDomain, "session_days": strconv.Itoa(p.SessionDays),
+			"allowed_domain": p.AllowedDomain, "organization_creation": p.OrganizationCreation, "session_days": strconv.Itoa(p.SessionDays),
 			"done_visible_days": strconv.Itoa(p.DoneVisibleDays)} {
 			if _, err := tx.Exec(`INSERT INTO instance_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, k, v); err != nil {
 				return err
