@@ -3,6 +3,7 @@
     ApiError,
     createProject,
     getProgress,
+    listOrganizations,
     listProjectTemplates,
     type Progress,
     type Project,
@@ -42,6 +43,9 @@
   let template = $state("0");
   let projectTemplates = $state<ProjectTemplate[]>([]);
   void listProjectTemplates().then((list) => (projectTemplates = list));
+  // An account without an organization has no access yet (ADR-0031): no project form, an explanation instead.
+  let noOrganization = $state(false);
+  void listOrganizations().then((list) => (noOrganization = list.length === 0));
   let counts = $state<Record<string, Progress>>({});
 
   const shown = $derived(
@@ -88,17 +92,19 @@
 
 <PageHero title={t("home.title")} description={t("home.intro")}>
   {#snippet actions()}
-    <button
-      type="button"
-      class="primary withicon"
-      aria-expanded={creating}
-      onclick={() => (creating = !creating)}
-      ><Icon name="plus" size={16} />{t("projects.create")}</button
-    >
+    {#if !noOrganization}
+      <button
+        type="button"
+        class="primary withicon"
+        aria-expanded={creating}
+        onclick={() => (creating = !creating)}
+        ><Icon name="plus" size={16} />{t("projects.create")}</button
+      >
+    {/if}
   {/snippet}
 </PageHero>
 
-{#if creating || projects.length === 0}
+{#if !noOrganization && (creating || projects.length === 0)}
   <form class="newform" onsubmit={submit}>
     <h2>{t("projects.create")}</h2>
     <div class="fields">
@@ -136,8 +142,10 @@
   <div class="emptycard">
     <EmptyState
       icon="projects"
-      title={t("home.emptyTitle")}
-      text={t("home.empty")}
+      title={noOrganization
+        ? t("home.noOrganizationTitle")
+        : t("home.emptyTitle")}
+      text={noOrganization ? t("home.noOrganization") : t("home.empty")}
     />
   </div>
 {:else}

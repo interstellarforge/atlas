@@ -106,7 +106,7 @@ func (s *Service) DeleteAccount(ctx context.Context, a auth.Actor, password stri
 			{`DELETE FROM notifications WHERE user_id = ?`, []any{a.UserID}},
 			{`DELETE FROM recovery_codes WHERE user_id = ?`, []any{a.UserID}},
 			{`UPDATE work_items SET assignee_id = NULL WHERE assignee_id = ?`, []any{a.UserID}},
-			{`UPDATE users SET name = 'Deleted user', email = ?, password_hash = ?, is_superadmin = 0, deactivated_at = ?, avatar_path = NULL,
+			{`UPDATE users SET name = 'Deleted user', email = ?, password_hash = ?, is_superadmin = 0, deactivated_at = ?, status = 'suspended', avatar_path = NULL,
 				totp_secret = NULL, totp_pending = NULL, totp_enabled = 0, preferences = '{}' WHERE id = ?`,
 				[]any{"deleted-" + strconv.FormatInt(a.UserID, 10) + "@deleted.invalid", "!" + hex.EncodeToString(junk), now, a.UserID}},
 		}

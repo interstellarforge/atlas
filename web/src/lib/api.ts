@@ -805,6 +805,7 @@ export async function importItems(
 
 export interface AdminUser extends User {
   deactivated_at: number | null;
+  status: "active" | "suspended";
   created_at: number;
   must_change_password: boolean;
 }
@@ -1016,6 +1017,21 @@ export function saveProjectTemplate(body: {
 
 export function deleteProjectTemplate(id: number): Promise<undefined> {
   return request("DELETE", `/project-templates/${String(id)}`);
+}
+
+export interface Organization {
+  key: string;
+  name: string;
+  status: string;
+  created_at: number;
+  /** The caller's own role in it: admin, user, or empty. */
+  role?: string;
+  no_active_admin: boolean;
+}
+
+export async function listOrganizations(): Promise<Organization[]> {
+  return (await request<{ items: Organization[] }>("GET", "/organizations"))
+    .items;
 }
 
 export interface PublicPolicy {

@@ -12,61 +12,74 @@ import (
 // Authorization decisions (ADR-0029). The Actor carries identity only; account status and rights are read from
 // the database on every decision, so revoking or suspending applies to open sessions and tokens at once.
 //
-// Levels on a project: SUPERADMIN and the ADMIN of the project's organization hold every action without any
-// membership; a USER needs both a membership of the organization and a project_members row and holds
-// MemberActions. A project without organization (not yet migrated) is reachable by a SUPERADMIN only.
-// No other file may decide on is_superadmin or the membership tables.
+// Levels on a project: the ADMIN of the project's organization holds every action without a project membership;
+// a USER needs both a membership of the organization and a project_members row and holds MemberActions. The
+// SUPERADMIN runs Atlas, not the organizations (ADR-0031): it reaches a project only through its own memberships or
+// through a valid support grant of the organization (read_only: view and export; full: every action), and only in
+// a user session. A project without organization is reachable by nobody.
+// No other file may decide on is_superadmin, the membership tables or support grants.
 
-// MemberActions is the fixed action set of the single project role "member" (ADR-0029). Organization ADMINs and
-// SUPERADMINs hold every action in Actions. context.write is included because members hold it today.
+// MemberActions is the fixed action set of the single project role "member" (ADR-0029). Organization ADMINs hold
+// every action in Actions. context.write is included because members hold it today.
 var MemberActions = []string{"view", "export", "item.create", "item.update", "comment", "import", "time.log", "context.write"}
 
 func memberAllows(act action) bool { return slices.Contains(MemberActions, string(act)) }
 
 // standing is the live state of the actor's account.
-type standing struct{ active, super bool }
+type standing struct {
+	active, super bool
+	support       bool // a SUPERADMIN user session: the only actor a support grant applies to
+}
 
 func (s *Service) standing(q queryer, a auth.Actor) (standing, error) {
 	var st standing
-	err := q.QueryRow(`SELECT deactivated_at IS NULL, is_superadmin = 1 FROM users WHERE id = ?`, a.UserID).Scan(&st.active, &st.super)
+	err := q.QueryRow(`SELECT status = 'active', is_superadmin = 1 FROM users WHERE id = ?`, a.UserID).Scan(&st.active, &st.super)
 	if errors.Is(err, sql.ErrNoRows) {
 		return standing{}, nil // unknown account: fail closed
 	}
+	st.support = st.active && st.super && a.Kind == auth.KindHuman
 	return st, err
 }
 
 type level int
 
 const (
-	levelNone level = iota
+	levelNone    level = iota
+	levelSupport       // read_only support grant: view and export
 	levelMember
 	levelAdmin
 )
 
-// projectLevel is what the user may do on a project, from the tables as they are now.
-func projectLevel(q queryer, userID int64, st standing, orgID sql.NullInt64, projectID int64) (level, error) {
-	if !st.active {
-		return levelNone, nil
-	}
-	if st.super {
-		return levelAdmin, nil
-	}
-	if !orgID.Valid {
-		return levelNone, nil
+// projectLevel is what the user may do on a project, from the tables as they are now, and the support grant it
+// rests on (0 when it rests on a membership). now is only used for grants.
+func projectLevel(q queryer, userID int64, st standing, orgID sql.NullInt64, projectID, now int64) (level, int64, error) {
+	if !st.active || !orgID.Valid {
+		return levelNone, 0, nil
 	}
 	var orgRole string
 	var member bool
 	err := q.QueryRow(`SELECT COALESCE((SELECT role FROM organization_memberships WHERE organization_id = ? AND user_id = ?), ''),
 		EXISTS (SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?)`, orgID.Int64, userID, projectID, userID).Scan(&orgRole, &member)
-	switch {
-	case err != nil:
-		return levelNone, err
-	case orgRole == "admin":
-		return levelAdmin, nil
-	case orgRole != "" && member:
-		return levelMember, nil
+	if err != nil {
+		return levelNone, 0, err
 	}
-	return levelNone, nil
+	lvl := levelNone
+	switch {
+	case orgRole == "admin":
+		return levelAdmin, 0, nil
+	case orgRole != "" && member:
+		lvl = levelMember
+	}
+	if st.support {
+		gid, gl, err := supportGrant(q, orgID.Int64, now)
+		if err != nil {
+			return levelNone, 0, err
+		}
+		if gid != 0 && gl > lvl {
+			return gl, gid, nil
+		}
+	}
+	return lvl, 0, nil
 }
 
 // IsSuperadmin reports whether the actor is an active global administrator acting through a user session.
@@ -77,6 +90,12 @@ func (s *Service) IsSuperadmin(a auth.Actor) bool {
 	}
 	st, err := s.standing(s.db.R, a)
 	return err == nil && st.active && st.super
+}
+
+// IsActive reports whether the actor's account is active right now; long-lived streams re-check it.
+func (s *Service) IsActive(a auth.Actor) bool {
+	st, err := s.standing(s.db.R, a)
+	return err == nil && st.active
 }
 
 // adminOnly guards instance administration: global admins only, through a user session (never a token).
@@ -113,20 +132,21 @@ func canReachProject(q queryer, userID, projectID int64) (bool, error) {
 		return false, err
 	}
 	var st standing
-	if err := q.QueryRow(`SELECT deactivated_at IS NULL, is_superadmin = 1 FROM users WHERE id = ?`, userID).Scan(&st.active, &st.super); errors.Is(err, sql.ErrNoRows) {
+	if err := q.QueryRow(`SELECT status = 'active', is_superadmin = 1 FROM users WHERE id = ?`, userID).Scan(&st.active, &st.super); errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	} else if err != nil {
 		return false, err
 	}
-	if archived && !st.super {
+	if archived {
 		return false, nil
 	}
-	lvl, err := projectLevel(q, userID, st, org, projectID)
+	lvl, _, err := projectLevel(q, userID, st, org, projectID, 0) // no actor here: no support grant applies
 	return lvl != levelNone, err
 }
 
 // visibleUsersQuery selects the people the actor may see (ADR-0027: users outside shared organizations are
-// invisible). A SUPERADMIN session sees everyone. Any other person sees themselves, the members of the
+// invisible). Nobody, not even a SUPERADMIN, sees people outside such a relation (the accounts list for suspension is
+// ListAdminUsers). A person sees themselves, the members of the
 // organizations they administer, the ADMINs of the organizations they belong to (who administer their projects)
 // and everyone who shares a project with them. A token sees the members of the projects it may read.
 func (s *Service) visibleUsersQuery(a auth.Actor) (string, []any, error) {
@@ -141,9 +161,6 @@ func (s *Service) visibleUsersQuery(a auth.Actor) (string, []any, error) {
 		return "", nil, ErrForbidden
 	}
 	const cols = `SELECT id, email, name, is_superadmin, avatar_path IS NOT NULL FROM users`
-	if st.super {
-		return cols + ` ORDER BY name`, nil, nil
-	}
 	return cols + ` WHERE id = ?
 		OR id IN (SELECT m.user_id FROM organization_memberships m
 			JOIN organizations o ON o.id = m.organization_id AND o.status = 'active'
@@ -180,10 +197,11 @@ const (
 	orgView    orgAction = iota // see the organization: any member
 	orgUpdate                   // settings: organization ADMIN
 	orgMembers                  // list, add, remove members, assign ADMIN: organization ADMIN
+	orgGrants                   // support grants: an explicit ADMIN of the organization, never through a grant
 )
 
 // authorizeOrg resolves an organization for the actor. Visibility comes first: an organization the actor does not
-// belong to (or an archived one, for anyone but SUPERADMIN) is not found, never forbidden. A member without the
+// belong to (or an archived one) is not found, never forbidden. A member without the
 // needed role is forbidden.
 func (s *Service) authorizeOrg(q queryer, a auth.Actor, key string, act orgAction) (Organization, error) {
 	scope := auth.ScopeRead
@@ -204,8 +222,27 @@ func (s *Service) authorizeOrg(q queryer, a auth.Actor, key string, act orgActio
 	if err != nil {
 		return Organization{}, err
 	}
-	if st.super {
+	if o.Role == "admin" && o.Status == "active" {
 		return o, nil
+	}
+	if st.support && act != orgGrants && o.Status == "active" {
+		gid, gl, err := supportGrant(q, o.ID, s.nowMs())
+		if err != nil {
+			return Organization{}, err
+		}
+		if gid != 0 && (gl == levelAdmin || act == orgView) {
+			s.noteSupport(a, o.ID, gid, supportAction(act))
+			return o, nil
+		}
+	}
+	if st.super && act == orgView {
+		return o, nil // the Atlas admin lists organizations: name, key, status, admins, counts
+	}
+	if st.support && act == orgMembers && o.NoActiveAdmin && o.Status == "active" {
+		return o, nil // the Atlas admin appoints the first ADMIN of an organization that has none
+	}
+	if st.super && o.Role == "" {
+		return Organization{}, ErrForbidden
 	}
 	if o.Role == "" || o.Status == "archived" {
 		return Organization{}, ErrNotFound
@@ -214,4 +251,12 @@ func (s *Service) authorizeOrg(q queryer, a auth.Actor, key string, act orgActio
 		return Organization{}, ErrForbidden
 	}
 	return o, nil
+}
+
+// supportAction names an organization action for the support audit: reading is throttled, changing is not.
+func supportAction(act orgAction) action {
+	if act == orgView {
+		return actView
+	}
+	return actMembers
 }

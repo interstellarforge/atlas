@@ -14,6 +14,7 @@ type AdminUser struct {
 	User
 	MustChangePassword bool   `json:"must_change_password"`
 	DeactivatedAt      *int64 `json:"deactivated_at"`
+	Status             string `json:"status"` // pending, active, rejected or suspended
 	CreatedAt          int64  `json:"created_at"`
 }
 
@@ -21,7 +22,7 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 	if err := s.adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, email, name, is_superadmin, must_change_password, deactivated_at, created_at FROM users ORDER BY name`)
+	rows, err := s.db.R.Query(`SELECT id, email, name, is_superadmin, must_change_password, deactivated_at, status, created_at FROM users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +31,7 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 	for rows.Next() {
 		var u AdminUser
 		var off sql.NullInt64
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.MustChangePassword, &off, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.MustChangePassword, &off, &u.Status, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		if off.Valid {
@@ -44,7 +45,7 @@ func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser
 // activeSuperadmins counts admins that can still sign in, optionally ignoring one user.
 func activeSuperadmins(tx *sql.Tx, except int64) (int, error) {
 	var n int
-	err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE is_superadmin = 1 AND deactivated_at IS NULL AND id <> ?`, except).Scan(&n)
+	err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE is_superadmin = 1 AND status = 'active' AND id <> ?`, except).Scan(&n)
 	return n, err
 }
 
@@ -54,6 +55,17 @@ func (s *Service) SetUserSuperadmin(ctx context.Context, a auth.Actor, id int64,
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
+		if admin {
+			var status string
+			if err := tx.QueryRow(`SELECT status FROM users WHERE id = ?`, id).Scan(&status); errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			} else if err != nil {
+				return err
+			}
+			if status != "active" {
+				return rule("only an active account can become superadmin")
+			}
+		}
 		if !admin {
 			if n, err := activeSuperadmins(tx, id); err != nil {
 				return err
@@ -72,51 +84,6 @@ func (s *Service) SetUserSuperadmin(ctx context.Context, a auth.Actor, id int64,
 	})
 }
 
-// SetUserActive deactivates (sessions end at once, tokens stop working) or reactivates a user.
-// Nobody can deactivate themselves, and the last active admin stays.
-func (s *Service) SetUserActive(ctx context.Context, a auth.Actor, id int64, active bool) error {
-	if err := s.adminOnly(a); err != nil {
-		return err
-	}
-	if !active && id == a.UserID {
-		return rule("you cannot deactivate yourself")
-	}
-	return s.tx(func(tx *sql.Tx) error {
-		var admin bool
-		if err := tx.QueryRow(`SELECT is_superadmin FROM users WHERE id = ?`, id).Scan(&admin); err != nil {
-			if err == sql.ErrNoRows {
-				return ErrNotFound
-			}
-			return err
-		}
-		if !active && admin {
-			if n, err := activeSuperadmins(tx, id); err != nil {
-				return err
-			} else if n == 0 {
-				return rule("there must be at least one active superadmin")
-			}
-		}
-		if !active {
-			if err := guardOrgAdminLoss(tx, id); err != nil {
-				return err
-			}
-		}
-		var at any
-		if !active {
-			at = s.nowMs()
-		}
-		if _, err := tx.Exec(`UPDATE users SET deactivated_at = ? WHERE id = ?`, at, id); err != nil {
-			return err
-		}
-		if !active {
-			if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
-				return err
-			}
-		}
-		return s.journal(ctx, tx, a, change{Operation: "user.active", Target: userTarget(id), Event: "admin.updated", Changes: map[string]any{"active": active}})
-	})
-}
-
 // ForcePasswordReset signs the user out everywhere; their next session can only change the password.
 // Tokens keep working: they are separate credentials the user or an admin revokes on their own.
 func (s *Service) ForcePasswordReset(ctx context.Context, a auth.Actor, id int64) error {
@@ -124,7 +91,7 @@ func (s *Service) ForcePasswordReset(ctx context.Context, a auth.Actor, id int64
 		return err
 	}
 	return s.tx(func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE users SET must_change_password = 1 WHERE id = ? AND deactivated_at IS NULL`, id)
+		res, err := tx.Exec(`UPDATE users SET must_change_password = 1 WHERE id = ? AND status = 'active'`, id)
 		if err != nil {
 			return err
 		}
@@ -242,7 +209,7 @@ func (s *Service) GrantSuperadmin(ctx context.Context, email string) error {
 	a := auth.Actor{Kind: auth.KindSystem}
 	return s.tx(func(tx *sql.Tx) error {
 		var id int64
-		err := tx.QueryRow(`SELECT id FROM users WHERE email = ? AND deactivated_at IS NULL`, strings.TrimSpace(email)).Scan(&id)
+		err := tx.QueryRow(`SELECT id FROM users WHERE email = ? AND status = 'active'`, strings.TrimSpace(email)).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return invalid("no active account has that email")
 		}

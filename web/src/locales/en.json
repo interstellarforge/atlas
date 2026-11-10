@@ -48,7 +48,8 @@
       "subtitle": "Welcome back. Sign in to continue.",
       "code": "Authentication code",
       "codeHint": "From your authenticator app, or one of your recovery codes.",
-      "codeNeeded": "This account uses two-factor authentication. Enter your code to continue."
+      "codeNeeded": "This account uses two-factor authentication. Enter your code to continue.",
+      "suspended": "This account is suspended. Contact your administrator."
     },
     "quote": "A clearer tomorrow builds from a more focused today.",
     "register": {
@@ -73,7 +74,9 @@
     "count": "{count} projects",
     "progress": "Share of items done",
     "items": "items",
-    "backlog": "Backlog"
+    "backlog": "Backlog",
+    "noOrganizationTitle": "You are not part of an organization yet",
+    "noOrganization": "Ask the admin of your organization to invite you. Once you are in, your projects appear here."
   },
   "projects": {
     "create": "New project",

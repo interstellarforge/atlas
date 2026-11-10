@@ -126,7 +126,7 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 	}
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "project_create",
-		Description: "Create a project, optionally from a project template (workflow, labels, item templates); only a SUPERADMIN or an organization ADMIN may create projects. Tokens limited to specific projects cannot create new ones.",
+		Description: "Create a project, optionally from a project template (workflow, labels, item templates); only an organization ADMIN (or a SUPERADMIN under a full support grant) may create projects. Tokens limited to specific projects cannot create new ones.",
 		Annotations: &sdk.ToolAnnotations{DestructiveHint: ptr(false)},
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in projectCreateIn) (*sdk.CallToolResult, any, error) {
 		out, failed := write(ctx, svc, writes, a, 1, "project_create", in.IdempotencyKey, in, func(ctx context.Context, s *core.Service) (map[string]any, error) {

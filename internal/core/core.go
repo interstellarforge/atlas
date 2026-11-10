@@ -63,6 +63,8 @@ type Service struct {
 	hooksHTTP bool
 	// readmes caches fetched READMEs per project key (ADR-0013).
 	readmes *readmeCache
+	// support throttles the audit entry for reading under a support grant (ADR-0031).
+	support *supportAudit
 }
 
 // SetNotifier registers a callback that runs after every committed mutation, so realtime
@@ -83,7 +85,8 @@ func (s *Service) ReadableProjectKeys(a auth.Actor) (map[string]bool, error) {
 }
 
 func New(d *db.DB, users *auth.Service) *Service {
-	return &Service{db: d, users: users, now: time.Now, readmes: &readmeCache{m: map[string]readmeEntry{}}}
+	return &Service{db: d, users: users, now: time.Now, readmes: &readmeCache{m: map[string]readmeEntry{}},
+		support: &supportAudit{seen: map[[2]int64]int64{}}}
 }
 
 func (s *Service) nowMs() int64 { return s.now().UnixMilli() }
@@ -199,15 +202,13 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	if !st.active {
 		return Project{}, "", ErrForbidden
 	}
-	if !st.super {
-		var hidden bool
-		if err := q.QueryRow(`SELECT EXISTS (SELECT 1 FROM organizations WHERE id = ? AND status = 'archived')`, p.OrganizationID).Scan(&hidden); err != nil {
-			return Project{}, "", err
-		} else if hidden {
-			return Project{}, "", ErrNotFound // an archived organization hides its projects
-		}
+	var hidden bool
+	if err := q.QueryRow(`SELECT EXISTS (SELECT 1 FROM organizations WHERE id = ? AND status = 'archived')`, p.OrganizationID).Scan(&hidden); err != nil {
+		return Project{}, "", err
+	} else if hidden {
+		return Project{}, "", ErrNotFound // an archived organization hides its projects
 	}
-	lvl, err := projectLevel(q, a.UserID, st, p.OrganizationID, p.ID)
+	lvl, grant, err := projectLevel(q, a.UserID, st, p.OrganizationID, p.ID, s.nowMs())
 	if err != nil {
 		return Project{}, "", err
 	}
@@ -215,11 +216,16 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	switch {
 	case lvl == levelNone:
 		return Project{}, "", ErrNotFound
+	case lvl == levelSupport && !supportAllows(act):
+		return Project{}, "", ErrForbidden
 	case lvl == levelMember && !memberAllows(act):
 		return Project{}, "", ErrForbidden
+	case lvl == levelSupport:
+		role = "support"
 	case lvl == levelAdmin:
 		role = "admin"
 	}
+	s.noteSupport(a, p.OrganizationID.Int64, grant, act)
 	p.Role = role
 	return p, role, nil
 }
@@ -236,30 +242,39 @@ func (s *Service) readableProjects(q queryer, a auth.Actor) (map[int64]string, e
 	if !st.active {
 		return nil, ErrForbidden
 	}
-	query := `SELECT id, key FROM projects`
-	args := []any{}
-	if !st.super {
-		query = `SELECT p.id, p.key FROM projects p
-			JOIN organizations o ON o.id = p.organization_id AND o.status = 'active'
-			JOIN organization_memberships om ON om.organization_id = o.id AND om.user_id = ?
-			WHERE om.role = 'admin' OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = ?)`
-		args = append(args, a.UserID, a.UserID)
-	}
-	rows, err := q.Query(query, args...)
+	// A project is readable through an organization membership (ADMIN, or USER with a project row) or, in a SUPERADMIN
+	// session only, through a valid support grant of its organization (ADR-0031). grant_id is 0 for a membership.
+	rows, err := q.Query(`SELECT p.id, p.key, o.id,
+			CASE WHEN om.user_id IS NOT NULL AND (om.role = 'admin' OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = ?)) THEN 0
+			ELSE g.gid END
+		FROM projects p JOIN organizations o ON o.id = p.organization_id AND o.status = 'active'
+		LEFT JOIN organization_memberships om ON om.organization_id = o.id AND om.user_id = ?
+		LEFT JOIN (SELECT organization_id, MIN(id) AS gid FROM support_grants WHERE ? AND revoked_at IS NULL
+			AND (expires_at IS NULL OR expires_at > ?) GROUP BY organization_id) g ON g.organization_id = o.id
+		WHERE (om.user_id IS NOT NULL AND (om.role = 'admin' OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = ?)))
+			OR g.gid IS NOT NULL`, a.UserID, a.UserID, st.support, s.nowMs(), a.UserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[int64]string{}
+	viaGrant := map[int64]int64{} // grant id -> organization id
 	for rows.Next() {
-		var id int64
+		var id, org int64
+		var grant sql.NullInt64
 		var key string
-		if err := rows.Scan(&id, &key); err != nil {
+		if err := rows.Scan(&id, &key, &org, &grant); err != nil {
 			return nil, err
 		}
 		if a.CanProject(key) {
 			out[id] = key
+			if grant.Valid && grant.Int64 != 0 {
+				viaGrant[grant.Int64] = org
+			}
 		}
+	}
+	for grant, org := range viaGrant {
+		s.noteSupport(a, org, grant, actView)
 	}
 	return out, rows.Err()
 }

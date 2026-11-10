@@ -225,6 +225,7 @@ func (s *Server) oauthDecide(w http.ResponseWriter, r *http.Request) {
 	case "login":
 		user, session, csrf, err := s.auth.Login(r.PostForm.Get("email"), r.PostForm.Get("password"), r.PostForm.Get("code"), s.clientKey(r))
 		d := pageData{Mode: "login", Client: c.Name, Req: req, Email: r.PostForm.Get("email")}
+		var acct *auth.AccountError
 		switch {
 		case errors.Is(err, auth.ErrTOTPRequired):
 			d.Totp = true
@@ -237,6 +238,10 @@ func (s *Server) oauthDecide(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, auth.ErrInvalidCredentials):
 			d.Error = "Invalid email or password."
 			s.page(w, http.StatusUnauthorized, d)
+			return
+		case errors.As(err, &acct):
+			d.Error = "This account is " + acct.State + "."
+			s.page(w, http.StatusForbidden, d)
 			return
 		case err != nil:
 			s.internal(w, r, err)

@@ -31,6 +31,17 @@ func (s *Server) registerIdentity(mux *http.ServeMux, protect func(http.HandlerF
 	mux.Handle("POST /api/v1/admin/invites", protect(s.adminCreateInvite))
 	mux.Handle("DELETE /api/v1/admin/invites/{id}", protect(s.adminRevokeInvite))
 	mux.Handle("GET /api/v1/admin/audit/export", protect(s.adminAuditExport))
+	mux.Handle("GET /api/v1/organizations", protect(s.listOrganizations))
+}
+
+// listOrganizations returns the caller's own active organizations (every organization for a SUPERADMIN).
+func (s *Server) listOrganizations(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.ListOrganizations(r.Context(), actor(r))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list})
 }
 
 // publicPolicy tells the login page whether to offer registration and how long passwords must be.

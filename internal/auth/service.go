@@ -32,6 +32,11 @@ var (
 	ErrTOTPRequired = errors.New("two-factor code required")
 )
 
+// AccountError means the credentials were right but the account is not active (ADR-0030): pending, rejected or suspended.
+type AccountError struct{ State string }
+
+func (e *AccountError) Error() string { return "account " + e.State }
+
 type User struct {
 	ID           int64  `json:"id"`
 	Email        string `json:"email"`
@@ -132,9 +137,10 @@ func (s *Service) Login(email, password, code, clientKey string) (user User, ses
 	var totpOn bool
 	var totpSecret sql.NullString
 	var lastStep int64
-	err = s.db.R.QueryRow(`SELECT id, email, name, is_superadmin, password_hash, avatar_path IS NOT NULL, totp_enabled, totp_secret, totp_last_step, must_change_password
-		FROM users WHERE email = ? AND deactivated_at IS NULL`, email).
-		Scan(&user.ID, &user.Email, &user.Name, &user.IsSuperadmin, &hash, &user.Avatar, &totpOn, &totpSecret, &lastStep, &user.MustChangePassword)
+	var state string
+	err = s.db.R.QueryRow(`SELECT id, email, name, is_superadmin, password_hash, avatar_path IS NOT NULL, totp_enabled, totp_secret, totp_last_step, must_change_password, status
+		FROM users WHERE email = ?`, email).
+		Scan(&user.ID, &user.Email, &user.Name, &user.IsSuperadmin, &hash, &user.Avatar, &totpOn, &totpSecret, &lastStep, &user.MustChangePassword, &state)
 	ok := false
 	if err == nil {
 		ok, _ = VerifyPassword(password, hash)
@@ -158,6 +164,9 @@ func (s *Service) Login(email, password, code, clientKey string) (user User, ses
 			return User{}, "", "", ErrInvalidCredentials
 		}
 		user.TOTP = true
+	}
+	if state != "active" {
+		return User{}, "", "", &AccountError{State: state} // only after the full credentials were right: no account enumeration
 	}
 
 	session = randomToken(32)
@@ -200,7 +209,7 @@ func (s *Service) SessionActor(session string) (Actor, error) {
 	var a Actor
 	var exp int64
 	err := s.db.R.QueryRow(`SELECT s.user_id, s.csrf_token, s.expires_at, s.rowid, u.must_change_password
-		FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(session)).
+		FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.status = 'active'`, hashToken(session)).
 		Scan(&a.UserID, &a.CSRF, &exp, &a.SessionID, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && exp < time.Now().UnixMilli()) {
 		return Actor{}, ErrUnauthenticated
@@ -307,7 +316,7 @@ func (s *Service) TokenActor(plain string) (Actor, error) {
 	var projects sql.NullString
 	var exp, rev sql.NullInt64
 	err := s.db.R.QueryRow(`SELECT t.id, t.user_id, t.scopes, t.projects, t.expires_at, t.revoked_at
-		FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ? AND u.deactivated_at IS NULL`, hashToken(plain)).
+		FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ? AND u.status = 'active'`, hashToken(plain)).
 		Scan(&a.TokenID, &a.UserID, &scopes, &projects, &exp, &rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Actor{}, ErrUnauthenticated

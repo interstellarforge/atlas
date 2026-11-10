@@ -224,12 +224,12 @@
     <h2 id="users-title">{t("admin.nav.users")}</h2>
     <ul class="list">
       {#each users as u (u.id)}
-        <li class:off={Boolean(u.deactivated_at)}>
+        <li class:off={u.status !== "active"}>
           <div>
             <strong>{u.name}</strong>
             <span class="muted">{u.email}</span>
           </div>
-          {#if u.deactivated_at}<span class="chip warn"
+          {#if u.status === "suspended"}<span class="chip warn"
               >{t("admin.deactivated")}</span
             >{/if}
           {#if u.is_superadmin}<span class="chip type">{t("admin.admin")}</span
@@ -239,9 +239,12 @@
             >{/if}
           <button
             type="button"
+            disabled={!u.is_superadmin && u.status !== "active"}
             onclick={() =>
               void run(t("settings.saved"), async () => {
-                await patchAdminUser(u.id, { is_superadmin: !u.is_superadmin });
+                await patchAdminUser(u.id, {
+                  is_superadmin: !u.is_superadmin,
+                });
                 await loadUsers();
               })}
             >{u.is_superadmin
@@ -257,7 +260,7 @@
           >
           <button
             type="button"
-            disabled={Boolean(u.deactivated_at)}
+            disabled={u.status !== "active"}
             onclick={() =>
               void run(t("admin.passwordForced"), async () => {
                 await patchAdminUser(u.id, { force_password_reset: true });
@@ -270,11 +273,11 @@
             onclick={() =>
               void run(t("settings.saved"), async () => {
                 await patchAdminUser(u.id, {
-                  active: Boolean(u.deactivated_at),
+                  active: u.status === "suspended",
                 });
                 await loadUsers();
               })}
-            >{u.deactivated_at
+            >{u.status === "suspended"
               ? t("admin.activate")
               : t("admin.deactivate")}</button
           >

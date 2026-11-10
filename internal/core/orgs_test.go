@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kees/atlas/internal/auth"
 	"github.com/kees/atlas/internal/core"
@@ -77,6 +78,12 @@ func TestLastOrganizationAdminGuard(t *testing.T) {
 	if err := e.svc.SetOrgMember(ctx, e.alice, "ACME", e.aliceID, "user", true); !errors.Is(err, core.ErrForbidden) {
 		t.Fatalf("allow_orphan by an organization admin: %v", err)
 	}
+	if err := e.svc.SetOrgMember(ctx, e.admin, "ACME", e.aliceID, "user", true); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a SUPERADMIN without a support grant changed an organization's admins: %v", err)
+	}
+	if _, err := e.svc.GrantSupport(ctx, e.alice, "ACME", "full", 1, false); err != nil {
+		t.Fatal(err)
+	}
 	if err := e.svc.SetOrgMember(ctx, e.admin, "ACME", e.aliceID, "user", true); err != nil {
 		t.Fatal(err)
 	}
@@ -106,16 +113,16 @@ func TestOrganizationMembershipAndArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	// a project member must belong to the project's organization
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.bobID, "member"); err == nil {
+	if err := e.svc.SetMember(ctx, e.alice, "EXO", e.bobID, "member"); err == nil {
 		t.Fatal("a user outside the organization became a project member")
 	}
 	if err := e.svc.SetOrgMember(ctx, e.alice, "ACME", e.bobID, "user", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.SetMember(ctx, e.admin, "EXO", e.bobID, "member"); err != nil {
+	if err := e.svc.SetMember(ctx, e.alice, "EXO", e.bobID, "member"); err != nil {
 		t.Fatal(err)
 	}
-	// archive hides the project from members, not from the SUPERADMIN
+	// archive hides the project from everyone, the SUPERADMIN included; the organization itself stays listed
 	if err := e.svc.SetOrganizationArchived(ctx, e.admin, "ACME", true); err != nil {
 		t.Fatal(err)
 	}
@@ -125,8 +132,11 @@ func TestOrganizationMembershipAndArchive(t *testing.T) {
 	if list, _ := e.svc.ListProjects(ctx, e.bob); len(list) != 0 {
 		t.Fatalf("archived organization still lists its project: %+v", list)
 	}
-	if _, err := e.svc.GetProject(ctx, e.admin, "EXO"); err != nil {
-		t.Fatal(err)
+	if _, err := e.svc.GetProject(ctx, e.admin, "EXO"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("an archived organization's project is visible to the SUPERADMIN: %v", err)
+	}
+	if o, err := e.svc.GetOrganization(ctx, e.admin, "ACME"); err != nil || o.Status != "archived" {
+		t.Fatalf("the SUPERADMIN must still see the archived organization: %v %+v", err, o)
 	}
 	if err := e.svc.SetOrganizationArchived(ctx, e.admin, "ACME", false); err != nil {
 		t.Fatal(err)
@@ -265,7 +275,7 @@ func TestProjectAccessMatrix(t *testing.T) {
 		a    auth.Actor
 		want map[string]error // nil = allowed
 	}{
-		{"SUPERADMIN without membership", super2, all(nil)},
+		{"SUPERADMIN without membership or grant", super2, all(core.ErrNotFound)},
 		{"organization ADMIN (inherited)", e.alice, all(nil)},
 		{"project member", e.bob, map[string]error{"view": nil, "item.create": nil, "project.update": core.ErrForbidden, "members": core.ErrForbidden}},
 		{"organization member without project", dan, all(core.ErrNotFound)},
@@ -273,14 +283,51 @@ func TestProjectAccessMatrix(t *testing.T) {
 		{"user without organization", nobody, all(core.ErrNotFound)},
 		{"suspended member", gone, all(core.ErrForbidden)},
 	}
-	for _, r := range rows {
+	check := func(who string, a auth.Actor, want map[string]error) {
+		t.Helper()
 		for act, f := range actions {
-			got := f(r.a)
-			if (r.want[act] == nil) != (got == nil) || (got != nil && !errors.Is(got, r.want[act])) {
-				t.Errorf("%s / %s: got %v, want %v", r.who, act, got, r.want[act])
+			got := f(a)
+			if (want[act] == nil) != (got == nil) || (got != nil && !errors.Is(got, want[act])) {
+				t.Errorf("%s / %s: got %v, want %v", who, act, got, want[act])
 			}
 		}
 	}
+	for _, r := range rows {
+		check(r.who, r.a, r.want)
+	}
+
+	// Support access (ADR-0031): only the ADMIN of the organization gives it, only a SUPERADMIN session uses it.
+	if _, err := e.svc.GrantSupport(ctx, super2, "MAIN", "full", 1, false); !errors.Is(err, core.ErrForbidden) && !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("a SUPERADMIN granted themselves support access: %v", err)
+	}
+	if _, err := e.svc.GrantSupport(ctx, e.bob, "MAIN", "full", 1, false); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a member granted support access: %v", err)
+	}
+	ro, err := e.svc.GrantSupport(ctx, e.alice, "MAIN", "read_only", 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("SUPERADMIN with a read-only grant", super2, map[string]error{"view": nil, "item.create": core.ErrForbidden, "project.update": core.ErrForbidden, "members": core.ErrForbidden})
+	token := auth.Actor{Kind: auth.KindToken, UserID: super2.UserID, TokenID: 1, Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}
+	check("token of a SUPERADMIN with a grant", token, all(core.ErrNotFound))
+	if err := e.svc.RevokeSupport(ctx, e.alice, "MAIN", ro.ID); err != nil {
+		t.Fatal(err)
+	}
+	check("SUPERADMIN after the grant was revoked", super2, all(core.ErrNotFound))
+	if _, err := e.svc.GrantSupport(ctx, e.alice, "MAIN", "full", 1, false); err != nil {
+		t.Fatal(err)
+	}
+	check("SUPERADMIN with a full grant", super2, all(nil))
+	if err := e.svc.SetOrgMember(ctx, super2, "MAIN", super2.UserID, "admin", false); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a SUPERADMIN under a grant made their own access permanent: %v", err)
+	}
+	if _, err := e.svc.GrantSupport(ctx, super2, "MAIN", "full", 720, false); err == nil {
+		t.Fatal("a SUPERADMIN under a grant created another grant")
+	}
+	// expiry: the same grant stops working when its time has passed
+	later := time.Now().Add(2 * time.Hour)
+	e.svc.SetClock(func() time.Time { return later })
+	check("SUPERADMIN after the grant expired", super2, all(core.ErrNotFound))
 }
 
 func mkUser(t *testing.T, e *env, email string) int64 {
@@ -331,11 +378,11 @@ func TestUserListingIsScopedToOrganizations(t *testing.T) {
 		want []string
 		not  []string
 	}{
-		"member sees self and the organization's admin": {e.bob, []string{"bob@x.io", "admin@x.io"}, []string{"carol@x.io", "alice@x.io", "stranger@x.io"}},
-		"organization member without a shared project":  {e.carol, []string{"carol@x.io", "admin@x.io"}, []string{"bob@x.io", "alice@x.io"}},
-		"admin of another organization":                 {e.alice, []string{"alice@x.io"}, []string{"bob@x.io", "carol@x.io", "admin@x.io"}},
-		"nobody":                                        {stranger, []string{"stranger@x.io"}, []string{"bob@x.io", "alice@x.io", "admin@x.io"}},
-		"SUPERADMIN":                                    {e.admin, []string{"bob@x.io", "alice@x.io", "stranger@x.io", "carol@x.io"}, nil},
+		"member sees self and the organization's admin":     {e.bob, []string{"bob@x.io", "admin@x.io"}, []string{"carol@x.io", "alice@x.io", "stranger@x.io"}},
+		"organization member without a shared project":      {e.carol, []string{"carol@x.io", "admin@x.io"}, []string{"bob@x.io", "alice@x.io"}},
+		"admin of another organization":                     {e.alice, []string{"alice@x.io"}, []string{"bob@x.io", "carol@x.io", "admin@x.io"}},
+		"nobody":                                            {stranger, []string{"stranger@x.io"}, []string{"bob@x.io", "alice@x.io", "admin@x.io"}},
+		"SUPERADMIN (people outside a shared organization)": {e.admin, []string{"admin@x.io"}, []string{"stranger@x.io", "alice@x.io"}},
 	} {
 		got := sees(c.who)
 		for _, w := range c.want {
@@ -356,5 +403,28 @@ func TestUserListingIsScopedToOrganizations(t *testing.T) {
 	}
 	if got := sees(e.carol); !got["bob@x.io"] || got["alice@x.io"] {
 		t.Errorf("an organization admin sees its members only: %v", got)
+	}
+}
+
+// ADR-0031: the Atlas admin appoints the first ADMIN of an organization that has none, and only then.
+func TestSuperadminAppointsFirstAdminOnly(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.org("EMPTY", e.aliceID)
+	e.org("BUSY", e.carolID)
+	if err := e.svc.SetOrgMember(ctx, e.admin, "BUSY", e.bobID, "admin", false); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("the SUPERADMIN added an ADMIN to an organization that has one: %v", err)
+	}
+	if _, err := e.db.W.Exec(`UPDATE organization_memberships SET role = 'user' WHERE user_id = ? AND organization_id = (SELECT id FROM organizations WHERE key = 'EMPTY')`, e.aliceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.SetOrgMember(ctx, e.admin, "EMPTY", e.admin.UserID, "admin", false); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("the SUPERADMIN appointed themselves: %v", err)
+	}
+	if err := e.svc.SetOrgMember(ctx, e.admin, "EMPTY", e.bobID, "admin", false); err != nil {
+		t.Fatalf("appointing the first admin: %v", err)
+	}
+	if err := e.svc.SetOrgMember(ctx, e.admin, "EMPTY", e.carolID, "admin", false); !errors.Is(err, core.ErrForbidden) {
+		t.Fatalf("a second appointment after the organization has an ADMIN again: %v", err)
 	}
 }

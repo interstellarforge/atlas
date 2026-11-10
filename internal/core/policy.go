@@ -17,7 +17,7 @@ import (
 // Policy is the instance-wide account policy, kept in instance_settings. Missing keys use these defaults.
 type Policy struct {
 	MinPasswordLength int    `json:"min_password_length"` // 8-128
-	Registration      string `json:"registration"`        // closed (admins create accounts), invite or open
+	Registration      string `json:"registration"`        // closed (the SUPERADMIN creates accounts), invite or open; every account starts without access (ADR-0031)
 	AllowedDomain     string `json:"allowed_domain"`      // open registration only: e.g. example.com; empty = any
 	SessionDays       int    `json:"session_days"`        // 1-90
 	DoneVisibleDays   int    `json:"done_visible_days"`   // 0-3650: lists hide completed items not updated for this long; 0 = never
@@ -219,8 +219,10 @@ func (s *Service) RevokeInvite(ctx context.Context, a auth.Actor, id int64) erro
 	})
 }
 
-// Register creates an account without an admin: with a valid invite, or when the policy allows open
-// registration (optionally for one email domain). Everything else is refused.
+// Register creates an account without an admin (ADR-0031): with a valid invite, or when the policy allows open
+// registration (optionally for one email domain). The account is ACTIVE and has no organization, so no access until
+// an organization takes it in. The answer never reveals whether the email already had an account: the User carries
+// no id, and a taken email changes nothing (and consumes no invite).
 func (s *Service) Register(ctx context.Context, email, name, password, invite string) (User, error) {
 	email, err := validEmail(email)
 	if err != nil {
@@ -238,7 +240,7 @@ func (s *Service) Register(ctx context.Context, email, name, password, invite st
 	if err != nil {
 		return User{}, err
 	}
-	var u User
+	u := User{Email: email, Name: name}
 	err = s.tx(func(tx *sql.Tx) error {
 		var inviteID int64
 		switch {
@@ -261,21 +263,21 @@ func (s *Service) Register(ctx context.Context, email, name, password, invite st
 		default:
 			return ErrForbidden
 		}
-		res, err := tx.Exec(`INSERT INTO users (email, name, password_hash, created_at) VALUES (?, ?, ?, ?)`, email, name, hash, s.nowMs())
+		now := s.nowMs()
+		res, err := tx.Exec(`INSERT INTO users (email, name, password_hash, created_at, status_changed_at) VALUES (?, ?, ?, ?, ?)`, email, name, hash, now, now)
 		if err != nil {
 			if isUnique(err) {
-				return rule("email already in use")
+				return nil // taken: same answer as for a new account, nothing changed
 			}
 			return err
 		}
-		u = User{Email: email, Name: name}
-		u.ID, _ = res.LastInsertId()
+		id, _ := res.LastInsertId()
 		if inviteID != 0 {
-			if _, err := tx.Exec(`UPDATE invites SET used_at = ?, used_by = ? WHERE id = ?`, s.nowMs(), u.ID, inviteID); err != nil {
+			if _, err := tx.Exec(`UPDATE invites SET used_at = ?, used_by = ? WHERE id = ?`, now, id, inviteID); err != nil {
 				return err
 			}
 		}
-		return s.journal(ctx, tx, auth.Actor{Kind: auth.KindHuman, UserID: u.ID}, change{Operation: "user.register", Target: userTarget(u.ID), Event: "admin.updated",
+		return s.journal(ctx, tx, auth.Actor{Kind: auth.KindHuman, UserID: id}, change{Operation: "user.register", Target: userTarget(id), Event: "admin.updated",
 			Changes: map[string]any{"invite": inviteID != 0}})
 	})
 	return u, err

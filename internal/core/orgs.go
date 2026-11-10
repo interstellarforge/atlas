@@ -32,7 +32,7 @@ type OrgMember struct {
 
 const orgSelect = `SELECT o.id, o.key, o.name, o.status, o.created_at, COALESCE(m.role, ''),
 	NOT EXISTS (SELECT 1 FROM organization_memberships x JOIN users u ON u.id = x.user_id
-		WHERE x.organization_id = o.id AND x.role = 'admin' AND u.deactivated_at IS NULL)
+		WHERE x.organization_id = o.id AND x.role = 'admin' AND u.status = 'active')
 	FROM organizations o LEFT JOIN organization_memberships m ON m.organization_id = o.id AND m.user_id = ?`
 
 func scanOrg(sc interface{ Scan(...any) error }) (Organization, error) {
@@ -75,7 +75,7 @@ func (s *Service) CreateOrganization(ctx context.Context, a auth.Actor, key, nam
 	var out Organization
 	err = s.tx(func(tx *sql.Tx) error {
 		var active bool
-		if err := tx.QueryRow(`SELECT deactivated_at IS NULL FROM users WHERE id = ?`, adminID).Scan(&active); errors.Is(err, sql.ErrNoRows) || (err == nil && !active) {
+		if err := tx.QueryRow(`SELECT status = 'active' FROM users WHERE id = ?`, adminID).Scan(&active); errors.Is(err, sql.ErrNoRows) || (err == nil && !active) {
 			return invalid("the first admin must be an active user")
 		} else if err != nil {
 			return err
@@ -125,7 +125,7 @@ func (s *Service) ListOrganizations(ctx context.Context, a auth.Actor) ([]Organi
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Organization
+	out := []Organization{}
 	for rows.Next() {
 		o, err := scanOrg(rows)
 		if err != nil {
@@ -189,7 +189,7 @@ func (s *Service) ListOrgMembers(ctx context.Context, a auth.Actor, key string) 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT u.id, u.email, u.name, m.role, u.deactivated_at IS NULL FROM organization_memberships m
+	rows, err := s.db.R.Query(`SELECT u.id, u.email, u.name, m.role, u.status = 'active' FROM organization_memberships m
 		JOIN users u ON u.id = m.user_id WHERE m.organization_id = ? ORDER BY u.name`, o.ID)
 	if err != nil {
 		return nil, err
@@ -216,6 +216,9 @@ func (s *Service) SetOrgMember(ctx context.Context, a auth.Actor, key string, us
 		o, err := s.authorizeOrg(tx, a, key, orgMembers)
 		if err != nil {
 			return err
+		}
+		if o.Role != "admin" && userID == a.UserID {
+			return ErrForbidden // acting under a support grant: never make your own access permanent
 		}
 		var exists int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE id = ?`, userID).Scan(&exists); err != nil {
@@ -249,6 +252,9 @@ func (s *Service) RemoveOrgMember(ctx context.Context, a auth.Actor, key string,
 		o, err := s.authorizeOrg(tx, a, key, orgMembers)
 		if err != nil {
 			return err
+		}
+		if o.Role != "admin" && userID == a.UserID {
+			return ErrForbidden
 		}
 		if err := s.guardLastOrgAdmin(tx, a, o, userID, allowOrphan); err != nil {
 			return err
@@ -298,7 +304,7 @@ func (s *Service) guardLastOrgAdmin(tx *sql.Tx, a auth.Actor, o Organization, us
 // isLastOrgAdmin reports whether the user is the only active ADMIN of the organization.
 func isLastOrgAdmin(q queryer, orgID, userID int64) (bool, error) {
 	var mine bool
-	err := q.QueryRow(`SELECT m.role = 'admin' AND u.deactivated_at IS NULL FROM organization_memberships m
+	err := q.QueryRow(`SELECT m.role = 'admin' AND u.status = 'active' FROM organization_memberships m
 		JOIN users u ON u.id = m.user_id WHERE m.organization_id = ? AND m.user_id = ?`, orgID, userID).Scan(&mine)
 	if errors.Is(err, sql.ErrNoRows) || !mine {
 		return false, nil
@@ -308,7 +314,7 @@ func isLastOrgAdmin(q queryer, orgID, userID int64) (bool, error) {
 	}
 	var others int
 	err = q.QueryRow(`SELECT COUNT(*) FROM organization_memberships m JOIN users u ON u.id = m.user_id
-		WHERE m.organization_id = ? AND m.role = 'admin' AND u.deactivated_at IS NULL AND m.user_id <> ?`, orgID, userID).Scan(&others)
+		WHERE m.organization_id = ? AND m.role = 'admin' AND u.status = 'active' AND m.user_id <> ?`, orgID, userID).Scan(&others)
 	return others == 0, err
 }
 
@@ -351,13 +357,9 @@ func (s *Service) projectOrganization(tx *sql.Tx, a auth.Actor, orgKey string) (
 	if !st.active || a.Projects != nil {
 		return Organization{}, ErrForbidden
 	}
-	q := `SELECT o.key FROM organizations o WHERE o.status = 'active'`
-	args := []any{}
-	if !st.super {
-		q += ` AND EXISTS (SELECT 1 FROM organization_memberships m WHERE m.organization_id = o.id AND m.user_id = ? AND m.role = 'admin')`
-		args = append(args, a.UserID)
-	}
-	rows, err := tx.Query(q+` ORDER BY o.key`, args...)
+	// Only organizations the actor administers: a SUPERADMIN has no project rights without a membership or a grant.
+	rows, err := tx.Query(`SELECT o.key FROM organizations o WHERE o.status = 'active'
+		AND EXISTS (SELECT 1 FROM organization_memberships m WHERE m.organization_id = o.id AND m.user_id = ? AND m.role = 'admin') ORDER BY o.key`, a.UserID)
 	if err != nil {
 		return Organization{}, err
 	}
@@ -373,7 +375,7 @@ func (s *Service) projectOrganization(tx *sql.Tx, a auth.Actor, orgKey string) (
 	rows.Close()
 	switch len(keys) {
 	case 0:
-		return Organization{}, ErrForbidden // only a SUPERADMIN or an organization ADMIN creates projects
+		return Organization{}, ErrForbidden // only an organization ADMIN creates projects
 	case 1:
 		return s.authorizeOrg(tx, a, keys[0], orgUpdate)
 	}

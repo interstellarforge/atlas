@@ -73,3 +73,7 @@ Errors: `ErrUnauthorized` (401), `ErrForbidden` (403), `ErrNotFound` (404), nil.
 - Behaviour change: project admins become members and lose management actions; viewers are handled by the migration review (ADR-0028).
 - Tests per ticket: authz unit matrix, 401/403/404 semantics, escalation and concurrency tests (ATL-479, ATL-438, ATL-483, ATL-490).
 - Follow-up work: ATL-435 (actor), ATL-436 (`authz.go`), ATL-478 (remove roles).
+
+## Amendment (ADR-0031)
+
+The SUPERADMIN no longer holds every project action. It reaches an organization's projects only through its own memberships or a support grant created by that organization's ADMIN (`support_grants`, read live); `org.any` and the SUPERADMIN branch of `projectLevel`, `readableProjects`, `authorizeOrg` and `visibleUsersQuery` are gone. Server actions are unchanged.

@@ -48,7 +48,7 @@ func TestAdminOnlyAndDeactivation(t *testing.T) {
 	if w := e.do("GET", "/api/v1/projects", nil, annBearer); w.Code != 401 {
 		t.Fatalf("deactivated user's token works: %d", w.Code)
 	}
-	if w := e.do("POST", "/api/v1/auth/login", map[string]string{"email": "ann@example.com", "password": "password-123"}, nil); w.Code != 401 {
+	if w := e.do("POST", "/api/v1/auth/login", map[string]string{"email": "ann@example.com", "password": "password-123"}, nil); w.Code != 403 {
 		t.Fatalf("deactivated user signed in: %d", w.Code)
 	}
 	if w := e.do("PATCH", "/api/v1/admin/users/"+id, map[string]any{"active": true}, kees); w.Code != 204 {

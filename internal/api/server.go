@@ -97,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAccount(mux, protect)
 	s.registerProjectTokens(mux, protect)
 	s.registerAdmin(mux, protect)
+	s.registerSupport(mux, protect)
 	s.registerTemplates(mux, protect)
 	s.registerIdentity(mux, protect)
 	s.registerInsight(mux, protect)

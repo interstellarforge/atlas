@@ -93,9 +93,11 @@ func TestPreferencesAndMutedNotifications(t *testing.T) {
 		t.Fatalf("preferences: %v", got)
 	}
 	// Bob follows an item and Kees changes it. With "followed" muted Bob gets nothing; unmuted he gets one.
-	if _, err := e.auth.CreateUser("bob@example.com", "Bob", "password-123", true); err != nil {
+	bobUser, err := e.auth.CreateUser("bob@example.com", "Bob", "password-123", false)
+	if err != nil {
 		t.Fatal(err)
 	}
+	e.orgAdmin(t, bobUser.ID) // Bob administers the organization, so he reaches EXO
 	bobLogin := e.do("POST", "/api/v1/auth/login", map[string]string{"email": "bob@example.com", "password": "password-123"}, nil)
 	bobCSRF := decodeBody[struct {
 		CSRF string `json:"csrf_token"`

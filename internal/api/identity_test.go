@@ -168,7 +168,7 @@ func TestDeleteAccount(t *testing.T) {
 	if w := e.do("POST", "/api/v1/auth/login", map[string]string{"email": "ann@example.com", "password": "password-123"}, nil); w.Code != 401 {
 		t.Fatalf("deleted user signed in: %d", w.Code)
 	}
-	if body := e.do("GET", "/api/v1/users", nil, kees).Body.String(); !strings.Contains(body, "Deleted user") || strings.Contains(body, "ann@example.com") {
+	if body := e.do("GET", "/api/v1/admin/users", nil, kees).Body.String(); !strings.Contains(body, "Deleted user") || strings.Contains(body, "ann@example.com") {
 		t.Fatalf("user not anonymised: %s", body)
 	}
 	if body := e.do("GET", "/api/v1/items/EXO-1", nil, kees).Body.String(); !strings.Contains(body, "by ann") {

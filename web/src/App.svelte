@@ -147,6 +147,8 @@
       if (e instanceof ApiError && e.code === "totp_required") {
         needCode = true;
         notice = t("auth.login.codeNeeded");
+      } else if (e instanceof ApiError && e.code.startsWith("account_")) {
+        error = t("auth.login.suspended");
       } else if (e instanceof ApiError && e.status === 429)
         error = t("auth.login.rateLimited");
       else if (e instanceof ApiError && e.status === 401)

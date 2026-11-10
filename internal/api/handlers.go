@@ -28,6 +28,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, session, csrf, err := s.auth.Login(in.Email, in.Password, in.Code, s.clientKey(r))
+	var acct *auth.AccountError
 	switch {
 	case errors.Is(err, auth.ErrTOTPRequired):
 		writeError(w, http.StatusUnauthorized, "totp_required", "enter your two-factor code")
@@ -38,6 +39,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "invalid email or password")
+		return
+	case errors.As(err, &acct):
+		writeError(w, http.StatusForbidden, "account_"+acct.State, "this account is "+acct.State)
 		return
 	case err != nil:
 		s.internal(w, r, err)

@@ -46,7 +46,7 @@
 ## Audit hardening (epic SEC, ADR-0017)
 
 - Creating users is a human-admin session action, journaled like other mutations (`user.create`); tokens, also admin tokens, get `forbidden`.
-- People are visible only through a shared organization or project (`visibleUsersQuery`); tokens list only users who share a project they may access; nobody but a SUPERADMIN sees the SUPERADMIN flag; avatars follow the same rule (`TestUserListingIsScoped`, `TestUserListingIsScopedToOrganizations`).
+- People are visible only through a shared organization or project (`visibleUsersQuery`); tokens list only users who share a project they may access; nobody but a SUPERADMIN sees the SUPERADMIN flag, and a SUPERADMIN sees no one outside their own organizations and projects (accounts for suspension: `/admin/users`); avatars follow the same rule (`TestUserListingIsScoped`, `TestUserListingIsScopedToOrganizations`).
 - Login and registration throttles key on the connection address. Behind a reverse proxy set `ATLAS_TRUSTED_PROXIES`; only then is `X-Forwarded-For` read, from the right, skipping trusted hops.
 - The HTTP server has a 2 minute `ReadTimeout`; JSON bodies must hold exactly one document.
 - The CSP forbids inline scripts; the theme bootstrap is `/theme-init.js`.
@@ -62,7 +62,7 @@
 - Deactivating a user deletes their sessions and makes their tokens fail; sign-in is refused. The last active SUPERADMIN cannot be demoted, suspended or deleted: the core refuses in the same `BEGIN IMMEDIATE` transaction, and triggers on `users` (migration 0030) abort any other writer, with no override (tested with two database handles, a busy lock and a failing audit write). Neither can the last active ADMIN of an organization, and nobody deactivates themselves.
 - Project tokens never exceed their owner: access is resolved live from the owner's current rights. When the owner leaves the project or the organization (or an organization ADMIN is demoted), those tokens are revoked.
 - A SUPERADMIN is made only by the first-install bootstrap (`ATLAS_ADMIN_EMAIL`), the data migration (`ATLAS_SUPERADMIN_EMAIL`), an existing SUPERADMIN in a human session, or the operator command `atlas superadmin grant <email>` (audited as `system:cli`). Invites, registration, organization ADMINs, tokens (even a SUPERADMIN's) and MCP cannot (`TestOnlyASuperadminCanMakeASuperadmin`).
-- Authorization follows ADR-0029: SUPERADMIN (`users.is_superadmin`), organization ADMIN and USER with a project membership (`core.MemberActions`). `internal/core/authz.go` is the only place that decides; `TestLegacyAuthorizationIsNotRead` fails if other code reads the legacy `is_admin` column or the retired role tables, `TestProjectAccessMatrix` and `TestAuthorizationMatrix` cover actor × action × resource and the 401/403/404 mapping. The rights tab shows the single member role read-only.
+- Authorization follows ADR-0029 as amended by ADR-0031: the SUPERADMIN (`users.is_superadmin`) runs Atlas and has no project or organization-data access of its own; organization ADMIN and USER with a project membership (`core.MemberActions`) do the work. A SUPERADMIN user session (never a token) reaches an organization only through a support grant that its ADMIN created (`support_grants`: read_only = view and export, full = every action, time-limited or until revoked, read live, revocable at once; use is audited as `support.access`, reading at most once per 10 minutes per grant and user). Under a grant a SUPERADMIN can neither create or extend grants nor change their own membership. A SUPERADMIN may appoint the first ADMIN of an organization that has none. `internal/core/authz.go` is the only place that decides; `TestLegacyAuthorizationIsNotRead` fails if other code reads the legacy `is_admin` column or the retired role tables, `TestProjectAccessMatrix` and `TestAuthorizationMatrix` cover actor × action × resource and the 401/403/404 mapping. The rights tab shows the single member role read-only.
 
 ### Two-factor authentication, registration and deletion
 
@@ -116,6 +116,17 @@
 - Abuse: registration and failed token requests count against a per-address limit (5 per 15 minutes); at most 1000 clients exist. Registered clients are not shown to users beyond their name on the consent page: treat the name as untrusted text (it is escaped).
 - The `resource` parameter, when sent, must equal `<base>/mcp` (RFC 8707). Set `ATLAS_PUBLIC_URL`; without it the metadata is built from the request's Host header.
 
+### Registration and invite review (ATL-376, ADR-0030)
+
+Result of reviewing `POST /auth/register`, invites and login, with tests in `internal/api/account_status_test.go`.
+
+- **No self-chosen privilege.** The body decoder rejects unknown fields (400), so `is_superadmin`, `status`, `role` or an organization cannot be sent. Register creates an `active` account without any organization (no access) and never `is_superadmin`; invites carry no role field. Only a SUPERADMIN session or the operator command makes a SUPERADMIN.
+- **Taken email.** The answer is the same 201 with no user id as for a new email; nothing changes and a presented invite is not consumed. The password hash is computed before any lookup, so the difference in time is one indexed query.
+- **Errors.** Password, name, domain and invite failures do not depend on whether the email exists. Refusals (closed door, bad invite) count against the shared per-client limiter; login failures (5 per 15 minutes per email and client) are unchanged and identical for unknown and non-active accounts.
+- **Cookies and CSRF.** Session cookie: HttpOnly, SameSite=Lax, Secure unless `ATLAS_COOKIE_SECURE=false`. Register and login are public JSON endpoints and create no state besides the account itself; every state-changing session request still needs the CSRF header.
+- **Residual risk (accepted).** Without email verification, someone who registers an address and then tries to sign in with the password they chose learns whether the address already had an account (sign-in works for a new one, 401 for an existing one). Mitigations: the login limiter and the register limiter; a new account has no access anyway (ADR-0031). Closing it needs verified email, which is out of scope for the MVP.
+- **For M3.** Organization invitations must keep the same answer whether or not the email has an account (ATL-414 and the invitation tests).
+
 ## Authorization audit matrix (ATL-374)
 
 Every REST route, MCP tool and other surface with its protection, target rule and expected answer (ADR-0029). Visibility comes first: a resource the caller may not know about answers 404, identical to a missing one; a visible resource without the needed right answers 403; no or invalid credentials, or a suspended account, answer 401. `TestAuthorizationMatrix` runs every route below as anonymous, suspended, plain, organization-admin, no-organization and SUPERADMIN actors, `TestMCPToolMatrix` every tool, and `TestSecurityDocListsEveryRoute` fails when a route is missing here. The "Rule" column names the action(s) the handler reaches in `core` (parsed from the code); read the handler for the exact check.
@@ -143,6 +154,10 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `GET /api/v1/admin/update` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
 | `GET /api/v1/admin/users` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
 | `PATCH /api/v1/admin/users/{id}` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
+| `GET /api/v1/organizations` | signed in | the caller's own active organizations; a SUPERADMIN lists all (name, key, status): `core.ListOrganizations` | 401 |
+| `GET /api/v1/organizations/{key}/support-grants` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`: never through a support grant, never a token with a project list | 401 / 403 / 404 |
+| `POST /api/v1/organizations/{key}/support-grants` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`; level read_only or full, hours 1-720 or until_revoked | 400 / 401 / 403 / 404 |
+| `DELETE /api/v1/organizations/{key}/support-grants/{id}` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`; ends the grant at once | 401 / 403 / 404 |
 | `GET /api/v1/attachments/{id}` | signed in + project right | the attachment's item: `access` view; token scope applies | 401 / 404 hidden |
 | `GET /api/v1/attachments/{id}/thumb` | signed in + project right | the attachment's item: `access` view; token scope applies | 401 / 404 hidden |
 | `POST /api/v1/auth/login` | public | no credentials; the handler validates its own input | - |

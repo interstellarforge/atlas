@@ -425,7 +425,7 @@ func TestRightsAreResolvedLive(t *testing.T) {
 	if _, err := e.svc.GetProject(ctx, e.alice, "EXO"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.db.W.Exec(`UPDATE users SET deactivated_at = 1 WHERE id = ?`, e.aliceID); err != nil {
+	if _, err := e.db.W.Exec(`UPDATE users SET status = 'suspended' WHERE id = ?`, e.aliceID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.svc.GetProject(ctx, e.alice, "EXO"); err == nil {

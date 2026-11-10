@@ -114,12 +114,15 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		case <-deadline.C:
 			return
 		case <-keepAlive.C:
+			if !s.core.IsActive(a) {
+				return
+			}
 			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
 				return
 			}
 			flusher.Flush()
 		case <-wake:
-			if !drain() {
+			if !s.core.IsActive(a) || !drain() {
 				return
 			}
 		}

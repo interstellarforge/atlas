@@ -279,7 +279,7 @@ func (s *Service) mailNotification(tx *sql.Tx, a auth.Actor, n Notice, project, 
 		return nil
 	}
 	var email string
-	if err := tx.QueryRow(`SELECT email FROM users WHERE id = ? AND deactivated_at IS NULL`, n.User).Scan(&email); err != nil {
+	if err := tx.QueryRow(`SELECT email FROM users WHERE id = ? AND status = 'active'`, n.User).Scan(&email); err != nil {
 		return nil
 	}
 	phrase, ok := notifyPhrases[n.Type]
