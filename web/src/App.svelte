@@ -4,6 +4,8 @@
     acceptInvite,
     acceptInviteNew,
     ApiError,
+    type Capabilities,
+    getCapabilities,
     getPreferences,
     getPublicPolicy,
     type InvitePreview,
@@ -29,9 +31,10 @@
   import HeroArt from "./lib/HeroArt.svelte";
   import { t } from "./lib/i18n";
   import Inbox from "./lib/Inbox.svelte";
+  import MyAccess from "./lib/MyAccess.svelte";
   import PageHero from "./lib/PageHero.svelte";
   import { loadPeople } from "./lib/people.svelte";
-  import { account } from "./lib/prefs.svelte";
+  import { account, loadScope, scope, setScope } from "./lib/prefs.svelte";
   import Projects from "./lib/Projects.svelte";
   import ProjectView from "./lib/ProjectView.svelte";
   import { navigate, route } from "./lib/router.svelte";
@@ -78,8 +81,14 @@
   let projects = $state<Project[]>([]);
   let orgs = $state<Organization[]>([]);
   const adminOrgs = $derived(orgs.filter((o) => o.role === "admin"));
+  let caps = $state<Capabilities | undefined>();
+  const companyAdmin = $derived((caps?.organization_admin.length ?? 0) > 0);
+  // Until the capabilities arrive the session user decides, so a deep link to /admin does not flash "not found".
+  const serverAdmin = $derived(
+    caps ? caps.server_admin : (user?.is_superadmin ?? false),
+  );
   async function loadOrgs(): Promise<void> {
-    orgs = await listOrganizations();
+    [orgs, caps] = await Promise.all([listOrganizations(), getCapabilities()]);
   }
   // A role can change while the page is open (an application is approved): look again on every page change.
   $effect(() => {
@@ -96,7 +105,27 @@
     document.title = ["Atlas -", name, current?.item].filter(Boolean).join(" ");
     if (!name) document.title = "Atlas";
   });
-  const allKeys = $derived(projects.map((p) => p.key));
+  // The organization switcher only filters lists; a stale choice (left the organization) shows everything.
+  const activeScope = $derived(
+    orgs.some((o) => o.key === scope.org) ? scope.org : "",
+  );
+  const shownProjects = $derived(
+    activeScope
+      ? projects.filter((p) => p.organization === activeScope)
+      : projects,
+  );
+  const allKeys = $derived(shownProjects.map((p) => p.key));
+  // Project settings are offered to the administrators of the project's organization (no project role of their
+  // own), to project admins and to the server admin; the server decides every request.
+  const canAdmin = $derived.by(() => {
+    const p = projects.find((x) => x.key === current?.key);
+    return (
+      (user?.is_superadmin ?? false) ||
+      p?.role === "admin" ||
+      (p?.organization !== undefined &&
+        (caps?.organization_admin.includes(p.organization) ?? false))
+    );
+  });
 
   void me()
     .then((u) => (user = u))
@@ -109,6 +138,7 @@
   // Live updates and the people list only make sense while signed in.
   $effect(() => {
     if (user) {
+      loadScope(user.id);
       connect();
       void loadPeople();
       void refreshInbox();
@@ -244,7 +274,13 @@
         needCode = true;
         notice = t("auth.login.codeNeeded");
       } else if (e instanceof ApiError && e.code.startsWith("account_")) {
-        error = t("auth.login.suspended");
+        error = t(
+          e.code === "account_pending"
+            ? "auth.login.pending"
+            : e.code === "account_rejected"
+              ? "auth.login.rejected"
+              : "auth.login.suspended",
+        );
       } else if (e instanceof ApiError && e.status === 429)
         error = t("auth.login.rateLimited");
       else if (e instanceof ApiError && e.status === 401)
@@ -477,9 +513,15 @@
 {:else}
   <Shell
     {user}
-    {projects}
+    projects={shownProjects}
     unread={inbox.unread}
-    companyAdmin={adminOrgs.length > 0}
+    {companyAdmin}
+    {serverAdmin}
+    {orgs}
+    orgScope={activeScope}
+    onscope={(key: string) => {
+      if (user) setScope(user.id, key);
+    }}
     onsignout={() => void signOut()}
   >
     {#if joinKey}
@@ -516,7 +558,7 @@
         {/if}
       </section>
     {:else if route.path === "/"}
-      <Projects {projects} onchange={() => void loadProjects()} />
+      <Projects projects={shownProjects} onchange={() => void loadProjects()} />
     {:else if current}
       <ProjectView
         project={current.key}
@@ -525,8 +567,7 @@
         repository={projects.find((p) => p.key === current.key)?.repository ??
           null}
         role={projects.find((p) => p.key === current.key)?.role ?? ""}
-        canAdmin={user.is_superadmin ||
-          projects.find((p) => p.key === current.key)?.role === "admin"}
+        {canAdmin}
         view={current.view}
         section={current.section ?? ""}
         onchange={() => void loadProjects()}
@@ -535,23 +576,27 @@
       />
     {:else if route.path === "/inbox"}
       <Inbox />
+    {:else if route.path === "/access"}
+      <MyAccess />
     {:else if route.path === "/board"}
       <PageHero title={t("cross.title")} description={t("cross.intro")} />
       <div class="fill"><Board projects={allKeys} /></div>
     {:else if route.path.startsWith("/company")}
-      {#if adminOrgs.length > 0}
+      {#if !caps}
+        <!-- capabilities still loading -->
+      {:else if companyAdmin}
         <Company
           {user}
           orgs={adminOrgs}
           orgKey={route.path.split("/")[2] ?? ""}
-          section={route.path.split("/")[3] ?? "members"}
+          section={route.path.split("/")[3] ?? "overview"}
           onchange={() => void loadOrgs()}
         />
       {:else}
         <h1>{t("notFound.title")}</h1>
         <p><a href="#/">{t("notFound.back")}</a></p>
       {/if}
-    {:else if route.path.startsWith("/admin") && user.is_superadmin}
+    {:else if route.path.startsWith("/admin") && serverAdmin}
       <Admin {user} section={route.path.split("/")[2] ?? "users"} />
     {:else if route.path.startsWith("/settings")}
       <Settings

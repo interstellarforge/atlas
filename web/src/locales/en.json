@@ -30,7 +30,26 @@
     "breadcrumb": "Breadcrumb",
     "settings": "Settings",
     "admin": "Admin",
-    "company": "Organization"
+    "company": "Organization",
+    "access": "My access",
+    "organization": "Organization filter",
+    "allOrganizations": "All organizations"
+  },
+  "access": {
+    "title": "My access",
+    "intro": "The organizations you belong to and the projects you can reach. Read-only: administrators change access.",
+    "role": {
+      "admin": "Admin",
+      "user": "Member"
+    },
+    "source": {
+      "explicit": "Assigned to you",
+      "inherited_org_admin": "Through your organization admin role",
+      "server_admin": "Through server administration"
+    },
+    "noProjects": "No projects assigned yet. Ask an administrator of this organization.",
+    "empty": "You are not a member of any organization yet.",
+    "failed": "Could not load your access: {message}"
   },
   "forcedPassword": {
     "title": "Choose a new password",
@@ -50,7 +69,9 @@
       "code": "Authentication code",
       "codeHint": "From your authenticator app, or one of your recovery codes.",
       "codeNeeded": "This account uses two-factor authentication. Enter your code to continue.",
-      "suspended": "This account is suspended. Contact your administrator."
+      "suspended": "This account is suspended. Contact your administrator.",
+      "pending": "Your account is waiting for approval. You can sign in once an administrator approves it.",
+      "rejected": "Your account request was declined. Contact your administrator."
     },
     "quote": "A clearer tomorrow builds from a more focused today.",
     "register": {
@@ -98,6 +119,9 @@
     "role": "Your role: {role}",
     "intro": "All your projects in one place. Open a board, a list or a hierarchy.",
     "emptyTitle": "Your projects will appear here",
+    "noAccessTitle": "No projects assigned to you yet",
+    "noAccess": "Administrators of your organization give access per project. See My access for what you can reach.",
+    "myAccess": "Open My access",
     "filter": "Filter projects…",
     "count": "{count} projects",
     "progress": "Share of items done",
@@ -146,6 +170,8 @@
     "backlog": "Backlog",
     "tree": "Hierarchy",
     "loadFailed": "Could not load this project.",
+    "notFound": "This project does not exist or you no longer have access to it.",
+    "forbidden": "You do not have permission to see this project.",
     "milestones": "Milestones",
     "settings": "Settings",
     "heroText": "Overview, board, list, backlog, hierarchy, timeline, issues and README of this project.",
@@ -563,6 +589,12 @@
       "member": "Member",
       "viewer": "Viewer"
     },
+    "inherited": "Inherited administrators",
+    "inheritedHint": "Administrators of the organization reach every project of it. Change this in the organization, not here.",
+    "inheritedAdmin": "Organization admin",
+    "inheritedNone": "No inherited administrators.",
+    "serverAdmins": "Server administrators who can reach this project through a support grant: {count}.",
+    "serverAdminsNamed": "Server administrators with access through a support grant: {names}.",
     "addMember": "Add member",
     "chooseUser": "Choose a person",
     "remove": "Remove",
@@ -623,11 +655,14 @@
   },
   "admin": {
     "title": "Administration",
-    "intro": "Users, rights, the audit log and the effective instance settings.",
+    "intro": "Users, requests, organizations, the audit log and the effective instance settings.",
     "sections": "Administration sections",
+    "statusFilter": "Filter by status",
+    "statusAll": "All accounts",
+    "statusActive": "Active",
     "nav": {
       "users": "Users",
-      "rights": "Rights",
+      "requests": "Requests",
       "audit": "Audit log",
       "logs": "Server log",
       "mcp": "MCP",
@@ -685,7 +720,6 @@
     "initialPassword": "Initial password",
     "createUser": "Create user",
     "userCreated": "User created.",
-    "rightsIntro": "What each project role may do. Roles are fixed; they are replaced by the organization model, so they can no longer be edited. A global admin may do everything.",
     "mustChange": "Must change password",
     "forcePassword": "Force password change",
     "passwordForced": "Signed out; the next sign-in must change the password.",
@@ -790,9 +824,17 @@
     "mailUseEnv": "Use the environment settings",
     "mailCleared": "Saved settings removed.",
     "orgsTitle": "Organizations",
-    "orgsIntro": "You manage Atlas, not the organizations' work. You see name, key, status, admins and the number of members.",
+    "orgsIntro": "You manage Atlas, not the organizations' work. You see name, key, status, admins and the number of members and active projects.",
     "orgAdmins": "Admins",
-    "orgMembers": "{count} members",
+    "orgProjects": "Projects: {count}",
+    "orgArchived": "Archived",
+    "orgNoAdmin": "No active admin",
+    "orgArchive": "Archive",
+    "orgRestore": "Restore",
+    "orgAppoint": "Appoint first admin",
+    "orgAppointSubmit": "Appoint",
+    "orgAppointed": "Admin appointed.",
+    "orgMembers": "Members: {count}",
     "orgCreate": "Create an organization",
     "orgKey": "Key",
     "orgName": "Name",
@@ -1015,6 +1057,8 @@
     "saved": "Saved.",
     "save": "Save",
     "nav": {
+      "overview": "Overview",
+      "projects": "Projects",
       "members": "Members",
       "invites": "Invitations",
       "requests": "Join requests",
@@ -1023,7 +1067,33 @@
       "support": "Support access",
       "audit": "Audit log"
     },
+    "overview": {
+      "members": "Members",
+      "projects": "Projects"
+    },
+    "projects": {
+      "created": "Project created.",
+      "open": "Open",
+      "settings": "Settings"
+    },
+    "picker": {
+      "none": "This organization has no projects yet."
+    },
+    "access": {
+      "source": {
+        "explicit": "Assigned",
+        "inherited_org_admin": "Inherited: organization admin",
+        "server_admin": "Server administrator"
+      },
+      "toggle": "Access",
+      "effective": "Effective access",
+      "none": "No project access yet.",
+      "assign": "Projects this member is assigned to",
+      "save": "Save assignment",
+      "saved": "Assignment saved."
+    },
     "members": {
+      "search": "Search members",
       "role": "Role",
       "admin": "Admin",
       "user": "Member",
@@ -1035,7 +1105,7 @@
     "invites": {
       "title": "Invite someone",
       "email": "Email address",
-      "projects": "Projects to join (keys, optional)",
+      "projects": "Projects to join (optional)",
       "days": "Valid for (days)",
       "send": "Create invitation",
       "sent": "Invitation created.",

@@ -1,0 +1,8 @@
+Subject: Your organization application on Atlas was {{.Result}}
+
+Hello,
+
+Your application for the organization {{.Name}} was {{.Result}}.
+{{if .Link}}
+{{.Link}}
+{{end}}

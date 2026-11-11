@@ -59,4 +59,17 @@ func TestAccessViews(t *testing.T) {
 	if _, err := e.svc.ProjectAccess(ctx, e.alice, "EXO"); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("another organization read the access review: %v", err)
 	}
+	// Atlas administrators reach the project only under a support grant: the ADMIN sees a count, not names.
+	if got, err := e.svc.ProjectServerAdmins(ctx, e.carol, "EXO"); err != nil || got.Count != 0 {
+		t.Fatalf("server admins without a grant: %v %+v", err, got)
+	}
+	if _, err := e.svc.GrantSupport(ctx, e.carol, "MAIN", "full", 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.svc.ProjectServerAdmins(ctx, e.carol, "EXO"); err != nil || got.Count < 1 || len(got.Names) != 0 {
+		t.Fatalf("the ADMIN must see a count only: %v %+v", err, got)
+	}
+	if got, err := e.svc.ProjectServerAdmins(ctx, e.admin, "EXO"); err != nil || got.Count < 1 || len(got.Names) != got.Count {
+		t.Fatalf("the SUPERADMIN must see names: %v %+v", err, got)
+	}
 }

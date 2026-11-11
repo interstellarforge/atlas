@@ -619,3 +619,32 @@ func (s *Service) UnmigratedReason() (string, error) {
 	}
 	return "", nil
 }
+
+// Capabilities is what the SPA may offer a person: navigation only, never an authorization (authz.go decides
+// every request). OrganizationAdmin lists the active organizations the person administers.
+type Capabilities struct {
+	ServerAdmin       bool     `json:"server_admin"`
+	OrganizationAdmin []string `json:"organization_admin"`
+}
+
+// CapabilitiesOf computes the capabilities of an active person from the same tables authz reads (ATL-465).
+func (s *Service) CapabilitiesOf(userID int64) (Capabilities, error) {
+	c := Capabilities{OrganizationAdmin: []string{}}
+	if err := s.db.R.QueryRow(`SELECT is_superadmin = 1 FROM users WHERE id = ? AND status = 'active'`, userID).Scan(&c.ServerAdmin); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return c, err
+	}
+	rows, err := s.db.R.Query(`SELECT o.key FROM organization_memberships m JOIN organizations o ON o.id = m.organization_id
+		WHERE m.user_id = ? AND m.role = 'admin' AND o.status = 'active' ORDER BY o.key`, userID)
+	if err != nil {
+		return c, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return c, err
+		}
+		c.OrganizationAdmin = append(c.OrganizationAdmin, k)
+	}
+	return c, rows.Err()
+}

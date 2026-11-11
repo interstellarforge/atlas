@@ -126,7 +126,7 @@ Result of reviewing `POST /auth/register`, invites and login, with tests in `int
 - **Errors.** Password, name, domain and invite failures do not depend on whether the email exists. Refusals (closed door, bad invite) count against the shared per-client limiter; login failures (5 per 15 minutes per email and client) are unchanged and identical for unknown and non-active accounts.
 - **Cookies and CSRF.** Session cookie: HttpOnly, SameSite=Lax, Secure unless `ATLAS_COOKIE_SECURE=false`. Register and login are public JSON endpoints and create no state besides the account itself; every state-changing session request still needs the CSRF header.
 - **Residual risk (accepted).** Without email verification, someone who registers an address and then tries to sign in with the password they chose learns whether the address already had an account (sign-in works for a new one, 401 for an existing one). Mitigations: the login limiter and the register limiter; a new account has no access anyway (ADR-0031). Closing it needs verified email, which is out of scope for the MVP.
-- **For M3.** Organization invitations must keep the same answer whether or not the email has an account (ATL-414 and the invitation tests).
+- Organization invitations (M3, ATL-414) keep the same answer whether or not the email has an account (ATL-414 and the invitation tests).
 
 ## Email domains: threat note (ATL-503, ADR-0031)
 
@@ -195,8 +195,9 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `GET /api/v1/organizations/{key}/support-grants` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`: never through a support grant, never a token with a project list | 401 / 403 / 404 |
 | `POST /api/v1/organizations/{key}/support-grants` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`; level read_only or full, hours 1-720 or until_revoked | 400 / 401 / 403 / 404 |
 | `DELETE /api/v1/organizations/{key}/support-grants/{id}` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgGrants`; ends the grant at once | 401 / 403 / 404 |
-| `GET /api/v1/admin/organizations` | SUPERADMIN session | `protect()` refuses everyone else before the body is read; name, key, status, ADMIN emails, member count only | 401 / 403 |
+| `GET /api/v1/admin/organizations` | SUPERADMIN session | `protect()` refuses everyone else before the body is read; name, key, status, ADMIN emails, member count, active project count, `no_active_admin` only (no project names) | 401 / 403 |
 | `POST /api/v1/admin/organizations` | SUPERADMIN session | `protect()`; `core.CreateOrganizationFor`: the first ADMIN is an existing active account, the creator does not join | 401 / 403 |
+| `POST /api/v1/admin/organizations/{key}/{decision}` | SUPERADMIN session | `protect()`; `core.SetOrganizationArchived` (decision archive or restore, else 400): human session only, an archived organization hides its projects | 400 / 401 / 403 / 404 |
 | `GET /api/v1/admin/organization-applications` | SUPERADMIN session | `protect()` refuses everyone else before the body is read | 401 / 403 |
 | `POST /api/v1/admin/organization-applications/{id}/{decision}` | SUPERADMIN session | `protect()`; `core.DecideApplication`: compare-and-set, human session only | 401 / 403 / 404 / 422 |
 | `GET /api/v1/organizations/{key}/invites` | explicit ADMIN of that organization, user session | `authorizeOrg` `orgMembers` | 401 / 403 / 404 |
@@ -238,7 +239,7 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `GET /api/v1/attachments/{id}/thumb` | signed in + project right | the attachment's item: `access` view; token scope applies | 401 / 404 hidden |
 | `POST /api/v1/auth/login` | public | no credentials; the handler validates its own input | - |
 | `POST /api/v1/auth/logout` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
-| `GET /api/v1/auth/me` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/auth/me` | signed in (own account) | only the caller's own account plus `capabilities` (`core.CapabilitiesOf`: navigation hints, never an authorization; changing credentials needs a human session) | 401 |
 | `GET /api/v1/auth/policy` | public | no credentials; the handler validates its own input | - |
 | `POST /api/v1/auth/register` | public | no credentials; the handler validates its own input | - |
 | `GET /api/v1/auth/invitations/{token}` | public, the token holder | `core.PreviewOrgInvite`: token hash lookup; every invalid, used, revoked or expired token gives the same 422; failures count against the login limiter | 422 / 429 |
@@ -323,7 +324,7 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `GET /api/v1/projects/{key}/members` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `DELETE /api/v1/projects/{key}/members/{user}` | signed in + project right | `access`: export, members, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `PUT /api/v1/projects/{key}/members/{user}` | signed in + project right | `access`: export, members, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
-| `GET /api/v1/projects/{key}/access` | signed in + project right | `access`: members; lists explicit members and inherited organization ADMINs (`core.ProjectAccess`) | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/access` | signed in + project right | `access`: members; lists explicit members and inherited organization ADMINs (`core.ProjectAccess`) and the Atlas administrators' presence under a valid support grant: a count, names for a SUPERADMIN only (`core.ProjectServerAdmins`) | 401 / 404 hidden / 403 missing right |
 | `GET /api/v1/projects/{key}/milestones` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `POST /api/v1/projects/{key}/milestones` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `DELETE /api/v1/projects/{key}/milestones/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
@@ -417,7 +418,7 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 
 - ATL-493: users and avatars were listed to every signed-in person. Fixed.
 - Four admin routes validated the body before authorizing (400 instead of 403). Fixed in `protect()`.
-- No route is unclassified. Known gaps are tracked: organization membership has no REST or UI yet (ATL-413, 439, 451).
+- No route is unclassified (`TestSecurityDocListsEveryRoute`). Organization membership has REST and UI (ATL-413, 439, 451, M4 UI).
 
 ## Inventory: `is_admin` and role references before the flip (ATL-473, kept for audit)
 

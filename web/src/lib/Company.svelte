@@ -4,6 +4,7 @@
     type AuditEntry,
     claimDomain,
     createOrgInvite,
+    createProject,
     decideJoinRequest,
     getOrgSettings,
     grantSupport,
@@ -13,6 +14,7 @@
     listOrgDomains,
     listOrgInvites,
     listOrgMembers,
+    listProjects,
     listProjectTemplates,
     listSupportGrants,
     type Organization,
@@ -20,6 +22,7 @@
     type OrgInvite,
     type OrgMember,
     type OrgSettings,
+    type Project,
     type ProjectTemplate,
     removeOrgDomain,
     removeOrgLogo,
@@ -35,7 +38,9 @@
     type User,
   } from "./api";
   import { t } from "./i18n";
+  import MemberAccess from "./MemberAccess.svelte";
   import PageHero from "./PageHero.svelte";
+  import ProjectPicker from "./ProjectPicker.svelte";
 
   let {
     user,
@@ -53,6 +58,8 @@
   } = $props();
 
   const sections = [
+    "overview",
+    "projects",
     "members",
     "invites",
     "requests",
@@ -65,7 +72,7 @@
   const active = $derived<Section>(
     (sections as readonly string[]).includes(section)
       ? (section as Section)
-      : "members",
+      : "overview",
   );
   const current = $derived(orgs.find((o) => o.key === orgKey) ?? orgs[0]);
   const key = $derived(current?.key ?? "");
@@ -77,6 +84,18 @@
   let notice = $state("");
   let error = $state("");
   let members = $state<OrgMember[]>([]);
+  let orgProjects = $state<Project[]>([]);
+  let memberQuery = $state("");
+  let newKey = $state("");
+  let newName = $state("");
+  let openMember = $state(0);
+  const shownMembers = $derived(
+    members.filter((m) =>
+      `${m.name} ${m.email}`
+        .toLowerCase()
+        .includes(memberQuery.trim().toLowerCase()),
+    ),
+  );
   let invites = $state<OrgInvite[]>([]);
   let requests = $state<JoinRequest[]>([]);
   let domains = $state<OrgDomain[]>([]);
@@ -89,7 +108,7 @@
 
   // forms
   let inviteEmail = $state("");
-  let inviteProjects = $state("");
+  let inviteProjects = $state<string[]>([]);
   let inviteDays = $state(7);
   let inviteLink = $state("");
   let domainName = $state("");
@@ -136,7 +155,12 @@
   async function load(): Promise<void> {
     if (!key) return;
     try {
-      if (active === "members") members = await listOrgMembers(key);
+      if (["overview", "projects", "members", "invites"].includes(active))
+        orgProjects = (await listProjects()).filter(
+          (p) => p.organization === key && !p.archived_at,
+        );
+      if (active === "members" || active === "overview")
+        members = await listOrgMembers(key);
       if (active === "invites") invites = await listOrgInvites(key);
       if (active === "requests") {
         requests = await listJoinRequests(key, "pending");
@@ -199,18 +223,27 @@
   async function invite(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     await run(t("company.invites.sent"), async () => {
-      const projects = inviteProjects
-        .split(",")
-        .map((p) => p.trim())
-        .filter(Boolean);
       const res = await createOrgInvite(key, {
         email: inviteEmail,
-        projects,
+        projects: inviteProjects,
         days: inviteDays,
       });
       inviteLink = `${location.origin}${location.pathname}#/invite/${res.token}`;
-      inviteEmail = inviteProjects = "";
+      inviteEmail = "";
+      inviteProjects = [];
       invites = await listOrgInvites(key);
+    });
+  }
+
+  async function addProject(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    await run(t("company.projects.created"), async () => {
+      await createProject(newKey.toUpperCase(), newName, 0, key);
+      newKey = newName = "";
+      orgProjects = (await listProjects()).filter(
+        (p) => p.organization === key && !p.archived_at,
+      );
+      onchange();
     });
   }
 
@@ -256,11 +289,71 @@
 {#if notice}<p class="banner ok" role="status">{notice}</p>{/if}
 {#if error}<p class="banner error" role="alert">{error}</p>{/if}
 
-{#if active === "members"}
+{#if active === "overview"}
+  <section class="panel">
+    <h2>{current?.name}</h2>
+    <p class="muted">{key}</p>
+    <dl class="stats">
+      <div>
+        <dt>{t("company.overview.members")}</dt>
+        <dd>{members.length}</dd>
+      </div>
+      <div>
+        <dt>{t("company.overview.projects")}</dt>
+        <dd>{orgProjects.length}</dd>
+      </div>
+    </dl>
+    <p>
+      <a href="#/company/{key}/members">{t("company.nav.members")}</a> ·
+      <a href="#/company/{key}/projects">{t("company.nav.projects")}</a> ·
+      <a href="#/company/{key}/settings">{t("company.nav.settings")}</a>
+    </p>
+  </section>
+{:else if active === "projects"}
+  <section class="panel">
+    <h2>{t("company.nav.projects")}</h2>
+    <ul class="list">
+      {#each orgProjects as p (p.key)}
+        <li>
+          <div>
+            <strong>{p.name}</strong>
+            <span class="muted">{p.key}</span>
+          </div>
+          <a href="#/p/{p.key}">{t("company.projects.open")}</a>
+          <a href="#/p/{p.key}/settings">{t("company.projects.settings")}</a>
+        </li>
+      {:else}
+        <li class="muted">{t("company.picker.none")}</li>
+      {/each}
+    </ul>
+  </section>
+  <form class="panel" onsubmit={addProject}>
+    <h2>{t("projects.create")}</h2>
+    <label>
+      {t("projects.key")}
+      <input bind:value={newKey} required />
+    </label>
+    <label>
+      {t("projects.name")}
+      <input bind:value={newName} required />
+    </label>
+    <div>
+      <button class="primary" type="submit">{t("projects.submit")}</button>
+    </div>
+  </form>
+{:else if active === "members"}
   <section class="panel">
     <h2>{t("company.nav.members")}</h2>
+    <label class="search">
+      <span class="sr-only">{t("company.members.search")}</span>
+      <input
+        type="search"
+        placeholder={t("company.members.search")}
+        bind:value={memberQuery}
+      />
+    </label>
     <ul class="list">
-      {#each members as m (m.user_id)}
+      {#each shownMembers as m (m.user_id)}
         <li class:off={!m.active}>
           <div>
             <strong>{m.name}</strong>
@@ -294,6 +387,16 @@
                 });
             }}>{t("company.members.remove")}</button
           >
+          <button
+            type="button"
+            aria-expanded={openMember === m.user_id}
+            onclick={() =>
+              (openMember = openMember === m.user_id ? 0 : m.user_id)}
+            >{t("company.access.toggle")}</button
+          >
+          {#if openMember === m.user_id}
+            <MemberAccess orgKey={key} member={m} projects={orgProjects} />
+          {/if}
         </li>
       {/each}
     </ul>
@@ -306,10 +409,11 @@
       {t("company.invites.email")}
       <input type="email" bind:value={inviteEmail} required />
     </label>
-    <label>
-      {t("company.invites.projects")}
-      <input bind:value={inviteProjects} placeholder="ABC, DEF" />
-    </label>
+    <ProjectPicker
+      projects={orgProjects}
+      bind:selected={inviteProjects}
+      legend={t("company.invites.projects")}
+    />
     <label>
       {t("company.invites.days")}
       <input type="number" min="1" max="30" bind:value={inviteDays} />
@@ -738,6 +842,18 @@
   }
   .switch {
     max-width: 320px;
+  }
+  .stats {
+    display: flex;
+    gap: var(--space-4);
+    margin: var(--space-3) 0;
+  }
+  .stats dt {
+    color: var(--color-muted, inherit);
+  }
+  .stats dd {
+    margin: 0;
+    font-size: 1.5rem;
   }
   .list {
     list-style: none;

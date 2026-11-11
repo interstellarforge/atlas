@@ -21,9 +21,21 @@ export interface User {
   must_enable_totp?: boolean;
 }
 
+/** Navigation hints computed by the server; never an authorization. */
+export interface Capabilities {
+  server_admin: boolean;
+  organization_admin: string[];
+}
+
 interface Session {
   user: User;
   csrf_token: string;
+  capabilities?: Capabilities;
+}
+
+export async function getCapabilities(): Promise<Capabilities> {
+  const s = await request<Session>("GET", "/auth/me");
+  return s.capabilities ?? { server_admin: false, organization_admin: [] };
 }
 
 let csrfToken = "";
@@ -162,11 +174,13 @@ export function createProject(
   key: string,
   name: string,
   template = 0,
+  organization = "",
 ): Promise<Project> {
   return request<Project>("POST", "/projects", {
     key,
     name,
     ...(template > 0 && { template }),
+    ...(organization && { organization }),
   });
 }
 
@@ -811,6 +825,7 @@ export interface AdminUser extends User {
   status: "active" | "suspended";
   created_at: number;
   must_change_password: boolean;
+  organizations?: { key: string; name: string; role: string }[];
 }
 
 export interface AuditEntry {
@@ -1041,6 +1056,45 @@ export async function listOrganizations(): Promise<Organization[]> {
     .items;
 }
 
+export interface ProjectAccessEntry {
+  user_id: number;
+  name: string;
+  email: string;
+  /** explicit or inherited_org_admin. */
+  source: string;
+}
+
+export interface ProjectAccessView {
+  items: ProjectAccessEntry[];
+  /** Atlas administrators reach the project only under a support grant. */
+  server_admins: { count: number; names?: string[] };
+}
+
+/** Everyone who reaches a project; only for those who manage its members. */
+export function getProjectAccess(project: string): Promise<ProjectAccessView> {
+  return request("GET", `/projects/${project}/access`);
+}
+
+export interface AccessProject {
+  key: string;
+  name: string;
+  /** explicit, inherited_org_admin or server_admin. */
+  source: string;
+}
+
+export interface MyAccess {
+  organizations: {
+    key: string;
+    name: string;
+    role: string;
+    projects: AccessProject[];
+  }[];
+}
+
+export function getMyAccess(): Promise<MyAccess> {
+  return request("GET", "/me/access");
+}
+
 export interface Application {
   id: number;
   key: string;
@@ -1065,6 +1119,19 @@ export interface AdminOrganization {
   created_at: number;
   admins: string[];
   members: number;
+  /** Active projects: a count only. */
+  projects: number;
+  no_active_admin: boolean;
+}
+
+export function archiveAdminOrganization(
+  key: string,
+  decision: "archive" | "restore",
+): Promise<void> {
+  return request(
+    "POST",
+    `/admin/organizations/${encodeURIComponent(key)}/${decision}`,
+  );
 }
 
 export async function listMyApplications(): Promise<Application[]> {
@@ -1673,6 +1740,25 @@ export interface OrgMember {
   name: string;
   role: "admin" | "user";
   active: boolean;
+}
+
+/** Effective access of one member, for the organization's administrator. */
+export function getMemberAccess(
+  key: string,
+  userId: number,
+): Promise<MyAccess> {
+  return request("GET", `${org(key)}/members/${String(userId)}/access`);
+}
+
+/** Replaces the member's explicit project assignments in one atomic step. */
+export function setMemberProjects(
+  key: string,
+  userId: number,
+  projects: string[],
+): Promise<void> {
+  return request("PUT", `${org(key)}/members/${String(userId)}/projects`, {
+    projects,
+  });
 }
 
 export async function listOrgMembers(key: string): Promise<OrgMember[]> {

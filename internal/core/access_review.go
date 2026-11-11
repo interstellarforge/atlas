@@ -139,3 +139,43 @@ func (s *Service) EffectiveAccess(ctx context.Context, a auth.Actor, orgKey stri
 	}
 	return out, nil
 }
+
+// ServerAdminAccess says whether the Atlas administrators reach a project: only while the organization has a
+// valid support grant (ADR-0031). The ADMIN sees the count, only a SUPERADMIN sees the names.
+type ServerAdminAccess struct {
+	Count int      `json:"count"`
+	Names []string `json:"names,omitempty"`
+}
+
+// ProjectServerAdmins answers under the same right as ProjectAccess (managing the members).
+func (s *Service) ProjectServerAdmins(ctx context.Context, a auth.Actor, key string) (ServerAdminAccess, error) {
+	p, _, err := s.access(s.db.R, a, key, actMembers)
+	if err != nil {
+		return ServerAdminAccess{}, err
+	}
+	gid, _, err := supportGrant(s.db.R, p.OrganizationID.Int64, s.nowMs())
+	if err != nil || gid == 0 {
+		return ServerAdminAccess{}, err
+	}
+	st, err := s.standing(s.db.R, a)
+	if err != nil {
+		return ServerAdminAccess{}, err
+	}
+	rows, err := s.db.R.Query(`SELECT name FROM users WHERE is_superadmin = 1 AND status = 'active' ORDER BY name`)
+	if err != nil {
+		return ServerAdminAccess{}, err
+	}
+	defer rows.Close()
+	var out ServerAdminAccess
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return out, err
+		}
+		out.Count++
+		if st.super {
+			out.Names = append(out.Names, n)
+		}
+	}
+	return out, rows.Err()
+}

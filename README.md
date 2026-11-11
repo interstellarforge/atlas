@@ -108,6 +108,10 @@ The defaults are intended to work for a small self-hosted instance. Common setti
 
 Outgoing email is optional. See [operations](docs/operations.md) for SMTP settings, backup and restore, import/export and maintenance commands.
 
+### Accounts, organizations and access
+
+Accounts are free: a new account is active but reaches nothing until an organization takes it in. The instance policy (Admin > Access) sets registration to `closed`, `invite` or `open` and organization creation to `admin_only` or `apply` (an application the server administrator approves). People join an organization by invitation, join link or request, or through a claimed email domain. Roles: the server administrator (SUPERADMIN) runs Atlas but reaches an organization's work only through a support grant from its ADMIN; an organization ADMIN manages its members and projects; a USER needs organization membership plus an assignment per project. Suspended accounts are refused on every path. Details: [security](docs/security.md), ADR-0029 to ADR-0031 and the [release checklist](docs/release-checklist.md) for the registration gate.
+
 ## Connect an agent
 
 Create a personal or project token in Atlas. Read scope is enough for discovery and context; grant write scope only when the agent should change work.

@@ -52,7 +52,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode,
 		Expires: time.Now().Add(s.auth.SessionTTLFor(user.ID)),
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"user": user, "csrf_token": csrf})
+	caps, err := s.core.CapabilitiesOf(user.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": user, "csrf_token": csrf, "capabilities": caps})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +81,12 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": user, "csrf_token": a.CSRF, "actor": a.String()})
+	caps, err := s.core.CapabilitiesOf(a.UserID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": user, "csrf_token": a.CSRF, "actor": a.String(), "capabilities": caps})
 }
 
 // Tokens are managed by humans only: a token must not be able to mint more tokens.

@@ -54,21 +54,29 @@
   // An account without an organization has no access yet (ADR-0031): no project form, an explanation instead.
   let noOrganization = $state(false);
   let canApply = $state(false);
+  let orgAdmin = $state(false);
+  // The empty states depend on the organizations: show none until they are known.
+  let orgsLoaded = $state(false);
   let applications = $state<Application[]>([]);
   let appKey = $state("");
   let appName = $state("");
   let appNote = $state("");
   let appMessage = $state("");
   let appError = $state("");
-  void listOrganizations().then((list) => {
-    noOrganization = list.length === 0;
-    if (!noOrganization) return;
-    void getPublicPolicy().then(
-      (p) => (canApply = p.organization_creation === "apply"),
-    );
-    void listMyApplications().then((a) => (applications = a));
-    void listJoinOptions().then((o) => (joinOptions = o));
-  });
+  void listOrganizations().then(
+    (list) => {
+      noOrganization = list.length === 0;
+      orgAdmin = list.some((o) => o.role === "admin");
+      orgsLoaded = true;
+      if (!noOrganization) return;
+      void getPublicPolicy().then(
+        (p) => (canApply = p.organization_creation === "apply"),
+      );
+      void listMyApplications().then((a) => (applications = a));
+      void listJoinOptions().then((o) => (joinOptions = o));
+    },
+    () => (orgsLoaded = true), // failed: show the plain empty state
+  );
 
   let joinOptions = $state<JoinOption[]>([]);
   let joinMessage = $state("");
@@ -159,7 +167,7 @@
   {/snippet}
 </PageHero>
 
-{#if !noOrganization && (creating || projects.length === 0)}
+{#if orgsLoaded && !noOrganization && (creating || projects.length === 0)}
   <form class="newform" onsubmit={submit}>
     <h2>{t("projects.create")}</h2>
     <div class="fields">
@@ -193,15 +201,25 @@
   </form>
 {/if}
 
-{#if projects.length === 0}
+{#if orgsLoaded && projects.length === 0}
   <div class="emptycard">
     <EmptyState
       icon="projects"
       title={noOrganization
         ? t("home.noOrganizationTitle")
-        : t("home.emptyTitle")}
-      text={noOrganization ? t("home.noOrganization") : t("home.empty")}
-    />
+        : orgAdmin
+          ? t("home.emptyTitle")
+          : t("home.noAccessTitle")}
+      text={noOrganization
+        ? t("home.noOrganization")
+        : orgAdmin
+          ? t("home.empty")
+          : t("home.noAccess")}
+    >
+      {#if !noOrganization && !orgAdmin}
+        <a href="#/access">{t("home.myAccess")}</a>
+      {/if}
+    </EmptyState>
   </div>
   {#if noOrganization && canApply}
     <form class="newform" onsubmit={apply}>

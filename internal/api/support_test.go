@@ -185,6 +185,85 @@ func TestOrganizationApplicationsAPI(t *testing.T) {
 	}
 }
 
+// The Atlas admin overview carries aggregates and archives or restores an organization; nobody else may.
+func TestAdminOrganizationOverviewAndArchive(t *testing.T) {
+	e := setup(t)
+	kees := sessionOf(e, t)
+	e.auth.CreateUser("ann@example.com", "Ann", "password-123", false)
+	ann := loginAs(e, t, "ann@example.com", "password-123")
+	if c := e.do("POST", "/api/v1/admin/organizations", map[string]any{"key": "ANN", "name": "Ann Inc", "admin_email": "ann@example.com"}, kees).Code; c != 201 {
+		t.Fatalf("create: %d", c)
+	}
+	if c := e.do("POST", "/api/v1/projects", map[string]any{"key": "AP", "name": "Ann project", "organization": "ANN"}, ann).Code; c != 201 {
+		t.Fatalf("project: %d", c)
+	}
+	list := decodeBody[struct {
+		Items []struct {
+			Key           string
+			Projects      int
+			NoActiveAdmin bool `json:"no_active_admin"`
+		}
+	}](t, e.do("GET", "/api/v1/admin/organizations", nil, kees))
+	var found bool
+	for _, o := range list.Items {
+		if o.Key == "ANN" {
+			found = true
+			if o.Projects != 1 || o.NoActiveAdmin {
+				t.Errorf("overview aggregates: %+v", o)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("ANN missing from the overview")
+	}
+	if c := e.do("POST", "/api/v1/admin/organizations/ANN/archive", nil, ann).Code; c != 403 {
+		t.Errorf("the organization ADMIN archived it through the admin route: %d, want 403", c)
+	}
+	if c := e.do("POST", "/api/v1/admin/organizations/ANN/bogus", nil, kees).Code; c != 400 {
+		t.Errorf("an unknown decision: %d, want 400", c)
+	}
+	if c := e.do("POST", "/api/v1/admin/organizations/ANN/archive", nil, kees).Code; c != 204 {
+		t.Fatalf("archive: %d", c)
+	}
+	if c := e.do("GET", "/api/v1/projects/AP", nil, ann).Code; c != 404 {
+		t.Errorf("a project of an archived organization: %d, want 404", c)
+	}
+	if c := e.do("POST", "/api/v1/admin/organizations/ANN/restore", nil, kees).Code; c != 204 {
+		t.Fatalf("restore: %d", c)
+	}
+	if c := e.do("GET", "/api/v1/projects/AP", nil, ann).Code; c != 200 {
+		t.Errorf("a project after restore: %d, want 200", c)
+	}
+}
+
+// /auth/me carries capabilities for navigation: server admin and the organizations a person administers.
+func TestMeCapabilities(t *testing.T) {
+	e := setup(t)
+	kees := sessionOf(e, t)
+	e.auth.CreateUser("ann@example.com", "Ann", "password-123", false)
+	e.auth.CreateUser("bob@example.com", "Bob", "password-123", false)
+	ann := loginAs(e, t, "ann@example.com", "password-123")
+	bob := loginAs(e, t, "bob@example.com", "password-123")
+	if c := e.do("POST", "/api/v1/admin/organizations", map[string]any{"key": "ANN", "name": "Ann Inc", "admin_email": "ann@example.com"}, kees).Code; c != 201 {
+		t.Fatalf("create: %d", c)
+	}
+	type caps struct {
+		Capabilities struct {
+			ServerAdmin       bool     `json:"server_admin"`
+			OrganizationAdmin []string `json:"organization_admin"`
+		}
+	}
+	if got := decodeBody[caps](t, e.do("GET", "/api/v1/auth/me", nil, kees)).Capabilities; !got.ServerAdmin {
+		t.Errorf("the server admin: %+v", got)
+	}
+	if got := decodeBody[caps](t, e.do("GET", "/api/v1/auth/me", nil, ann)).Capabilities; got.ServerAdmin || len(got.OrganizationAdmin) != 1 || got.OrganizationAdmin[0] != "ANN" {
+		t.Errorf("an organization admin: %+v", got)
+	}
+	if got := decodeBody[caps](t, e.do("GET", "/api/v1/auth/me", nil, bob)).Capabilities; got.ServerAdmin || len(got.OrganizationAdmin) != 0 {
+		t.Errorf("a plain account: %+v", got)
+	}
+}
+
 // ADR-0031: organization invitations over REST: ADMIN-only creation, the open accept path and its non-disclosure.
 func TestOrganizationInvitesAPI(t *testing.T) {
 	e := setup(t)

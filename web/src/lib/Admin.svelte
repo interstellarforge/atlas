@@ -5,6 +5,7 @@
     type AdminOrganization,
     type AdminUser,
     ApiError,
+    archiveAdminOrganization,
     type AuditEntry,
     clearMailSettings,
     createAdminOrganization,
@@ -29,17 +30,16 @@
     listInstanceItemTemplates,
     listInvites,
     listProjectTemplates,
-    listRoles,
     type MailSettings,
     patchAdminUser,
     type Policy,
     type ProjectTemplate,
     revokeInvite,
-    type Role,
     saveInstanceItemTemplate,
     saveMailSettings,
     saveProjectTemplate,
     sendTestMail,
+    setOrgMemberRole,
     setPolicy,
     type UpdateStatus,
     type User,
@@ -52,10 +52,10 @@
 
   const sections = [
     "users",
+    "requests",
     "organizations",
     "access",
     "templates",
-    "rights",
     "audit",
     "logs",
     "mcp",
@@ -90,15 +90,18 @@
   let importText = $state("");
   let importName = $state("");
   let users = $state<AdminUser[]>([]);
+  let userStatus = $state<"" | "active" | "suspended">("");
+  const shownUsers = $derived(
+    userStatus ? users.filter((u) => u.status === userStatus) : users,
+  );
   let orgs = $state<AdminOrganization[]>([]);
+  let appoint = $state<Record<string, string>>({});
   let claims = $state<DomainClaim[]>([]);
   let applications = $state<AdminApplication[]>([]);
   let appKeys = $state<Record<number, string>>({});
   let orgKey = $state("");
   let orgName = $state("");
   let orgAdminEmail = $state("");
-  let roles = $state<Role[]>([]);
-  let roleActions = $state<string[]>([]);
   let settings = $state<Record<string, string | number | boolean>>({});
   let update = $state<UpdateStatus | undefined>();
   let audit = $state<AuditEntry[]>([]);
@@ -111,22 +114,6 @@
   let fActor = $state("");
   let fOperation = $state("");
   let fTarget = $state("");
-
-  function roleLabel(name: string): string {
-    return ["admin", "member", "viewer"].includes(name)
-      ? t(`psettings.roles.${name}` as "psettings.roles.admin")
-      : name;
-  }
-
-  async function loadRoles(): Promise<void> {
-    try {
-      const r = await listRoles();
-      roles = r.items;
-      roleActions = r.actions;
-    } catch {
-      error = t("admin.loadFailed");
-    }
-  }
 
   async function run(
     done: string,
@@ -204,9 +191,9 @@
       void getMailSettings()
         .then((m) => (mail = m))
         .catch(() => (error = t("admin.loadFailed")));
-    if (active === "users")
+    if (active === "users" || active === "organizations")
       void loadUsers().catch(() => (error = t("admin.loadFailed")));
-    if (active === "organizations")
+    if (active === "organizations" || active === "requests")
       void loadOrganizations().catch(() => (error = t("admin.loadFailed")));
     if (active === "access") {
       void getPolicy().then((p) => (policy = p));
@@ -221,7 +208,6 @@
         .catch(() => (error = t("admin.loadFailed")));
     if (active === "audit")
       void loadAudit().catch(() => (error = t("admin.loadFailed")));
-    if (active === "rights") void loadRoles();
     if (active === "instance") {
       void getInstance()
         .then((i) => (settings = i.settings))
@@ -250,12 +236,23 @@
 {#if active === "users"}
   <section class="panel" aria-labelledby="users-title">
     <h2 id="users-title">{t("admin.nav.users")}</h2>
+    <select aria-label={t("admin.statusFilter")} bind:value={userStatus}>
+      <option value="">{t("admin.statusAll")}</option>
+      <option value="active">{t("admin.statusActive")}</option>
+      <option value="suspended">{t("admin.deactivated")}</option>
+    </select>
     <ul class="list">
-      {#each users as u (u.id)}
+      {#each shownUsers as u (u.id)}
         <li class:off={u.status !== "active"}>
           <div>
             <strong>{u.name}</strong>
             <span class="muted">{u.email}</span>
+            <span class="muted"
+              >{new Date(u.created_at).toLocaleDateString()}{u.organizations
+                ?.length
+                ? ` · ${u.organizations.map((o) => `${o.key} (${o.role})`).join(", ")}`
+                : ""}</span
+            >
           </div>
           {#if u.status === "suspended"}<span class="chip warn"
               >{t("admin.deactivated")}</span
@@ -358,7 +355,7 @@
       <button class="primary" type="submit">{t("admin.createUser")}</button>
     </div>
   </form>
-{:else if active === "organizations"}
+{:else if active === "requests"}
   <section class="panel" aria-labelledby="applications-title">
     <h2 id="applications-title">{t("admin.appsTitle")}</h2>
     {#if applications.length === 0}
@@ -443,6 +440,7 @@
       </ul>
     {/if}
   </section>
+{:else if active === "organizations"}
   <section class="panel" aria-labelledby="orgs-title">
     <h2 id="orgs-title">{t("admin.orgsTitle")}</h2>
     <p class="muted hint">{t("admin.orgsIntro")}</p>
@@ -453,12 +451,65 @@
             <strong>{o.name}</strong>
             <span class="muted">{o.key}</span>
           </div>
+          {#if o.status !== "active"}<span class="chip warn"
+              >{t("admin.orgArchived")}</span
+            >{/if}
+          {#if o.no_active_admin}<span class="chip warn"
+              >{t("admin.orgNoAdmin")}</span
+            >{/if}
           <span class="muted"
             >{t("admin.orgAdmins")}: {o.admins.join(", ") || "-"}</span
           >
           <span class="muted"
             >{t("admin.orgMembers", { count: o.members })}</span
           >
+          <span class="muted"
+            >{t("admin.orgProjects", { count: o.projects })}</span
+          >
+          <button
+            type="button"
+            onclick={() =>
+              void run(t("settings.saved"), async () => {
+                await archiveAdminOrganization(
+                  o.key,
+                  o.status === "active" ? "archive" : "restore",
+                );
+                await loadOrganizations();
+              })}
+            >{o.status === "active"
+              ? t("admin.orgArchive")
+              : t("admin.orgRestore")}</button
+          >
+          {#if o.no_active_admin && o.status === "active"}
+            <form
+              class="inline"
+              onsubmit={(e) => {
+                e.preventDefault();
+                void run(t("admin.orgAppointed"), async () => {
+                  await setOrgMemberRole(
+                    o.key,
+                    Number(appoint[o.key]),
+                    "admin",
+                  );
+                  await loadOrganizations();
+                });
+              }}
+            >
+              <select
+                aria-label={t("admin.orgAppoint")}
+                bind:value={appoint[o.key]}
+                required
+              >
+                <option value="">{t("admin.orgAppoint")}</option>
+                {#each users.filter((u) => u.status === "active") as u (u.id)}
+                  <option value={String(u.id)}>{u.name}</option>
+                {/each}
+              </select>
+              <button class="primary" type="submit"
+                >{t("admin.orgAppointSubmit")}</button
+              >
+            </form>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -784,45 +835,6 @@
         >
       </div>
     </form>
-  </section>
-{:else if active === "rights"}
-  <section class="panel" aria-labelledby="rights-title">
-    <h2 id="rights-title">{t("admin.nav.rights")}</h2>
-    <p class="muted hint">{t("admin.rightsIntro")}</p>
-    <table>
-      <thead>
-        <tr>
-          <th scope="col">{t("admin.action")}</th>
-          {#each roles as r (r.name)}
-            <th scope="col">{roleLabel(r.name)}</th>
-          {/each}
-        </tr>
-      </thead>
-      <tbody>
-        {#each roleActions as action (action)}
-          <tr>
-            <th scope="row"
-              >{t(
-                `admin.actions.${action.replace(".", "_")}` as "admin.actions.view",
-              )}</th
-            >
-            {#each roles as r (r.name)}
-              <td
-                ><input
-                  type="checkbox"
-                  checked={r.actions.includes(action)}
-                  disabled
-                  aria-label="{roleLabel(r.name)}: {t(
-                    `admin.actions.${action.replace('.', '_')}` as 'admin.actions.view',
-                  )}"
-                /></td
-              >
-            {/each}
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-    <p class="muted hint">{t("admin.rightsTokens")}</p>
   </section>
 {:else if active === "audit"}
   <section class="panel" aria-labelledby="audit-title">

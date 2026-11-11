@@ -3,6 +3,7 @@
     ApiError,
     createProjectToken,
     deleteItemTemplate,
+    getProjectAccess,
     importItems,
     type ImportReport,
     type ItemTemplate,
@@ -11,6 +12,7 @@
     listProjectTokens,
     listRoles,
     type Member,
+    type ProjectAccessEntry,
     type ProjectToken,
     removeMember,
     type Repository,
@@ -97,10 +99,20 @@
   const candidates = $derived(
     people.users.filter((u) => !members.some((m) => m.user_id === u.id)),
   );
+  let inherited = $state<ProjectAccessEntry[]>([]);
+  let serverAdmins = $state<{ count: number; names?: string[] }>({ count: 0 });
   async function loadMembers(): Promise<void> {
-    const [m, r] = await Promise.all([listMembers(project), listRoles()]);
+    const [m, r, a] = await Promise.all([
+      listMembers(project),
+      listRoles(),
+      getProjectAccess(project).catch(() => undefined),
+    ]);
     members = m;
     roles = r.items;
+    inherited = (a?.items ?? []).filter(
+      (e) => e.source === "inherited_org_admin",
+    );
+    serverAdmins = a?.server_admins ?? { count: 0 };
   }
 
   // ---- tokens ----
@@ -338,6 +350,34 @@
             >
           </form>
         {/if}
+        <h3>{t("psettings.inherited")}</h3>
+        <p class="muted hint">{t("psettings.inheritedHint")}</p>
+        <ul class="list">
+          {#each inherited as a (a.user_id)}
+            <li>
+              <div>
+                <strong>{a.name}</strong>
+                <span class="muted">{a.email}</span>
+              </div>
+              <span class="muted">{t("psettings.inheritedAdmin")}</span>
+            </li>
+          {:else}
+            <li class="muted">{t("psettings.inheritedNone")}</li>
+          {/each}
+          {#if serverAdmins.count > 0}
+            <li>
+              <span class="muted"
+                >{serverAdmins.names?.length
+                  ? t("psettings.serverAdminsNamed", {
+                      names: serverAdmins.names.join(", "),
+                    })
+                  : t("psettings.serverAdmins", {
+                      count: serverAdmins.count,
+                    })}</span
+              >
+            </li>
+          {/if}
+        </ul>
       </section>
     {:else if active === "workflow"}
       <WorkflowSettings {project} {workflow} />

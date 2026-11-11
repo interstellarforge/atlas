@@ -61,3 +61,24 @@ export function toggleSidebar(): void {
 export const account = $state<{ defaultView: string }>({
   defaultView: "board",
 });
+
+// The organization the lists are filtered to ("" = all); a per-viewer, per-user convenience.
+const SCOPE_KEY = "atlas-org-scope";
+export const scope = $state({ org: "" });
+
+export function loadScope(userId: number): void {
+  try {
+    scope.org = localStorage.getItem(`${SCOPE_KEY}-${String(userId)}`) ?? "";
+  } catch {
+    scope.org = "";
+  }
+}
+
+export function setScope(userId: number, org: string): void {
+  scope.org = org;
+  try {
+    localStorage.setItem(`${SCOPE_KEY}-${String(userId)}`, org);
+  } catch {
+    /* storage unavailable: the choice just won't persist */
+  }
+}

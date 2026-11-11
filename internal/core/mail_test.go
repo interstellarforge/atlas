@@ -219,3 +219,25 @@ func TestNotificationMailFollowsThePreference(t *testing.T) {
 		t.Fatalf("mailed %s", to)
 	}
 }
+
+func TestApplicationMails(t *testing.T) {
+	e, _, _ := mailEnv(t)
+	saveMail(t, e, nil)
+	if _, err := e.svc.SetPolicy(ctx, e.admin, core.Policy{MinPasswordLength: 8, Registration: "closed", OrganizationCreation: "apply", SessionDays: 14, DoneVisibleDays: 14}); err != nil {
+		t.Fatal(err)
+	}
+	app, err := e.svc.ApplyForOrganization(ctx, e.alice, "ACME2", "Acme Two", "secret note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, subject, body := outbox(e)
+	if n != 1 || !strings.Contains(subject, "application") || strings.Contains(body, "secret note") {
+		t.Fatalf("request mail: %d %q %q", n, subject, body)
+	}
+	if err := e.svc.DecideApplication(ctx, e.admin, app.ID, "approve", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if n, subject, _ := outbox(e); n != 2 || !strings.Contains(subject, "approved") {
+		t.Fatalf("decision mail: %d %q", n, subject)
+	}
+}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    ApiError,
     getProgress,
     getWorkflow,
     type Progress,
@@ -169,8 +170,13 @@
     try {
       const loaded = await getWorkflow(key);
       if (key === project) workflow = loaded;
-    } catch {
-      error = t("project.loadFailed");
+    } catch (e) {
+      error =
+        e instanceof ApiError && e.status === 404
+          ? t("project.notFound")
+          : e instanceof ApiError && e.status === 403
+            ? t("project.forbidden")
+            : t("project.loadFailed");
     }
   }
 
@@ -310,6 +316,8 @@
         <IssuesView {project} {workflow} />
       {:else if view === "readme"}
         <ReadmeView {project} />
+      {:else if view === "settings" && !canAdmin}
+        <p class="banner error" role="alert">{t("project.forbidden")}</p>
       {:else if view === "settings"}
         <ProjectSettings
           {project}

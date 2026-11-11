@@ -49,6 +49,10 @@ type AdminOrganization struct {
 	CreatedAt int64    `json:"created_at"`
 	Admins    []string `json:"admins"`
 	Members   int      `json:"members"`
+	// Projects counts the active projects: an aggregate only, never their names (ADR-0031).
+	Projects int `json:"projects"`
+	// NoActiveAdmin flags an organization without an active ADMIN.
+	NoActiveAdmin bool `json:"no_active_admin"`
 }
 
 const applicationCols = `a.id, a.key, a.name, a.note, a.status, a.created_at, a.decided_at, a.decision_note, COALESCE(o.key, '')`
@@ -110,6 +114,9 @@ func (s *Service) ApplyForOrganization(ctx context.Context, a auth.Actor, key, n
 		}
 		id, _ := res.LastInsertId()
 		out = Application{ID: id, Key: key, Name: name, Note: note, Status: "pending", CreatedAt: now}
+		if err := s.mailApplication(tx, a.UserID, key, name); err != nil {
+			return err
+		}
 		return s.journal(ctx, tx, a, change{Operation: "org.apply", Target: "application-" + strconv.FormatInt(id, 10), Event: "admin.updated",
 			Changes: map[string]any{"key": key, "name": name}})
 	})
@@ -217,6 +224,9 @@ func (s *Service) DecideApplication(ctx context.Context, a auth.Actor, id int64,
 		if n, _ := res.RowsAffected(); n == 0 {
 			return rule("the application changed in the meantime: reload and try again")
 		}
+		if err := s.mailApplicationDecision(tx, applicant, appKey, name, to); err != nil {
+			return err
+		}
 		return s.journal(ctx, tx, a, change{Operation: "org.application." + decision, Target: "application-" + strconv.FormatInt(id, 10), Event: "admin.updated",
 			Changes: map[string]any{"to": to}}) // never the note
 	})
@@ -230,7 +240,8 @@ func (s *Service) ListAdminOrganizations(ctx context.Context, a auth.Actor) ([]A
 	rows, err := s.db.R.Query(`SELECT o.key, o.name, o.status, o.created_at,
 		(SELECT COUNT(*) FROM organization_memberships m WHERE m.organization_id = o.id),
 		COALESCE((SELECT group_concat(u.email, ',') FROM organization_memberships m JOIN users u ON u.id = m.user_id
-			WHERE m.organization_id = o.id AND m.role = 'admin' AND u.status = 'active'), '')
+			WHERE m.organization_id = o.id AND m.role = 'admin' AND u.status = 'active'), ''),
+		(SELECT COUNT(*) FROM projects p WHERE p.organization_id = o.id AND p.archived_at IS NULL)
 		FROM organizations o ORDER BY o.key`)
 	if err != nil {
 		return nil, err
@@ -240,14 +251,56 @@ func (s *Service) ListAdminOrganizations(ctx context.Context, a auth.Actor) ([]A
 	for rows.Next() {
 		var o AdminOrganization
 		var admins string
-		if err := rows.Scan(&o.Key, &o.Name, &o.Status, &o.CreatedAt, &o.Members, &admins); err != nil {
+		if err := rows.Scan(&o.Key, &o.Name, &o.Status, &o.CreatedAt, &o.Members, &admins, &o.Projects); err != nil {
 			return nil, err
 		}
 		o.Admins = []string{}
 		if admins != "" {
 			o.Admins = strings.Split(admins, ",")
 		}
+		o.NoActiveAdmin = len(o.Admins) == 0
 		out = append(out, o)
 	}
 	return out, rows.Err()
+}
+
+// mailApplication tells every active SUPERADMIN that an application waits. The note is never mailed.
+func (s *Service) mailApplication(tx *sql.Tx, applicantID int64, key, name string) error {
+	var applicant string
+	if err := tx.QueryRow(`SELECT name FROM users WHERE id = ?`, applicantID).Scan(&applicant); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT email FROM users WHERE is_superadmin = 1 AND status = 'active'`)
+	if err != nil {
+		return err
+	}
+	var to []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			rows.Close()
+			return err
+		}
+		to = append(to, e)
+	}
+	rows.Close()
+	for _, e := range to {
+		if err := s.enqueueMail(tx, e, "org_application", map[string]any{"Applicant": applicant, "Key": key, "Name": name, "Link": s.link("/admin/organizations")}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mailApplicationDecision tells the applicant the outcome (approved or rejected), without the decision note.
+func (s *Service) mailApplicationDecision(tx *sql.Tx, applicantID int64, key, name, result string) error {
+	var email string
+	if err := tx.QueryRow(`SELECT email FROM users WHERE id = ?`, applicantID).Scan(&email); err != nil {
+		return err
+	}
+	link := ""
+	if result == "approved" {
+		link = s.link("/company/" + strings.ToUpper(key))
+	}
+	return s.enqueueMail(tx, email, "org_application_decision", map[string]any{"Name": name, "Result": result, "Link": link})
 }

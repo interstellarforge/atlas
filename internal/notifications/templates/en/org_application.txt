@@ -1,0 +1,9 @@
+Subject: New organization application on Atlas
+
+Hello,
+
+{{.Applicant}} applied for the organization {{.Name}} ({{.Key}}).
+{{if .Link}}
+Decide here:
+{{.Link}}
+{{end}}

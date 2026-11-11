@@ -3,6 +3,7 @@
 
   import {
     getUpdateStatus,
+    type Organization,
     type Project,
     type UpdateStatus,
     type User,
@@ -25,6 +26,10 @@
     projects,
     unread,
     companyAdmin = false,
+    serverAdmin = false,
+    orgs = [],
+    orgScope = "",
+    onscope,
     onsignout,
     children,
   }: {
@@ -33,6 +38,12 @@
     unread: number;
     /** The user administers at least one organization. */
     companyAdmin?: boolean;
+    /** The user administers the server (navigation hint from /auth/me). */
+    serverAdmin?: boolean;
+    /** Organizations the user can reach; the switcher shows with two or more. */
+    orgs?: Organization[];
+    orgScope?: string;
+    onscope?: (key: string) => void;
     onsignout: () => void;
     children: Snippet;
   } = $props();
@@ -61,6 +72,7 @@
       | "nav.inbox"
       | "nav.settings"
       | "nav.company"
+      | "nav.access"
       | "nav.admin";
   }[] = [
     { href: "#/", path: "/", icon: "projects", label: "nav.projects" },
@@ -71,6 +83,7 @@
       label: "nav.overview",
     },
     { href: "#/inbox", path: "/inbox", icon: "inbox", label: "nav.inbox" },
+    { href: "#/access", path: "/access", icon: "eye", label: "nav.access" },
     {
       href: "#/settings/profile",
       path: "/settings",
@@ -93,7 +106,7 @@
   const visibleLinks = $derived([
     ...links,
     ...(companyAdmin ? [companyLink] : []),
-    ...(user.is_superadmin ? [adminLink] : []),
+    ...(serverAdmin ? [adminLink] : []),
   ]);
 
   const viewLabel = {
@@ -230,6 +243,19 @@
 
   <div class="section">
     <p class="heading" class:sr-only={collapsed}>{t("nav.workspace")}</p>
+    {#if orgs.length > 1 && !collapsed}
+      <select
+        class="orgswitch"
+        aria-label={t("nav.organization")}
+        value={orgScope}
+        onchange={(e) => onscope?.(e.currentTarget.value)}
+      >
+        <option value="">{t("nav.allOrganizations")}</option>
+        {#each orgs as o (o.key)}
+          <option value={o.key}>{o.name}</option>
+        {/each}
+      </select>
+    {/if}
     <ul class="projects">
       {#each projects as project (project.key)}
         <li>
@@ -506,6 +532,10 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--atlas-text-subtle);
+  }
+  .orgswitch {
+    width: 100%;
+    margin-bottom: 0.5rem;
   }
   .projects {
     list-style: none;

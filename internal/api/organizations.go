@@ -16,6 +16,7 @@ func (s *Server) registerOrganizations(mux *http.ServeMux, protect func(http.Han
 	mux.Handle("POST /api/v1/organizations/applications", protect(s.applyForOrganization))
 	mux.Handle("GET /api/v1/admin/organizations", protect(s.adminOrganizations))
 	mux.Handle("POST /api/v1/admin/organizations", protect(s.adminCreateOrganization))
+	mux.Handle("POST /api/v1/admin/organizations/{key}/{decision}", protect(s.adminArchiveOrganization))
 	mux.Handle("GET /api/v1/admin/organization-applications", protect(s.adminApplications))
 	mux.Handle("POST /api/v1/admin/organization-applications/{id}/{decision}", protect(s.adminDecideApplication))
 	mux.Handle("GET /api/v1/organizations/{key}/invites", protect(s.listOrgInvites))
@@ -223,6 +224,20 @@ func (s *Server) adminApplications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+// adminArchiveOrganization archives or restores an organization: decision archive or restore (SUPERADMIN).
+func (s *Server) adminArchiveOrganization(w http.ResponseWriter, r *http.Request) {
+	d := r.PathValue("decision")
+	if d != "archive" && d != "restore" {
+		writeError(w, http.StatusBadRequest, "invalid", "decision must be archive or restore")
+		return
+	}
+	if err := s.core.SetOrganizationArchived(r.Context(), actor(r), r.PathValue("key"), d == "archive"); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // adminDecideApplication takes approve (optional {"key"} to change the organization key) or reject (optional {"note"}).
@@ -642,7 +657,12 @@ func (s *Server) projectAccess(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": list})
+	admins, err := s.core.ProjectServerAdmins(r.Context(), actor(r), r.PathValue("key"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "server_admins": admins})
 }
 
 // setMemberProjects takes {"projects": [keys]}: the full set of projects of the organization the member belongs to.
