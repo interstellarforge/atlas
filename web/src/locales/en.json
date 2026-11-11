@@ -66,6 +66,7 @@
     },
     "invite": {
       "title": "Join {organization}",
+      "heading": "Invitation",
       "intro": "You were invited as {email}.",
       "newAccount": "Choose a name and password to create your account.",
       "existing": "An account with this address exists. Sign in to accept the invitation.",

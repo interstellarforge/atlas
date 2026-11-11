@@ -80,3 +80,30 @@ func TestWebhookDeliversSignedWithRetry(t *testing.T) {
 		t.Fatal("delivered twice")
 	}
 }
+
+func TestWebhookWaitsWhileOrganizationArchived(t *testing.T) {
+	e := setup(t)
+	e.project("HK")
+	ctx := context.Background()
+	e.svc.SetMail(core.MailConfig{KeyPath: filepath.Join(t.TempDir(), "k")})
+	f := &fakePoster{}
+	e.svc.SetWebhooks(f, false)
+	if _, err := e.svc.CreateWebhook(ctx, e.admin, "HK", "https://hook.example/x", []string{"item.created"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.CreateItem(ctx, e.admin, core.CreateItem{Project: "HK", Type: "task", Title: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.SetOrganizationArchived(ctx, e.admin, "MAIN", true); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.svc.DeliverWebhooks(ctx); n != 0 || len(f.got) != 0 {
+		t.Fatalf("an archived organization sent %d deliveries", n)
+	}
+	if err := e.svc.SetOrganizationArchived(ctx, e.admin, "MAIN", false); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.svc.DeliverWebhooks(ctx); n != 1 {
+		t.Fatalf("delivery after unarchive: %d, want 1", n)
+	}
+}

@@ -125,7 +125,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.core.ListProjects(r.Context(), actor(r))
+	ps, err := s.core.ListProjectsIn(r.Context(), actor(r), r.URL.Query().Get("organization"))
 	if err != nil {
 		s.fail(w, r, err)
 		return

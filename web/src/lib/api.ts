@@ -103,6 +103,8 @@ export interface Repository {
 
 export interface Project {
   key: string;
+  /** Key of the owning organization. */
+  organization?: string;
   name: string;
   role?: string;
   repository?: Repository | null;

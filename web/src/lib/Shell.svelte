@@ -132,6 +132,8 @@
         { label: t(viewLabel[current.view]) },
       ];
     if (route.path === "/") return [{ label: t("nav.projects") }];
+    if (route.path.startsWith("/invite/"))
+      return [{ label: t("auth.invite.heading") }];
     const link = visibleLinks.find((l) => l.path !== "/" && isActive(l.path));
     return [{ label: link ? t(link.label) : t("notFound.title") }];
   });

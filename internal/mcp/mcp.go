@@ -96,16 +96,18 @@ func newServer(svc *core.Service, feed *events.Feed, g *guards, a auth.Actor, la
 
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "projects_list",
-		Description: "List the projects you can access (key, name, archived, linked git repository).",
+		Description: "List the projects you can access (key, organization, name, archived, linked git repository); optionally only those of one organization.",
 		Annotations: readOnly,
-	}, func(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
-		ps, err := svc.ListProjects(ctx, a)
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in struct {
+		Organization string `json:"organization,omitempty" jsonschema:"organization key to filter on"`
+	}) (*sdk.CallToolResult, any, error) {
+		ps, err := svc.ListProjectsIn(ctx, a, in.Organization)
 		if err != nil {
 			return fail(err)
 		}
 		items := make([]map[string]any, 0, len(ps))
 		for _, p := range ps {
-			m := map[string]any{"key": p.Key, "name": p.Name, "archived": p.ArchivedAt != nil}
+			m := map[string]any{"key": p.Key, "organization": p.Organization, "name": p.Name, "archived": p.ArchivedAt != nil}
 			if p.Repository != nil {
 				m["repository"] = map[string]any{"url": p.Repository.URL, "branch": p.Repository.Branch, "provider": p.Repository.Provider}
 			}

@@ -12,7 +12,8 @@
 - An admin can force a password change (`must_change_password`): sessions end, the next one may only reach `/auth/me`, logout and `/me/password`. Tokens are not touched. See ADR-0010.
 - Roles per project via `project_members`: built-in `admin`, `member` and `viewer` plus any custom roles that already exist. Roles are frozen: they can no longer be edited (ADR-0029, which supersedes ADR-0010) and are replaced by the organization model in the ORG 2 migration. Each role is a set of actions in `role_actions`; every project check in `core` names an action through `Service.access`, and all account-level decisions live in `internal/core/authz.go`. `/api/v1/admin/*` is refused with 403 before the body is read. `internal/api/matrix_test.go` runs every registered route and MCP tool as each actor; an unclassified route or tool fails the test.
 - Token scopes: `read` and `write` separately, optionally limited to projects. A token never exceeds its owner's rights.
-- Enforced in `core` services, not only in handlers. SSE and `changes_since` filter by permission.
+- Enforced in `core` services, not only in handlers. SSE and `changes_since` filter by permission; an open stream also ends when its session or token is revoked or expired (`core.IsActive`, checked at every wake and keepalive). Removing a member from an organization or project also drops their follows and notifications on the projects they lost (queued mail is only a summary and a link).
+- Invitation tokens: only their hash is stored, the journal never holds the token, the request log writes `/api/v1/auth/invitations/{token}` instead of the path, wrong tokens share the login failure limiter (429 after repeated failures, even for a valid token), and one organization creates at most 50 invitations per hour.
 - Required tests: permission matrix for read/write/other-project access, token scope, revoked token.
 
 ## Agent safety
@@ -218,6 +219,8 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `GET /api/v1/organizations/{key}/members` | explicit ADMIN of that organization, user session | `core.ListOrgMembers`: `authorizeOrg` `orgMembers` | 401 / 403 / 404 |
 | `PUT /api/v1/organizations/{key}/members/{user}` | explicit ADMIN of that organization, user session | `core.SetOrgMember`: role admin or user; the last active ADMIN is protected; a support grant cannot make its own access permanent | 400 / 401 / 403 / 404 / 422 |
 | `DELETE /api/v1/organizations/{key}/members/{user}` | explicit ADMIN of that organization, user session | `core.RemoveOrgMember`: also leaves every project of the organization; the last active ADMIN is protected | 401 / 403 / 404 / 422 |
+| `GET /api/v1/organizations/{key}/members/{user}/access` | explicit ADMIN of that organization, user session | `core.EffectiveAccess`: `authorizeOrg` `orgMembers`; a person who is no member of the organization answers 404 | 401 / 403 / 404 |
+| `PUT /api/v1/organizations/{key}/members/{user}/projects` | explicit ADMIN of that organization, user session | `core.SetMemberProjects`: `authorizeOrg` `orgMembers`; every key must belong to the organization, all or nothing; revokes tokens and purges follows of dropped projects | 400 / 401 / 403 / 404 |
 | `GET /api/v1/organizations/{key}/logo` | member of that organization (the Atlas admin sees the organization too), user session | `authorizeOrg` `orgView`; only a re-encoded thumbnail is served; no logo and no access answer the same | 401 / 404 |
 | `PUT /api/v1/organizations/{key}/logo` | explicit ADMIN of that organization, user session | `core.SetOrgLogo`: the ADMIN check runs before the upload is read; same limits, magic bytes and pixel count as attachments | 400 / 401 / 403 / 404 / 413 |
 | `DELETE /api/v1/organizations/{key}/logo` | explicit ADMIN of that organization, user session | `core.RemoveOrgLogo` | 401 / 403 / 404 |
@@ -277,6 +280,7 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `PUT /api/v1/me/avatar` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
 | `PUT /api/v1/me/email` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
 | `PUT /api/v1/me/password` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
+| `GET /api/v1/me/access` | signed in (own account) | `core.EffectiveAccess`: the caller's own organizations and projects with their source; a project-limited token sees only its projects | 401 |
 | `GET /api/v1/me/preferences` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
 | `PUT /api/v1/me/preferences` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
 | `GET /api/v1/me/security` | signed in (own account) | only the caller's own account (changing credentials needs a human session) | 401 |
@@ -319,6 +323,7 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | `GET /api/v1/projects/{key}/members` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `DELETE /api/v1/projects/{key}/members/{user}` | signed in + project right | `access`: export, members, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `PUT /api/v1/projects/{key}/members/{user}` | signed in + project right | `access`: export, members, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
+| `GET /api/v1/projects/{key}/access` | signed in + project right | `access`: members; lists explicit members and inherited organization ADMINs (`core.ProjectAccess`) | 401 / 404 hidden / 403 missing right |
 | `GET /api/v1/projects/{key}/milestones` | signed in + project right | `access`: export, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `POST /api/v1/projects/{key}/milestones` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
 | `DELETE /api/v1/projects/{key}/milestones/{id}` | signed in + project right | `access`: export, project.update, view; token scope and project list apply | 401 / 404 hidden / 403 missing right |
@@ -402,10 +407,10 @@ Every REST route, MCP tool and other surface with its protection, target rule an
 | Search (`items?q=`, FTS) | a project filter through `access`; a hidden project answers 404 |
 | Exports and imports | `export` / `import` actions on the project (member and up) |
 | Attachments and thumbnails | through the item's project (`view`); avatars through `visibleUsersQuery` |
-| Webhooks, recurrences, milestones, sprints, workflow, tokens | management actions: SUPERADMIN or the organization ADMIN |
+| Webhooks, recurrences, milestones, sprints, workflow, tokens | management actions (`workflow`, `tokens`, `project.update`): the organization ADMIN, or a SUPERADMIN under a full support grant; members do not hold them |
 | Notifications | the caller's own only |
 | OAuth (`/oauth/*`, `/.well-known/*`) | public by design (PKCE, exact redirect match, hashed codes); issued tokens are ordinary scoped tokens |
-| Background work (recurrences, webhooks, mail) | no rights of its own: runs for the user who created it with that user's live rights (a suspended creator fails closed) |
+| Background work (recurrences, webhooks, mail) | recurrences run as their creator with that user's live rights (a removed or suspended creator creates nothing); webhook deliveries wait while the project's organization is not active; queued mail is only a summary and a link, which answers 404 once access is gone |
 | `atlas` subcommands | operator with shell access to the data directory: `backup`, `restore`, `check paths`, `superadmin grant`, `migrate-orgs` |
 
 ### Findings
@@ -426,8 +431,6 @@ Code audit at commit 4e7217b (non-test files). Feeds ATL-475/477 and the authori
 | User create/read | `auth/service.go:115,135,217`; `core/identity.go`; `api/identity.go`; `api/work.go:111` (`CreateUser` takes `is_admin`) | `is_superadmin` never settable via create/body; ATL-437/438 |
 | Invites | `core/policy.go:147-286`; `migrations/0011` | `invites.is_admin` dropped; kinds registration/organization (M3) |
 | Project authz | `core/core.go:163 access`, `core/projects.go` | replaced by `authz.go`, ATL-436 |
-| Bypasses outside `access()` | `core/notifications.go:93`, `core/items.go:465` (assignee/recipient check `is_admin = 1 OR member`) | must route through `authz.go`; easy to miss |
-| Background actor | `core/recurrence.go:263,296` builds an `Actor` from stored `is_admin` | must use live rights / system actor (ADR-0029) |
 | Admin API | `core/admin.go`, `api/admin.go` | SUPERADMIN-only (`/api/v1/admin/*`) |
 | SPA | `web/src/lib/{Admin,Shell,ProjectSettings,ItemTime,ContextView}.svelte`, `App.svelte`, `api.ts` | `is_admin` field becomes `is_superadmin`; UI hiding is convenience only |
 | Schema | `migrations/0001_auth.sql` | ATL-474 |

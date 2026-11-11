@@ -92,10 +92,24 @@ func (s *Service) IsSuperadmin(a auth.Actor) bool {
 	return err == nil && st.active && st.super
 }
 
-// IsActive reports whether the actor's account is active right now; long-lived streams re-check it.
+// IsActive reports whether the actor's account is active and its session or token is still valid right now;
+// long-lived streams re-check it, so a revoked or expired credential ends them at once (ATL-444).
 func (s *Service) IsActive(a auth.Actor) bool {
 	st, err := s.standing(s.db.R, a)
-	return err == nil && st.active
+	if err != nil || !st.active {
+		return false
+	}
+	var live bool
+	switch {
+	case a.Kind == auth.KindToken:
+		err = s.db.R.QueryRow(`SELECT EXISTS (SELECT 1 FROM api_tokens WHERE id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?))`,
+			a.TokenID, s.nowMs()).Scan(&live)
+	case a.Kind == auth.KindHuman && a.SessionID != 0:
+		err = s.db.R.QueryRow(`SELECT EXISTS (SELECT 1 FROM sessions WHERE rowid = ? AND expires_at > ?)`, a.SessionID, s.nowMs()).Scan(&live)
+	default:
+		return true
+	}
+	return err == nil && live
 }
 
 // adminOnly guards instance administration: global admins only, through a user session (never a token).

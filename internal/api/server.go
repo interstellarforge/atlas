@@ -193,7 +193,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		func() {
 			defer func() {
 				if p := recover(); p != nil && p != http.ErrAbortHandler {
-					slog.Error("panic in handler", "request_id", id, "method", r.Method, "path", r.URL.Path, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+					slog.Error("panic in handler", "request_id", id, "method", r.Method, "path", logPath(r.URL.Path), "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
 					if !sw.wrote {
 						writeError(sw, http.StatusInternalServerError, "internal", "internal error")
 					}
@@ -212,9 +212,17 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			level = slog.LevelError
 		}
 		slog.Log(r.Context(), level, "request",
-			"request_id", id, "method", r.Method, "path", r.URL.Path,
+			"request_id", id, "method", r.Method, "path", logPath(r.URL.Path),
 			"status", sw.status, "duration_ms", time.Since(start).Milliseconds(), "actor", actor)
 	})
+}
+
+// logPath keeps secrets out of the request log: an invitation token travels in the path.
+func logPath(p string) string {
+	if rest, ok := strings.CutPrefix(p, "/api/v1/auth/invitations/"); ok && rest != "" && rest != "accept" {
+		return "/api/v1/auth/invitations/{token}"
+	}
+	return p
 }
 
 func newRequestID() string {

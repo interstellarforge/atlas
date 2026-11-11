@@ -34,6 +34,10 @@ func (s *Server) registerOrganizations(mux *http.ServeMux, protect func(http.Han
 	mux.Handle("GET /api/v1/organizations/{key}/members", protect(s.listOrgMembers))
 	mux.Handle("PUT /api/v1/organizations/{key}/members/{user}", protect(s.setOrgMember))
 	mux.Handle("DELETE /api/v1/organizations/{key}/members/{user}", protect(s.removeOrgMember))
+	mux.Handle("GET /api/v1/organizations/{key}/members/{user}/access", protect(s.memberAccess))
+	mux.Handle("PUT /api/v1/organizations/{key}/members/{user}/projects", protect(s.setMemberProjects))
+	mux.Handle("GET /api/v1/me/access", protect(s.myAccess))
+	mux.Handle("GET /api/v1/projects/{key}/access", protect(s.projectAccess))
 	mux.Handle("GET /api/v1/organizations/{key}/logo", protect(s.getOrgLogo))
 	mux.Handle("PUT /api/v1/organizations/{key}/logo", protect(s.putOrgLogo))
 	mux.Handle("DELETE /api/v1/organizations/{key}/logo", protect(s.deleteOrgLogo))
@@ -464,7 +468,13 @@ func (s *Server) orgAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listOrgMembers(w http.ResponseWriter, r *http.Request) {
-	list, err := s.core.ListOrgMembers(r.Context(), actor(r), r.PathValue("key"))
+	var list []core.OrgMember
+	var err error
+	if r.URL.Query().Has("q") { // the one search path for pickers and dialogs: min 2 characters, at most 20 results
+		list, err = s.core.SearchOrgMembers(r.Context(), actor(r), r.PathValue("key"), r.URL.Query().Get("q"))
+	} else {
+		list, err = s.core.ListOrgMembers(r.Context(), actor(r), r.PathValue("key"))
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -595,6 +605,60 @@ func (s *Server) putOrgLogo(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteOrgLogo(w http.ResponseWriter, r *http.Request) {
 	if err := s.core.RemoveOrgLogo(r.Context(), actor(r), r.PathValue("key")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// myAccess and memberAccess answer what a person can reach: their own, or a member's for the organization ADMIN.
+func (s *Server) myAccess(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.EffectiveAccess(r.Context(), actor(r), "", 0)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"organizations": list})
+}
+
+func (s *Server) memberAccess(w http.ResponseWriter, r *http.Request) {
+	uid, err := strconv.ParseInt(r.PathValue("user"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid", "invalid user id")
+		return
+	}
+	list, err := s.core.EffectiveAccess(r.Context(), actor(r), r.PathValue("key"), uid)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"organizations": list})
+}
+
+// projectAccess lists explicit members and inherited organization ADMINs of a project.
+func (s *Server) projectAccess(w http.ResponseWriter, r *http.Request) {
+	list, err := s.core.ProjectAccess(r.Context(), actor(r), r.PathValue("key"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+// setMemberProjects takes {"projects": [keys]}: the full set of projects of the organization the member belongs to.
+func (s *Server) setMemberProjects(w http.ResponseWriter, r *http.Request) {
+	uid, err := strconv.ParseInt(r.PathValue("user"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid", "invalid user id")
+		return
+	}
+	var in struct {
+		Projects []string `json:"projects"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if err := s.core.SetMemberProjects(r.Context(), actor(r), r.PathValue("key"), uid, in.Projects); err != nil {
 		s.fail(w, r, err)
 		return
 	}

@@ -16,30 +16,84 @@ type AdminUser struct {
 	DeactivatedAt      *int64 `json:"deactivated_at"`
 	Status             string `json:"status"` // pending, active, rejected or suspended
 	CreatedAt          int64  `json:"created_at"`
+	// Organizations are the user's memberships (key, name, role).
+	Organizations []UserOrg `json:"organizations"`
 }
 
-func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor) ([]AdminUser, error) {
+type UserOrg struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+// AdminUserFilter narrows the account list: Status is exact, Q matches name or email. Limit 0 means 100 (max 500).
+type AdminUserFilter struct {
+	Status, Q     string
+	Limit, Offset int
+}
+
+// ListAdminUsers lists accounts with their organization memberships, newest filters first applied, and the total
+// number of matches (ATL-457).
+func (s *Service) ListAdminUsers(ctx context.Context, a auth.Actor, f AdminUserFilter) ([]AdminUser, int, error) {
 	if err := s.adminOnly(a); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, email, name, is_superadmin, must_change_password, deactivated_at, status, created_at FROM users ORDER BY name`)
+	if f.Limit <= 0 || f.Limit > 500 {
+		f.Limit = 100
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	q := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(f.Q)) + "%"
+	where, args := `WHERE (? = '' OR status = ?) AND (name LIKE ? ESCAPE '\' OR email LIKE ? ESCAPE '\')`, []any{f.Status, f.Status, q, q}
+	var total int
+	if err := s.db.R.QueryRow(`SELECT COUNT(*) FROM users `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.db.R.Query(`SELECT id, email, name, is_superadmin, must_change_password, deactivated_at, status, created_at FROM users `+where+
+		` ORDER BY name, id LIMIT ? OFFSET ?`, append(args, f.Limit, f.Offset)...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	out := []AdminUser{}
+	byID := map[int64]int{}
 	for rows.Next() {
 		var u AdminUser
 		var off sql.NullInt64
 		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsSuperadmin, &u.MustChangePassword, &off, &u.Status, &u.CreatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if off.Valid {
 			u.DeactivatedAt = &off.Int64
 		}
+		u.Organizations = []UserOrg{}
+		byID[u.ID] = len(out)
 		out = append(out, u)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if len(out) == 0 {
+		return out, total, nil
+	}
+	ms, err := s.db.R.Query(`SELECT m.user_id, o.key, o.name, m.role FROM organization_memberships m JOIN organizations o ON o.id = m.organization_id
+		WHERE m.user_id IN (SELECT id FROM users `+where+` ORDER BY name, id LIMIT ? OFFSET ?) ORDER BY o.key`, append(args, f.Limit, f.Offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer ms.Close()
+	for ms.Next() {
+		var uid int64
+		var m UserOrg
+		if err := ms.Scan(&uid, &m.Key, &m.Name, &m.Role); err != nil {
+			return nil, 0, err
+		}
+		if i, ok := byID[uid]; ok {
+			out[i].Organizations = append(out[i].Organizations, m)
+		}
+	}
+	return out, total, ms.Err()
 }
 
 // activeSuperadmins counts admins that can still sign in, optionally ignoring one user.

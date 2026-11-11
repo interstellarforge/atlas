@@ -25,12 +25,15 @@ func (s *Server) registerAdmin(mux *http.ServeMux, protect func(http.HandlerFunc
 }
 
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
-	list, err := s.core.ListAdminUsers(r.Context(), actor(r))
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	list, total, err := s.core.ListAdminUsers(r.Context(), actor(r), core.AdminUserFilter{Status: q.Get("status"), Q: q.Get("q"), Limit: limit, Offset: offset})
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": list})
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": total})
 }
 
 // adminPatchUser accepts {"is_superadmin": bool} and/or {"active": bool}.

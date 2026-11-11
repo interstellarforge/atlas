@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kees/atlas/internal/auth"
@@ -231,6 +232,111 @@ func (s *Service) ListOrgMembers(ctx context.Context, a auth.Actor, key string) 
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// SearchOrgMembers finds members of one organization by name or email, for pickers and dialogs: at least two
+// characters, at most 20 results, only people who belong to that organization (ATL-484).
+func (s *Service) SearchOrgMembers(ctx context.Context, a auth.Actor, key, q string) ([]OrgMember, error) {
+	q = strings.TrimSpace(q)
+	if len([]rune(q)) < 2 {
+		return nil, invalid("search needs at least 2 characters")
+	}
+	o, err := s.authorizeOrg(s.db.R, a, key, orgMembers)
+	if err != nil {
+		return nil, err
+	}
+	like := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(q) + "%"
+	rows, err := s.db.R.Query(`SELECT u.id, u.email, u.name, m.role, u.status = 'active' FROM organization_memberships m
+		JOIN users u ON u.id = m.user_id WHERE m.organization_id = ? AND (u.name LIKE ? ESCAPE '\' OR u.email LIKE ? ESCAPE '\')
+		ORDER BY u.name LIMIT 20`, o.ID, like, like)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []OrgMember{}
+	for rows.Next() {
+		var m OrgMember
+		if err := rows.Scan(&m.UserID, &m.Email, &m.Name, &m.Role, &m.Active); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// SetMemberProjects replaces the projects a USER of the organization belongs to with exactly the given set, in one
+// transaction (ATL-485). Every key must be a project of that organization or the whole request fails; projects that
+// drop out lose the member's tokens, follows and notifications like a single removal. An ADMIN reaches every project
+// and has no explicit set.
+func (s *Service) SetMemberProjects(ctx context.Context, a auth.Actor, orgKey string, userID int64, keys []string) error {
+	return s.tx(func(tx *sql.Tx) error {
+		o, err := s.authorizeOrg(tx, a, orgKey, orgMembers)
+		if err != nil {
+			return err
+		}
+		var role string
+		if err := tx.QueryRow(`SELECT role FROM organization_memberships WHERE organization_id = ? AND user_id = ?`, o.ID, userID).Scan(&role); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if role == "admin" {
+			return rule("an organization admin reaches every project; there is no project set to assign")
+		}
+		want := map[int64]string{}
+		for _, k := range keys {
+			k = strings.ToUpper(strings.TrimSpace(k))
+			var id int64
+			if err := tx.QueryRow(`SELECT id FROM projects WHERE key = ? AND organization_id = ?`, k, o.ID).Scan(&id); errors.Is(err, sql.ErrNoRows) {
+				return invalid("unknown project %q in this organization", k)
+			} else if err != nil {
+				return err
+			}
+			want[id] = k
+		}
+		rows, err := tx.Query(`SELECT p.id, p.key FROM project_members m JOIN projects p ON p.id = m.project_id WHERE p.organization_id = ? AND m.user_id = ?`, o.ID, userID)
+		if err != nil {
+			return err
+		}
+		have := map[int64]string{}
+		for rows.Next() {
+			var id int64
+			var k string
+			if err := rows.Scan(&id, &k); err != nil {
+				rows.Close()
+				return err
+			}
+			have[id] = k
+		}
+		rows.Close()
+		var added, removed []string
+		for id, k := range want {
+			if _, ok := have[id]; !ok {
+				if _, err := tx.Exec(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'member')`, id, userID); err != nil {
+					return err
+				}
+				added = append(added, k)
+			}
+		}
+		for id, k := range have {
+			if _, ok := want[id]; !ok {
+				if _, err := tx.Exec(`DELETE FROM project_members WHERE project_id = ? AND user_id = ?`, id, userID); err != nil {
+					return err
+				}
+				if err := s.revokeOwnedProjectTokens(tx, userID, k); err != nil {
+					return err
+				}
+				if err := purgeProjectTraces(tx, userID, k); err != nil {
+					return err
+				}
+				removed = append(removed, k)
+			}
+		}
+		sort.Strings(added)
+		sort.Strings(removed)
+		return s.journal(ctx, tx, a, change{Operation: "org.member.projects", Target: orgTarget(o.Key), Event: "admin.updated",
+			Changes: map[string]any{"user_id": userID, "added": added, "removed": removed}})
+	})
 }
 
 // SetOrgMember adds a user to an organization or changes the role (admin|user). allowOrphan lets a SUPERADMIN
@@ -464,8 +570,22 @@ func (s *Service) revokeProjectTokensInOrg(tx *sql.Tx, orgID, userID int64, only
 		if err := s.revokeOwnedProjectTokens(tx, userID, k); err != nil {
 			return err
 		}
+		if err := purgeProjectTraces(tx, userID, k); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// purgeProjectTraces drops what a user who lost a project still holds on it: item follows and notifications
+// (ATL-445). Queued mail is not touched: it carries a summary and a link, and the link answers 404 once access is gone.
+func purgeProjectTraces(tx *sql.Tx, userID int64, projectKey string) error {
+	if _, err := tx.Exec(`DELETE FROM item_follows WHERE user_id = ? AND item_id IN
+		(SELECT i.id FROM work_items i JOIN projects p ON p.id = i.project_id WHERE p.key = ?)`, userID, projectKey); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM notifications WHERE user_id = ? AND project = ?`, userID, projectKey)
+	return err
 }
 
 // BootstrapOrganization creates the first organization of a new installation with the first SUPERADMIN as its ADMIN.

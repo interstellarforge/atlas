@@ -277,6 +277,10 @@ func TestVerifyCatchesUnexpectedResults(t *testing.T) {
 			if bad := orgmigrate.Verify(tx, fresh, old); len(bad) != 0 {
 				t.Fatalf("a clean apply fails verification: %v", bad)
 			}
+			// the trigger would refuse the tampering that verification must be able to catch on its own
+			if _, err := tx.Exec(`DROP TRIGGER project_members_org_member`); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := tx.Exec(tamper); err != nil {
 				t.Fatal(err)
 			}

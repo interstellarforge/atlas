@@ -561,3 +561,85 @@ func TestOrganizationApplications(t *testing.T) {
 		t.Fatalf("a 4th application inside 30 days: %v", err)
 	}
 }
+
+func TestListProjectsCarriesAndFiltersOrganization(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.org("ACME", e.aliceID)
+	e.project("EXO")
+	if _, err := e.db.W.Exec(`UPDATE projects SET organization_id = (SELECT id FROM organizations WHERE key = 'ACME') WHERE key = 'EXO'`); err != nil {
+		t.Fatal(err)
+	}
+	all, err := e.svc.ListProjectsIn(ctx, e.alice, "")
+	if err != nil || len(all) != 1 || all[0].Organization != "ACME" {
+		t.Fatalf("project must carry its organization: %v %+v", err, all)
+	}
+	if got, _ := e.svc.ListProjectsIn(ctx, e.alice, "OTHER"); len(got) != 0 {
+		t.Fatalf("filter on another organization returned %+v", got)
+	}
+	if got, _ := e.svc.ListProjectsIn(ctx, e.alice, "ACME"); len(got) != 1 {
+		t.Fatalf("filter on its own organization returned %+v", got)
+	}
+}
+
+func TestIsActiveEndsWithRevokedSessionOrToken(t *testing.T) {
+	e := setup(t)
+	now := time.Now().UnixMilli()
+	if _, err := e.db.W.Exec(`INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at) VALUES ('h', ?, 'c', ?, ?)`, e.aliceID, now, now+60000); err != nil {
+		t.Fatal(err)
+	}
+	var rowid int64
+	if err := e.db.R.QueryRow(`SELECT rowid FROM sessions WHERE token_hash = 'h'`).Scan(&rowid); err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.db.W.Exec(`INSERT INTO api_tokens (user_id, name, prefix, token_hash, scopes, created_at) VALUES (?, 't', 'p', 'th', '["read"]', ?)`, e.aliceID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenID, _ := res.LastInsertId()
+	sess := auth.Actor{Kind: auth.KindHuman, UserID: e.aliceID, SessionID: rowid}
+	tok := auth.Actor{Kind: auth.KindToken, UserID: e.aliceID, TokenID: tokenID, Scopes: []string{"read"}}
+	if !e.svc.IsActive(sess) || !e.svc.IsActive(tok) {
+		t.Fatal("a valid session and token must be active")
+	}
+	if _, err := e.db.W.Exec(`DELETE FROM sessions WHERE rowid = ?`, rowid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.W.Exec(`UPDATE api_tokens SET revoked_at = ? WHERE id = ?`, now, tokenID); err != nil {
+		t.Fatal(err)
+	}
+	if e.svc.IsActive(sess) || e.svc.IsActive(tok) {
+		t.Fatal("a revoked session or token must end its stream")
+	}
+}
+
+func TestRemovingOrgMemberPurgesFollowsAndNotifications(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.project("EXO")
+	if err := e.member("EXO", e.bobID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	it := e.item(e.admin, core.CreateItem{Project: "EXO", Type: "task", Title: "follow me"})
+	if err := e.svc.Follow(ctx, e.bob, it.Key); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.W.Exec(`INSERT INTO notifications (user_id, type, project, item_key, actor, created_at) VALUES (?, 'assigned', 'EXO', ?, 'human:user-1', 1)`, e.bobID, it.Key); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.RemoveOrgMember(ctx, e.admin, "MAIN", e.bobID, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM item_follows WHERE user_id = ?`, e.bobID) + e.count(`SELECT COUNT(*) FROM notifications WHERE user_id = ?`, e.bobID); n != 0 {
+		t.Fatalf("%d follows/notifications survived the removal", n)
+	}
+}
+
+func TestDatabaseRefusesProjectMemberOutsideOrganization(t *testing.T) {
+	e := setup(t)
+	e.project("EXO")
+	// bypass core.SetMember: the trigger is the last line of defence (ATL-461)
+	if _, err := e.db.W.Exec(`INSERT INTO project_members (project_id, user_id, role) VALUES ((SELECT id FROM projects WHERE key = 'EXO'), ?, 'member')`, e.bobID); err == nil {
+		t.Fatal("a user outside the organization became a project member through SQL")
+	}
+}

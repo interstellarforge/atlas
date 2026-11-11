@@ -55,3 +55,24 @@ func TestRecurrenceNeedsProjectAdmin(t *testing.T) {
 		t.Fatal("non-member created a recurrence")
 	}
 }
+
+func TestRecurrenceStopsWhenCreatorLosesAccess(t *testing.T) {
+	e := setup(t)
+	e.project("REC")
+	ctx := context.Background()
+	now := time.Date(2026, 1, 5, 8, 0, 0, 0, time.UTC)
+	e.svc.SetClock(func() time.Time { return now })
+	if err := e.member("REC", e.aliceID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.CreateRecurrence(ctx, e.alice, "REC", core.Recurrence{Title: "Daily", Freq: "daily", AtMinute: 9 * 60}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.RemoveOrgMember(ctx, e.admin, "MAIN", e.aliceID, true); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Hour)
+	if n := e.svc.RunDueRecurrences(ctx); n != 0 {
+		t.Fatalf("a recurrence of a removed member created %d items", n)
+	}
+}

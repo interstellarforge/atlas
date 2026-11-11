@@ -233,12 +233,14 @@ func signWebhook(secret, timestamp string, body []byte) string {
 }
 
 // DeliverWebhooks sends the due deliveries and returns how many succeeded.
+// A delivery waits while the project's organization is not active, so an archived organization sends nothing.
 func (s *Service) DeliverWebhooks(ctx context.Context) int {
 	if s.hooks == nil {
 		return 0
 	}
 	now := s.nowMs()
 	rows, err := s.db.R.Query(`SELECT o.id, o.attempts, o.event, o.payload, w.url, w.secret_enc FROM webhook_outbox o JOIN webhooks w ON w.id = o.webhook_id
+		JOIN projects p ON p.id = w.project_id JOIN organizations og ON og.id = p.organization_id AND og.status = 'active'
 		WHERE w.active = 1 AND o.delivered_at IS NULL AND o.failed_at IS NULL AND o.next_attempt_at <= ? ORDER BY o.id LIMIT ?`, now, webhookBatch)
 	if err != nil {
 		slog.Error("webhooks: read outbox", "error", err)

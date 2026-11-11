@@ -29,6 +29,9 @@ type InvitePreview struct {
 	AccountExists bool   `json:"account_exists"`
 }
 
+// maxInvitesPerHour caps the invitations one organization can create per hour, so a hijacked ADMIN session cannot be used to spam mail.
+const maxInvitesPerHour = 50
+
 func errInviteInvalid() error { return rule("this invitation is not valid") }
 
 // CreateOrgInvite invites an email address as USER of the organization, optionally onto projects of that organization.
@@ -57,6 +60,13 @@ func (s *Service) CreateOrgInvite(ctx context.Context, a auth.Actor, orgKey, ema
 		}
 		if o.Role != "admin" {
 			return ErrForbidden
+		}
+		var recent int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM organization_invites WHERE organization_id = ? AND created_at > ?`, o.ID, now-3_600_000).Scan(&recent); err != nil {
+			return err
+		}
+		if recent >= maxInvitesPerHour {
+			return rule("too many invitations in the last hour; try again later")
 		}
 		var projectIDs []int64
 		for _, k := range projectKeys {

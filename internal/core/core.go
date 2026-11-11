@@ -147,9 +147,11 @@ type Project struct {
 	OrganizationID sql.NullInt64 `json:"-"`
 	Key            string        `json:"key"`
 	Name           string        `json:"name"`
-	ArchivedAt     *int64        `json:"archived_at"`
-	CreatedAt      int64         `json:"created_at"`
-	Role           string        `json:"role,omitempty"`
+	// Organization is the key of the owning organization.
+	Organization string `json:"organization,omitempty"`
+	ArchivedAt   *int64 `json:"archived_at"`
+	CreatedAt    int64  `json:"created_at"`
+	Role         string `json:"role,omitempty"`
 	// MergeColumns is true when any category is merged; MergeCategories names them (ADR-0011, ADR-0020).
 	MergeColumns    bool     `json:"merge_columns"`
 	MergeCategories []string `json:"merge_categories"`
@@ -185,8 +187,8 @@ func (s *Service) access(q queryer, a auth.Actor, key string, act action) (Proje
 	var p Project
 	var archived sql.NullInt64
 	var repoURL, repoBranch, merged string
-	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_categories, repo_url, repo_branch, time_tracking, organization_id FROM projects WHERE key = ?`, key).
-		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &merged, &repoURL, &repoBranch, &p.TimeTracking, &p.OrganizationID)
+	err := q.QueryRow(`SELECT id, key, name, archived_at, created_at, merge_categories, repo_url, repo_branch, time_tracking, organization_id, COALESCE((SELECT o.key FROM organizations o WHERE o.id = organization_id), '') FROM projects WHERE key = ?`, key).
+		Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &merged, &repoURL, &repoBranch, &p.TimeTracking, &p.OrganizationID, &p.Organization)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !a.CanProject(p.Key)) {
 		return Project{}, "", ErrNotFound
 	}

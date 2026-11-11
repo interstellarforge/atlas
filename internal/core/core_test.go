@@ -444,7 +444,7 @@ func TestRightsAreResolvedLive(t *testing.T) {
 	if _, err := e.db.W.Exec(`UPDATE users SET is_superadmin = 0 WHERE id = ?`, e.admin.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.ListAdminUsers(ctx, e.admin); !errors.Is(err, core.ErrForbidden) {
+	if _, _, err := e.svc.ListAdminUsers(ctx, e.admin, core.AdminUserFilter{}); !errors.Is(err, core.ErrForbidden) {
 		t.Fatal("a demoted admin kept instance administration with an open session")
 	}
 	// still ADMIN of the organization: project access stays, until that goes too

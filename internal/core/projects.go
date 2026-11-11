@@ -77,11 +77,17 @@ func (s *Service) CreateProjectIn(ctx context.Context, a auth.Actor, orgKey, key
 }
 
 func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, error) {
+	return s.ListProjectsIn(ctx, a, "")
+}
+
+// ListProjectsIn lists the readable projects, only those of one organization when orgKey is set.
+func (s *Service) ListProjectsIn(ctx context.Context, a auth.Actor, orgKey string) ([]Project, error) {
 	readable, err := s.readableProjects(s.db.R, a)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.R.Query(`SELECT id, key, name, archived_at, created_at, merge_categories, repo_url, repo_branch, time_tracking FROM projects ORDER BY key`)
+	rows, err := s.db.R.Query(`SELECT p.id, p.key, p.name, p.archived_at, p.created_at, p.merge_categories, p.repo_url, p.repo_branch, p.time_tracking, COALESCE(o.key, '')
+		FROM projects p LEFT JOIN organizations o ON o.id = p.organization_id WHERE ? = '' OR o.key = ? ORDER BY p.key`, orgKey, orgKey)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +97,7 @@ func (s *Service) ListProjects(ctx context.Context, a auth.Actor) ([]Project, er
 		var p Project
 		var archived sql.NullInt64
 		var repoURL, repoBranch, merged string
-		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &merged, &repoURL, &repoBranch, &p.TimeTracking); err != nil {
+		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &archived, &p.CreatedAt, &merged, &repoURL, &repoBranch, &p.TimeTracking, &p.Organization); err != nil {
 			return nil, err
 		}
 		p.Repository = linkedRepo(repoURL, repoBranch)
@@ -336,6 +342,13 @@ func (s *Service) RemoveMember(ctx context.Context, a auth.Actor, key string, us
 		}
 		if err := s.revokeOwnedProjectTokens(tx, userID, key); err != nil {
 			return err
+		}
+		if still, err := canReachProject(tx, userID, p.ID); err != nil {
+			return err
+		} else if !still {
+			if err := purgeProjectTraces(tx, userID, key); err != nil {
+				return err
+			}
 		}
 		return s.journal(ctx, tx, a, change{Operation: "member.remove", Target: key, Event: "project.updated",
 			Project: key, Changes: map[string]any{"user_id": userID}})
